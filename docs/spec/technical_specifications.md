@@ -117,8 +117,11 @@ CREATE TABLE lora_family_compat (
 );
 
 -- Вектор-индекс
+-- Размерность зафиксирована под выбранную модель эмбеддинга (§7: BAAI/bge-m3 → 1024).
+-- Смена модели эмбеддинга = `reindex-all` CLI: DROP + CREATE с новой размерностью
+-- и полная переиндексация всех LoRA.
 CREATE VIRTUAL TABLE vec_loras USING vec0(
-  embedding FLOAT[768]                   -- размерность зависит от выбранной модели
+  embedding FLOAT[1024]
 );
 
 -- Явная связка name ↔ rowid для vec_loras (sqlite-vec не даёт FK из virtual)
@@ -208,6 +211,12 @@ CREATE INDEX idx_prompts_session ON prompts(session_id, created_at);
   ретроспективы, ничего не блокируют.
 - `sessions.source_image_path` / `result_image_path` — относительные пути к
   файлам на диске. Сами бинарники — отдельно.
+- **Удаление сессии** — транзакционное по обоим сторонам: (1) `DELETE FROM
+  sessions` каскадно чистит БД (messages, prompts, pins); (2) application-level
+  hook удаляет `data/images/<session_id>/`. Порядок: сначала ФС → потом БД
+  (если БД упадёт после удаления файлов, картинки уже нет, а запись в БД мы
+  откатим retry-ом; если наоборот — получим dangling-папку). Обёртка в
+  `session_repo.delete(...)` обеспечивает оба шага.
 
 ### 3.3. Бинарники — на диске
 
@@ -244,8 +253,13 @@ LLM выдаёт структурированный список интенто�
 }
 ```
 
-- `kind` — одно из известных тегов библиотеки (LLM получает этот список в
-  системном промпте).
+- `kind` — свободная строка. Бэк передаёт LLM агрегированный список известных
+  тегов (`SELECT DISTINCT json_each.value FROM loras, json_each(loras.tags)`)
+  и инструктирует "используй один из этих тегов, либо придумай новый, если
+  ничего не подходит". На cold-start (пустая/почти пустая библиотека) список
+  тегов пуст — LLM генерит `kind` свободно. Retriever использует `kind` как
+  дополнительный фильтр только если значение точно совпадает с существующим
+  тегом; иначе — игнорирует и ретривит по `query` без фильтра.
 - `query` — поисковая фраза в терминах *эффекта*, не описания картинки.
 
 **Шаг 2 — retrieval.**
@@ -283,9 +297,9 @@ LLM выдаёт структурированный список интенто�
 ### 4.3. `chat` (SSE)
 
 Обычный стриминг-чат для обсуждения желаемых изменений. История кладётся в
-`messages.jsonl`. Этот endpoint **не вызывает** generate-prompt — генерация
-промпта инициируется отдельно пользователем (кнопкой) или модельным tool-call
-(пост-MVP).
+таблицу `messages` (INSERT на каждое завершённое сообщение). Этот endpoint
+**не вызывает** generate-prompt — генерация промпта инициируется отдельно
+пользователем (кнопкой) или модельным tool-call (пост-MVP).
 
 ### 4.4. JSON schema финального промпта (`GeneratedPrompt`)
 
@@ -305,6 +319,9 @@ LLM выдаёт структурированный список интенто�
 - LoRA с `name`, которого нет в таблице `loras`, — фронт показывает ⚠, но всё
   равно собирает строку `<lora:name:weight>` (lenient validation — LLM может
   предложить LoRA, которой у юзера нет, это полезный сигнал).
+- **Бэк сохраняет `loras_json` в `prompts` верабтим**, не фильтруя unknown —
+  история должна отражать то, что LLM реально предложила. Валидация только
+  формальная (schema, диапазон веса).
 - `loras: []` допустимо.
 - Параметры (sampler / cfg / steps / denoise / размеры / seed) в schema **не
   входят** — это забота юзера/ComfyUI.
@@ -385,9 +402,20 @@ backend/
 - `POST /api/sessions/{s}/source` (upload)
 - `POST /api/sessions/{s}/analyze-source` (VL → summary)
 - `POST /api/sessions/{s}/chat` (SSE)
-- `POST /api/sessions/{s}/generate-prompt` (двухступенчатый, возвращает
-  `GeneratedPrompt` + показывает промежуточные intents/retrieved через отдельные
-  поля для debug-view)
+- `POST /api/sessions/{s}/generate-prompt` (двухступенчатый). Возвращает
+  объект:
+  ```json
+  {
+    "prompt_id": 123,
+    "prompt": { /* GeneratedPrompt: positive, negative, loras */ },
+    "intents": [ /* output шага intent rewriting */ ],
+    "retrieved": [ /* имена LoRA с scores по каждому intent */ ]
+  }
+  ```
+  Те же `intents` и `retrieved` персистятся в `prompts.intents_json` /
+  `retrieved_loras_json`. Фронт получает всё inline за один запрос; повторно
+  подтягивать из `prompts` не нужно (но можно — эндпоинт `GET
+  /api/sessions/{s}/prompts` отдаст историю с теми же полями).
 - `GET /api/library/families`, `POST`, `PUT /{id}`, `DELETE /{id}`
 - `GET /api/library/models`, `POST`, `PUT /{name}`, `DELETE /{name}`
 - `GET /api/library/loras` (с фильтрами по tag, family_id), `POST`,
@@ -442,8 +470,12 @@ description/prompt_guide).
 - `fastapi`, `uvicorn[standard]`
 - `pydantic` v2
 - `openai` (для LMStudio OpenAI-compat)
-- `sentence-transformers` (multilingual: кандидаты — `BAAI/bge-m3`,
-  `intfloat/multilingual-e5-base`; финальный выбор на этапе имплементации)
+- `sentence-transformers` с моделью **`BAAI/bge-m3`** (multilingual, 1024-dim
+  — размерность `vec_loras` из §3.1 завязана на этот выбор). Первый запуск
+  тянет ~2GB весов. Смена модели = `reindex-all` CLI (см. §3.1). Альтернатива
+  для слабых машин — `intfloat/multilingual-e5-base` (768-dim), но потребует
+  синхронного изменения `CREATE VIRTUAL TABLE vec_loras` — не под флаг, а
+  миграцией.
 - `sqlite-vec` (PyPI, precompiled binaries для Windows)
 - `numpy`
 - `python-multipart` (upload картинок)
