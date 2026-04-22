@@ -1,0 +1,27 @@
+# app data (sqlite + images), создаётся бэком при первом запуске
+/data/
+
+# python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+dist/
+build/
+*.egg-info/
+
+# node / frontend
+node_modules/
+frontend/dist/
+frontend/.vite/
+
+# editors / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db

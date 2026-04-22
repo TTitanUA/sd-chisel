@@ -44,31 +44,30 @@ Supersedes технические разделы `doc/concept.md` (концеп�
 │                                │ (VL + text LLM)  │                │
 │                                └──────────────────┘                │
 │                                                                    │
-│ Data on disk:                                                      │
-│   <data_root>/app.db                (sqlite: всё метаданные —      │
-│                                      library + projects/sessions/  │
-│                                      messages/prompts/pins)        │
-│   <data_root>/images/<session_id>/source.<ext>, result.<ext>       │
-│   <data_root>/config.json           (глобальные UI-настройки)      │
+│ Data on disk (./data/, git-ignored):                               │
+│   data/app.db                      (sqlite: всё метаданные —       │
+│                                     library + projects/sessions/   │
+│                                     messages/prompts/pins)         │
+│   data/images/<session_id>/source.<ext>, result.<ext>              │
 └────────────────────────────────────────────────────────────────────┘
 ```
 
 - Фронт ↔ бэк: REST для CRUD, SSE для стриминга чата.
 - Бэк ↔ LMStudio: OpenAI-совместимый HTTP. Endpoint и модель настраиваются
   **per-session** независимо для VL и prompt-writer.
-- `<data_root>` — папка, настраивается через env (`APP_DATA_DIR`, дефолт
-  `%APPDATA%\sd-chisel`).
+- Путь данных — `./data/` относительно корня репо, фиксированно, без env-переменных.
+  Бэк резолвит путь детерминированно (walk up от `app/main.py`). Папка `data/`
+  в `.gitignore` целиком.
 
 ---
 
 ## 3. Data model
 
-Весь структурированный стейт — в одном файле `app.db` (sqlite + sqlite-vec).
-Foreign keys включены (`PRAGMA foreign_keys = ON`), WAL-mode для конкурентных
-read/write во время стриминга чата.
+Весь структурированный стейт — в одном файле `data/app.db` (sqlite +
+sqlite-vec). Foreign keys включены (`PRAGMA foreign_keys = ON`), WAL-mode —
+для конкурентных read/write во время стриминга чата.
 
-На диске вне БД остаются только бинарники (картинки) и глобальный
-`config.json`.
+На диске вне БД остаются только бинарники (картинки) в `data/images/`.
 
 ### 3.1. Справочник / библиотека: семейства, модели, LoRA
 
@@ -213,14 +212,14 @@ CREATE INDEX idx_prompts_session ON prompts(session_id, created_at);
 ### 3.3. Бинарники — на диске
 
 ```
-<data_root>/images/<session_id>/
+data/images/<session_id>/
   ├── source.<ext>         # исходник
   └── result.<ext>          # результат (опц., под шаг 6)
 ```
 
 Плоская структура по `session_id` (без вложения в проекты) — сессия сама по
 себе уникальна, проект — это логическая группировка в БД. Удаление сессии
-через API → каскадно чистит БД и удаляет папку `images/<session_id>/`.
+через API → каскадно чистит БД и удаляет папку `data/images/<session_id>/`.
 
 ---
 
@@ -468,7 +467,7 @@ description/prompt_guide).
 ```
 sd-chisel/
 ├── README.md
-├── .env.example
+├── .gitignore                  # /data/, прочее
 ├── doc/
 │   └── concept.md              # исходный prose-концепт
 ├── docs/
@@ -477,10 +476,13 @@ sd-chisel/
 ├── backend/
 │   ├── pyproject.toml
 │   └── app/ ... (см. §5)
-└── frontend/
-    ├── package.json
-    ├── vite.config.ts
-    └── src/ ... (см. §6)
+├── frontend/
+│   ├── package.json
+│   ├── vite.config.ts
+│   └── src/ ... (см. §6)
+└── data/                        # git-ignored, создаётся бэком при первом запуске
+    ├── app.db
+    └── images/<session_id>/source.*, result.*
 ```
 
 ---
