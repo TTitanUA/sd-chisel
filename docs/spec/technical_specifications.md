@@ -45,12 +45,11 @@ Supersedes технические разделы `doc/concept.md` (концеп�
 │                                └──────────────────┘                │
 │                                                                    │
 │ Data on disk:                                                      │
-│   <data_root>/library.db            (sqlite: families/models/loras │
-│                                      /compat/vec_loras/vec_map)    │
-│   <data_root>/projects/<p>/sessions/<s>/                           │
-│      session.json, messages.jsonl, source.<ext>, result.<ext>,     │
-│      prompts.jsonl                                                 │
-│   <data_root>/config.json                                          │
+│   <data_root>/app.db                (sqlite: всё метаданные —      │
+│                                      library + projects/sessions/  │
+│                                      messages/prompts/pins)        │
+│   <data_root>/images/<session_id>/source.<ext>, result.<ext>       │
+│   <data_root>/config.json           (глобальные UI-настройки)      │
 └────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -64,9 +63,14 @@ Supersedes технические разделы `doc/concept.md` (концеп�
 
 ## 3. Data model
 
-### 3.1. Описания LoRA / моделей / семейств — SQLite (source of truth)
+Весь структурированный стейт — в одном файле `app.db` (sqlite + sqlite-vec).
+Foreign keys включены (`PRAGMA foreign_keys = ON`), WAL-mode для конкурентных
+read/write во время стриминга чата.
 
-Единый файл `library.db`. Foreign keys включены (`PRAGMA foreign_keys = ON`).
+На диске вне БД остаются только бинарники (картинки) и глобальный
+`config.json`.
+
+### 3.1. Справочник / библиотека: семейства, модели, LoRA
 
 ```sql
 -- Справочник семейств (закрытый, переиспользуется)
@@ -135,43 +139,88 @@ CREATE TABLE lora_vec_map (
 - Удаление family блокируется RESTRICT, пока на него есть ссылки.
 - `author`, `version`, `source_url` — всё опционально.
 
-### 3.2. Проекты, сессии, чаты, промпты — файлы
+### 3.2. Проекты, сессии, чат, история промптов — в той же БД
+
+```sql
+CREATE TABLE projects (
+  id          TEXT PRIMARY KEY,       -- slug
+  name        TEXT NOT NULL,
+  created_at  INTEGER NOT NULL,
+  updated_at  INTEGER NOT NULL
+);
+
+CREATE TABLE sessions (
+  id                 TEXT PRIMARY KEY,                   -- ulid/uuid
+  project_id         TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  name               TEXT,                               -- опц., юзерское
+  model_name         TEXT REFERENCES models(name) ON DELETE SET NULL,
+  use_negative       INTEGER NOT NULL DEFAULT 1,         -- 0/1
+  vl_endpoint        TEXT,                               -- JSON {base_url, model, api_key}
+  prompt_endpoint    TEXT,                               -- JSON
+  vl_summary         TEXT,                               -- кешированный VL-анализ исходника
+  source_image_path  TEXT,                               -- относит. <data_root>
+  result_image_path  TEXT,                               -- опц., под шаг 6
+  created_at         INTEGER NOT NULL,
+  updated_at         INTEGER NOT NULL
+);
+CREATE INDEX idx_sessions_project ON sessions(project_id, updated_at DESC);
+
+-- Pinned LoRAs per session (обязательные, всегда в контексте)
+CREATE TABLE session_pinned_loras (
+  session_id       TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+  lora_name        TEXT NOT NULL REFERENCES loras(name)  ON DELETE CASCADE,
+  weight_override  REAL,                                 -- опц., overrides recommended_weight
+  PRIMARY KEY (session_id, lora_name)
+);
+
+-- Append-only чат
+CREATE TABLE messages (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  session_id  TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+  role        TEXT NOT NULL CHECK (role IN ('user','assistant','system')),
+  content     TEXT NOT NULL,
+  created_at  INTEGER NOT NULL
+);
+CREATE INDEX idx_messages_session ON messages(session_id, created_at);
+
+-- История финальных промптов (append-only)
+CREATE TABLE prompts (
+  id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+  session_id            TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+  positive              TEXT NOT NULL,
+  negative              TEXT,                            -- NULL если use_negative = 0
+  loras_json            TEXT NOT NULL,                   -- JSON [{name, weight}]
+  intents_json          TEXT,                            -- debug: output шага intent rewriting
+  retrieved_loras_json  TEXT,                            -- debug: что вернул retriever
+  created_at            INTEGER NOT NULL
+);
+CREATE INDEX idx_prompts_session ON prompts(session_id, created_at);
+```
+
+**Соглашения:**
+
+- `sessions.use_negative` — свойство воркфлоу (не модели). Если `0`, LLM
+  возвращает `negative: null`.
+- `sessions.vl_endpoint` / `prompt_endpoint` — JSON, независимые настройки
+  для VL и prompt-writer вызовов (может быть разные base_url / модели).
+- `session_pinned_loras` — обязательные LoRA, всегда добавляются в контекст
+  LLM поверх retrieved. Мультивыбор в `SessionSettingsDrawer` пишет сюда.
+- `prompts.intents_json` / `retrieved_loras_json` — для debug-pane и
+  ретроспективы, ничего не блокируют.
+- `sessions.source_image_path` / `result_image_path` — относительные пути к
+  файлам на диске. Сами бинарники — отдельно.
+
+### 3.3. Бинарники — на диске
 
 ```
-<data_root>/projects/<project-slug>/
-├── project.json              # {name, created_at}
-└── sessions/<session-id>/
-    ├── session.json          # настройки (model_name, pinned_loras[],
-    │                         #   vl_endpoint, prompt_endpoint, use_negative)
-    ├── messages.jsonl        # append-only чат
-    ├── source.<ext>          # исходник
-    ├── result.<ext>          # результат (опц., под шаг 6)
-    └── prompts.jsonl         # история финальных JSON-промптов
+<data_root>/images/<session_id>/
+  ├── source.<ext>         # исходник
+  └── result.<ext>          # результат (опц., под шаг 6)
 ```
 
-**Почему файлы, а не sqlite:** JSONL — append-only, дешёвый rolling save,
-читается одним `read`, ремонтируется руками. Сессии изолированы друг от друга,
-реляций между ними нет. Хранить их в БД — over-engineering.
-
-### 3.3. `session.json` — поля
-
-```json
-{
-  "id": "...",
-  "created_at": 1713800000,
-  "model_name": "some_illustrious_checkpoint",
-  "pinned_loras": ["detail-tweaker-xl"],
-  "use_negative": true,
-  "vl_endpoint":     { "base_url": "...", "model": "...", "api_key": "..." },
-  "prompt_endpoint": { "base_url": "...", "model": "...", "api_key": "..." }
-}
-```
-
-- `pinned_loras` — обязательные LoRA, всегда добавляются в контекст LLM поверх
-  retrieved. Чекбоксы в `SessionSettingsDrawer` → это и есть pins (не
-  "единственные", как было в первичном концепте).
-- `use_negative` — свойство воркфлоу (не модели). Если `false`, LLM возвращает
-  `negative: null`.
+Плоская структура по `session_id` (без вложения в проекты) — сессия сама по
+себе уникальна, проект — это логическая группировка в БД. Удаление сессии
+через API → каскадно чистит БД и удаляет папку `images/<session_id>/`.
 
 ---
 
@@ -321,9 +370,10 @@ backend/
 │   │   ├── prompt_builder.py # сборка system prompt'а
 │   │   └── sessions.py
 │   ├── storage/
-│   │   ├── db.py             # sqlite + sqlite-vec init, connection pool
-│   │   ├── library_repo.py
-│   │   └── files.py          # JSONL I/O, project/session files
+│   │   ├── db.py             # sqlite + sqlite-vec init, WAL, pool, migrations
+│   │   ├── library_repo.py   # families/models/loras CRUD
+│   │   ├── session_repo.py   # projects/sessions/messages/prompts CRUD
+│   │   └── images.py         # file I/O для картинок (<data_root>/images/...)
 │   └── models/               # Pydantic схемы (в т.ч. GeneratedPrompt, IntentList)
 └── tests/
 ```
