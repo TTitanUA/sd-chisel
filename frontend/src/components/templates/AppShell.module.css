@@ -40,11 +40,11 @@
 }
 
 .healthDot[data-status="ok"]::before {
-  background: #4f7d3a;
+  background: var(--success);
 }
 
 .healthDot[data-status="down"]::before {
-  background: #c96442;
+  background: var(--danger);
 }
 
 .sidebar {
@@ -70,7 +70,7 @@
 }
 
 .sidebarLink:hover {
-  background: var(--bg-muted);
+  background: var(--surface-alt);
 }
 
 .sidebarLink.active {
