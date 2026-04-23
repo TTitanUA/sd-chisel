@@ -100,3 +100,18 @@ def test_families_are_seeded(fresh_conn, tmp_path):
         "sd15", "sd21", "cascade", "hunyuan", "kolors", "auraflow",
     }
     assert ids == expected
+
+
+def test_split_statements_preserves_semicolons_in_string_literals(tmp_path, fresh_conn):
+    # A migration whose INSERT has `;` and escaped `''` inside its string values.
+    from app.storage.migrations import _split_statements
+
+    sql = (
+        "CREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT);\n"
+        "INSERT INTO t(id, v) VALUES (1, 'a;b');\n"
+        "INSERT INTO t(id, v) VALUES (2, 'it''s;fine');\n"
+    )
+    stmts = _split_statements(sql)
+    assert len(stmts) == 3
+    assert stmts[1] == "INSERT INTO t(id, v) VALUES (1, 'a;b')"
+    assert stmts[2] == "INSERT INTO t(id, v) VALUES (2, 'it''s;fine')"

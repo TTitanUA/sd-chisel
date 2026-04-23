@@ -36,14 +36,50 @@ def _discover(migrations_dir: Path) -> list[tuple[int, Path]]:
 def _split_statements(sql: str) -> list[str]:
     """Split a SQL script into individual statements.
 
-    Strips line comments (`-- ...`) and splits on `;`. Migration scripts must
-    not contain `;` inside string literals or identifiers.
+    Strips `--` line comments and splits on `;` only when the `;` is outside
+    a single-quoted string literal. Inside a literal, `''` is SQL's escape
+    for a single quote — we stay inside the literal when we see it.
     """
-    stripped = "\n".join(
+    no_comments = "\n".join(
         line for line in sql.splitlines()
         if not line.lstrip().startswith("--")
     )
-    return [s.strip() for s in stripped.split(";") if s.strip()]
+    statements: list[str] = []
+    buf: list[str] = []
+    in_str = False
+    i = 0
+    n = len(no_comments)
+    while i < n:
+        ch = no_comments[i]
+        if in_str:
+            buf.append(ch)
+            if ch == "'":
+                # Escaped quote inside a literal: '' means one literal quote.
+                if i + 1 < n and no_comments[i + 1] == "'":
+                    buf.append(no_comments[i + 1])
+                    i += 2
+                    continue
+                in_str = False
+            i += 1
+            continue
+        if ch == "'":
+            in_str = True
+            buf.append(ch)
+            i += 1
+            continue
+        if ch == ";":
+            stmt = "".join(buf).strip()
+            if stmt:
+                statements.append(stmt)
+            buf.clear()
+            i += 1
+            continue
+        buf.append(ch)
+        i += 1
+    tail = "".join(buf).strip()
+    if tail:
+        statements.append(tail)
+    return statements
 
 
 def apply_pending(conn: sqlite3.Connection, migrations_dir: Path) -> int:
