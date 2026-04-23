@@ -88,3 +88,15 @@ def test_apply_pending_rolls_back_on_partial_failure(fresh_conn, tmp_path):
     assert "ok" not in tables
     assert "bad" not in tables
     assert applied_versions(fresh_conn) == []
+
+
+def test_families_are_seeded(fresh_conn, tmp_path):
+    migrations_dir = Path(__file__).parent.parent / "migrations"
+    apply_pending(fresh_conn, migrations_dir)
+
+    ids = {r[0] for r in fresh_conn.execute("SELECT id FROM families")}
+    expected = {
+        "sdxl", "illustrious", "pony", "flux",
+        "sd15", "sd21", "cascade", "hunyuan", "kolors", "auraflow",
+    }
+    assert ids == expected
