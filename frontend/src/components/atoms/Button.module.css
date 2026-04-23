@@ -14,7 +14,7 @@
 }
 
 .button:hover {
-  background: var(--surface-hover, var(--bg-muted));
+  background: var(--surface-alt);
 }
 
 .button:disabled {
@@ -25,7 +25,7 @@
 .primary {
   background: var(--accent);
   border-color: var(--accent);
-  color: var(--accent-contrast, #fff);
+  color: var(--accent-text);
 }
 
 .sm {
