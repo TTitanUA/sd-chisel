@@ -53,6 +53,8 @@ backend/
 ├── app/
 │   ├── main.py                  # FastAPI + /health
 │   ├── config.py                # резолв ./data/ walk-up от app/main.py
+│   ├── api/                     # пустой namespace с __init__.py (наполняется в slice'ах)
+│   ├── services/                # пустой namespace с __init__.py (наполняется в slice'ах)
 │   ├── storage/
 │   │   ├── db.py                # sqlite + sqlite-vec, WAL, FK on, connection pool
 │   │   ├── migrations.py        # runner для .sql файлов
@@ -71,7 +73,8 @@ backend/
 ```
 
 **Ключевые решения:**
-- `schema_migrations(version INTEGER PK, applied_at INTEGER)` — тонкая таблица, runner читает файлы по возрастанию, применяет недостающие в транзакции.
+- `schema_migrations(version INTEGER PK, applied_at INTEGER)` — тонкая таблица, runner читает файлы по возрастанию, применяет каждый недостающий файл **в отдельной транзакции** (BEGIN → exec script → INSERT в schema_migrations → COMMIT). По файлу — одна транзакция; это ограничивает blast radius частичного применения и корректно работает с `CREATE VIRTUAL TABLE` sqlite-vec.
+- `001_init.sql` явно содержит **все** таблицы из §3 спеки, включая junction-таблицы: `families`, `models`, `loras`, `lora_family_compat`, `vec_loras` (virtual), `lora_vec_map`, `projects`, `sessions`, `session_pinned_loras`, `messages`, `prompts` + все индексы (`idx_sessions_project`, `idx_messages_session`, `idx_prompts_session`).
 - `PRAGMA foreign_keys = ON` и `PRAGMA journal_mode = WAL` ставятся при каждом открытии соединения.
 - `vec_loras` создаётся в той же миграции через `CREATE VIRTUAL TABLE ... USING vec0(embedding FLOAT[1024])`. Размерность 1024 зафиксирована под bge-m3 (§7 спеки).
 - Resolver `./data/`: идёт вверх от `app/main.py` до каталога, содержащего `backend/` или `.git`, кладёт `data/` туда. Нет env-переменных (§2 спеки).
@@ -113,7 +116,8 @@ frontend/
     │       └── LibraryLayout.tsx
     ├── store/                   # Zustand (базовый — пустой store)
     └── api/
-        └── client.ts            # fetch wrapper + QueryClient
+        ├── client.ts            # fetch wrapper (base URL из env), QueryClient instance
+        └── health.ts            # useHealth() хук; AppShell вызывает его и рисует connection dot
 ```
 
 **Ключевые решения:**
