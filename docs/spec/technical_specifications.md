@@ -434,10 +434,32 @@ backend/
 
 ## 6. Frontend
 
-**Стек:** Vite + React 18 + TypeScript + TailwindCSS + shadcn/ui + Zustand
-(клиентский стейт) + TanStack Query (серверные данные) + `react-router` +
-`react-resizable-panels` + `@uiw/react-md-editor` (редактор для
-description/prompt_guide).
+**Стек:** Vite + React 18 + TypeScript + Radix UI (headless primitives:
+Dialog, DropdownMenu, Popover, Tooltip и т.д. — подключаем по мере надобности)
++ CSS modules + `global.css` + PostCSS (autoprefixer + nested) +
+`lucide-react` (иконки) + Zustand (клиентский стейт) + TanStack Query
+(серверные данные) + `react-router` + `react-resizable-panels` +
+`@uiw/react-md-editor` (редактор для description/prompt_guide).
+
+**Без Tailwind/shadcn.** Дизайн-система уже отработана в прототипе
+(`mvp-ui-mock/app/ds/`) как набор CSS-переменных-токенов + `primitives.css` /
+`extended.css`. Портируем её как `global.css` + набор токенов; специфичные
+стили компонентов — в `.module.css` рядом с компонентом.
+
+**Декомпозиция — атомарный дизайн:**
+
+```
+frontend/src/components/
+├── atoms/        # Button, Icon, Badge, Input, Slider, ...
+├── molecules/    # FormField, LoraRow, TagChip, StatBadge, ...
+├── organisms/    # SourceImagePane, ChatPane, PromptPane, LibraryTable, ...
+└── templates/    # WorkspaceLayout, LibraryLayout, AppShell
+```
+
+Страницы (`pages/`) собираются из templates + organisms, получают данные
+через TanStack Query хуки (`src/api/`).
+
+**Пакетный менеджер:** pnpm.
 
 **Экраны:**
 
@@ -486,7 +508,9 @@ description/prompt_guide).
 
 **Фронт:**
 - `react`, `react-dom`, `vite`, `typescript`
-- `tailwindcss`, `@radix-ui/*` (через shadcn/ui)
+- `@radix-ui/react-*` (headless primitives, только нужные)
+- `lucide-react` (иконки)
+- `postcss`, `autoprefixer`, `postcss-nested` (CSS modules из коробки Vite)
 - `zustand`, `@tanstack/react-query`
 - `react-router-dom`
 - `react-resizable-panels`
