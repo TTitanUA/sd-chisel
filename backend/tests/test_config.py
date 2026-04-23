@@ -35,3 +35,16 @@ def test_resolve_data_root_creates_dir(tmp_path):
     root = resolve_data_root(anchor_file=fake_main)
     assert root.exists()
     assert root.is_dir()
+
+
+def test_resolve_data_root_handles_backend_named_repo_root(tmp_path):
+    # Repo is cloned into a directory literally named "backend".
+    repo = tmp_path / "backend"
+    (repo / "backend" / "app").mkdir(parents=True)
+    (repo / ".git").mkdir()
+    (repo / "backend" / "pyproject.toml").write_text("")
+    fake_main = repo / "backend" / "app" / "main.py"
+    fake_main.write_text("")
+
+    # Outer (repo/.git) wins over inner (repo/backend/pyproject.toml).
+    assert resolve_data_root(anchor_file=fake_main) == repo / "data"
