@@ -1,6 +1,9 @@
 import { QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { queryClient } from "./api/client";
+import { AppShell } from "./components/templates/AppShell";
+import { WorkspaceLayout } from "./components/templates/WorkspaceLayout";
+import { LibraryLayout } from "./components/templates/LibraryLayout";
 import WorkspaceRoute from "./routes/workspace";
 import FamiliesRoute from "./routes/library/families";
 import ModelsRoute from "./routes/library/models";
@@ -11,12 +14,45 @@ export function App() {
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
         <Routes>
-          <Route path="/" element={<Navigate to="/projects/scrapyard/sessions/default" replace />} />
-          <Route path="/projects/:projectId/sessions/:sessionId" element={<WorkspaceRoute />} />
-          <Route path="/library/families" element={<FamiliesRoute />} />
-          <Route path="/library/models" element={<ModelsRoute />} />
-          <Route path="/library/loras" element={<LorasRoute />} />
-          <Route path="*" element={<div>404</div>} />
+          <Route element={<AppShell />}>
+            <Route
+              path="/"
+              element={<Navigate to="/projects/scrapyard/sessions/default" replace />}
+            />
+            <Route
+              path="/projects/:projectId/sessions/:sessionId"
+              element={
+                <WorkspaceLayout>
+                  <WorkspaceRoute />
+                </WorkspaceLayout>
+              }
+            />
+            <Route
+              path="/library/families"
+              element={
+                <LibraryLayout>
+                  <FamiliesRoute />
+                </LibraryLayout>
+              }
+            />
+            <Route
+              path="/library/models"
+              element={
+                <LibraryLayout>
+                  <ModelsRoute />
+                </LibraryLayout>
+              }
+            />
+            <Route
+              path="/library/loras"
+              element={
+                <LibraryLayout>
+                  <LorasRoute />
+                </LibraryLayout>
+              }
+            />
+            <Route path="*" element={<div style={{ padding: 24 }}>404</div>} />
+          </Route>
         </Routes>
       </BrowserRouter>
     </QueryClientProvider>
