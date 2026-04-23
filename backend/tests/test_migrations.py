@@ -1,10 +1,10 @@
+import sqlite3
 from pathlib import Path
 
 import pytest
 
 from app.storage import db as db_mod
-from app.storage.migrations import apply_pending, applied_versions
-
+from app.storage.migrations import applied_versions, apply_pending
 
 
 @pytest.fixture
@@ -57,7 +57,7 @@ def test_foreign_keys_enforced(fresh_conn, tmp_path):
     apply_pending(fresh_conn, migrations_dir)
 
     # Inserting a model with a non-existent family must fail.
-    with pytest.raises(Exception):
+    with pytest.raises(sqlite3.IntegrityError):
         fresh_conn.execute(
             "INSERT INTO models(name, display_name, family_id, created_at, updated_at) "
             "VALUES (?, ?, ?, 0, 0)",
@@ -76,7 +76,7 @@ def test_apply_pending_rolls_back_on_partial_failure(fresh_conn, tmp_path):
         encoding="utf-8",
     )
 
-    with pytest.raises(Exception):
+    with pytest.raises(sqlite3.OperationalError):
         apply_pending(fresh_conn, bad_dir)
 
     # Neither `ok` nor `bad` should exist; schema_migrations should be empty.

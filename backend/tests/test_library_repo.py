@@ -1,3 +1,4 @@
+import sqlite3
 from pathlib import Path
 
 import pytest
@@ -32,7 +33,7 @@ def test_create_and_get_model(conn):
 
 
 def test_create_model_with_unknown_family_raises(conn):
-    with pytest.raises(Exception):
+    with pytest.raises(sqlite3.IntegrityError):
         library_repo.create_model(conn, name="x", display_name="X", family_id="nope")
 
 
@@ -47,10 +48,10 @@ def test_create_and_get_lora_with_compat(conn):
         recommended_weight=0.85,
         family_compat=["sdxl", "illustrious"],
     )
-    l = library_repo.get_lora(conn, "cinematic_lighting_v2")
-    assert l is not None
-    assert l["tags"] == ["light", "mood"]
-    assert set(l["family_compat"]) == {"sdxl", "illustrious"}
+    lora = library_repo.get_lora(conn, "cinematic_lighting_v2")
+    assert lora is not None
+    assert lora["tags"] == ["light", "mood"]
+    assert set(lora["family_compat"]) == {"sdxl", "illustrious"}
 
 
 def test_delete_lora_cascades_compat_and_vec_map(conn):
