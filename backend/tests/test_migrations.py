@@ -6,6 +6,7 @@ from app.storage import db as db_mod
 from app.storage.migrations import apply_pending, applied_versions
 
 
+
 @pytest.fixture
 def fresh_conn(tmp_path):
     conn = db_mod.connect(tmp_path / "test.db")
@@ -62,3 +63,28 @@ def test_foreign_keys_enforced(fresh_conn, tmp_path):
             "VALUES (?, ?, ?, 0, 0)",
             ("m1", "M1", "does-not-exist"),
         )
+
+
+def test_apply_pending_rolls_back_on_partial_failure(fresh_conn, tmp_path):
+    # Craft a migration whose second statement fails.
+    bad_dir = tmp_path / "bad_migrations"
+    bad_dir.mkdir()
+    (bad_dir / "001_bad.sql").write_text(
+        "CREATE TABLE ok (id INTEGER);\n"
+        "CREATE TABLE bad (id INTEGER REFERENCES missing(id));\n"
+        "INSERT INTO SYNTAX ERROR;\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(Exception):
+        apply_pending(fresh_conn, bad_dir)
+
+    # Neither `ok` nor `bad` should exist; schema_migrations should be empty.
+    tables = {
+        r[0] for r in fresh_conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        )
+    }
+    assert "ok" not in tables
+    assert "bad" not in tables
+    assert applied_versions(fresh_conn) == []

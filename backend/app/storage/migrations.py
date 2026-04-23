@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 import sqlite3
+import time
 from pathlib import Path
 
 _VERSION_RE = re.compile(r"^(\d{3,})_.+\.sql$")
@@ -32,33 +33,44 @@ def _discover(migrations_dir: Path) -> list[tuple[int, Path]]:
     return out
 
 
+def _split_statements(sql: str) -> list[str]:
+    """Split a SQL script into individual statements.
+
+    Strips line comments (`-- ...`) and splits on `;`. Migration scripts must
+    not contain `;` inside string literals or identifiers.
+    """
+    stripped = "\n".join(
+        line for line in sql.splitlines()
+        if not line.lstrip().startswith("--")
+    )
+    return [s.strip() for s in stripped.split(";") if s.strip()]
+
+
 def apply_pending(conn: sqlite3.Connection, migrations_dir: Path) -> int:
     """Apply all migration files not yet in schema_migrations.
 
-    Each file runs in its own transaction. sqlite3.Connection.executescript()
-    always issues an implicit COMMIT before running, so we cannot wrap it in a
-    manual BEGIN/COMMIT. Instead we let executescript handle its own
-    transaction for the SQL file, then record the version in a separate
-    transaction using the connection as a context manager.
+    Each file's DDL and the corresponding schema_migrations INSERT run inside
+    a single manual BEGIN/COMMIT so a partial failure rolls back cleanly.
     Returns the count of newly applied migrations.
     """
-    import time
-
     _ensure_table(conn)
     already = set(applied_versions(conn))
     applied = 0
     for version, path in _discover(migrations_dir):
         if version in already:
             continue
-        sql = path.read_text(encoding="utf-8")
-        # executescript issues an implicit COMMIT first, then wraps the
-        # statements in its own BEGIN/COMMIT, so we must NOT open a
-        # transaction before calling it.
-        conn.executescript(sql)
-        with conn:
+        statements = _split_statements(path.read_text(encoding="utf-8"))
+        try:
+            conn.execute("BEGIN")
+            for stmt in statements:
+                conn.execute(stmt)
             conn.execute(
                 "INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)",
                 (version, int(time.time())),
             )
+            conn.execute("COMMIT")
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
         applied += 1
     return applied
