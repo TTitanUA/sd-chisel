@@ -70,7 +70,10 @@ def apply_pending(conn: sqlite3.Connection, migrations_dir: Path) -> int:
             )
             conn.execute("COMMIT")
         except Exception:
-            conn.execute("ROLLBACK")
+            try:
+                conn.execute("ROLLBACK")
+            except Exception:
+                pass
             raise
         applied += 1
     return applied
