@@ -1,0 +1,278 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>sd-chisel — Design System</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+  <link rel="stylesheet" href="design-system/tokens.css">
+  <link rel="stylesheet" href="design-system/primitives.css">
+  <link rel="stylesheet" href="design-system/extended.css">
+  <link rel="stylesheet" href="design-system/library-variants.css">
+  <link rel="stylesheet" href="design-system/library-v2.css">
+
+  <style>
+    html, body {
+      margin: 0;
+      background: #e8e4db;
+      font-family: 'Inter', system-ui, sans-serif;
+      overflow: hidden;
+      height: 100vh;
+    }
+    .theme-art {
+      padding: 28px;
+      width: 100%;
+      height: 100%;
+      box-sizing: border-box;
+      overflow: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 24px;
+    }
+    .dir-header {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 16px;
+      padding-bottom: 16px;
+      border-bottom: 1px solid var(--border);
+    }
+    .dir-name {
+      font-family: var(--font-display);
+      font-size: 32px;
+      font-weight: 600;
+      letter-spacing: -0.03em;
+      color: var(--text);
+      margin: 0;
+    }
+    .dir-tag {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--text-subtle);
+    }
+    .dir-desc {
+      font-size: 14px;
+      color: var(--text-muted);
+      max-width: 520px;
+      line-height: 1.5;
+    }
+
+    .block { display: flex; flex-direction: column; gap: 12px; }
+    .block-header {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      border-top: 1px solid var(--border);
+      padding-top: 14px;
+    }
+    .block-name {
+      font-family: var(--font-display);
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text);
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+    .block-note {
+      font-size: 11px;
+      color: var(--text-subtle);
+      font-family: var(--font-mono);
+    }
+
+    .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+
+    .type-row {
+      display: flex;
+      align-items: baseline;
+      gap: 16px;
+      padding: 6px 0;
+      border-bottom: 1px dashed var(--border);
+    }
+    .type-row:last-child { border-bottom: none; }
+    .type-row .spec {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      color: var(--text-subtle);
+      width: 110px;
+      flex-shrink: 0;
+      letter-spacing: 0.04em;
+    }
+    .type-sample { color: var(--text); line-height: 1.2; }
+
+    .palette-row {
+      display: grid;
+      grid-template-columns: 70px 1fr;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 8px;
+    }
+    .palette-label {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      color: var(--text-muted);
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+
+    .card-demo {
+      background: var(--bg-raised);
+      border: 1px solid var(--border);
+      border-radius: var(--r-sm);
+      padding: 16px;
+      box-shadow: var(--shadow-sm);
+    }
+    .card-demo .ds-label-caps { margin-bottom: 6px; }
+
+    .radii-demo { display: flex; gap: 8px; }
+    .radii-demo > div {
+      flex: 1;
+      aspect-ratio: 1;
+      background: var(--accent-subtle);
+      border: 1px solid color-mix(in oklab, var(--accent) 30%, var(--border));
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: var(--font-mono);
+      font-size: 10px;
+      color: var(--accent);
+    }
+
+    .shadow-demo > div {
+      padding: 12px;
+      border-radius: var(--r-sm);
+      background: var(--bg-raised);
+      margin-bottom: 10px;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+
+    .mono-pre {
+      font-family: var(--font-mono);
+      font-size: var(--text-xs);
+      color: var(--text);
+      background: var(--surface);
+      padding: var(--s-3);
+      border-radius: var(--r-sm);
+      border: 1px solid var(--border);
+      white-space: pre-wrap;
+      word-break: break-word;
+      line-height: 1.5;
+    }
+
+    .patch-strip {
+      display: flex;
+      gap: 0;
+      border-radius: var(--r-sm);
+      overflow: hidden;
+      height: 56px;
+      border: 1px solid var(--border);
+    }
+    .patch-strip > div {
+      flex: 1;
+      display: flex;
+      align-items: flex-end;
+      padding: 6px 8px;
+      font-family: var(--font-mono);
+      font-size: 9.5px;
+      color: rgba(255,255,255,0.95);
+    }
+    .patch-strip > div.is-light { color: rgba(0,0,0,0.75); }
+  </style>
+</head>
+<body>
+
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+  <script type="text/babel" src="design-system/design-canvas.jsx"></script>
+  <script type="text/babel" src="design-system/primitives.jsx"></script>
+  <script type="text/babel" src="design-system/extended.jsx"></script>
+  <script type="text/babel" src="design-system/library-variants.jsx"></script>
+  <script type="text/babel" src="design-system/library-v2.jsx"></script>
+  <script type="text/babel" src="design-system/direction-art.jsx"></script>
+
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const DIR = {
+      id: 'quarry',
+      name: 'Quarry',
+      tag: 'LIGHT · WARM STONE · TERRACOTTA',
+      desc: 'Тёплая бумага + терракотовый акцент. Inter для UI, JetBrains Mono для промптов/кода. Просторный, тактильный, спокойный.',
+      accent: '#c96442',
+    };
+
+    function App() {
+      return (
+        <DesignCanvas>
+          <DCSection id="foundations" title="Foundations" subtitle="tokens · typography · spacing · radii · shadows">
+            <DCArtboard id="tokens" label="Tokens + core primitives" width={1160} height={1680}>
+              <DirectionArt dir={DIR} />
+            </DCArtboard>
+          </DCSection>
+
+          <DCSection id="library" title="Library — LoRA" subtitle="/library/loras · master–detail · read-first · explicit edit">
+            <DCArtboard id="lib-v2" label="List + Detail (selected: cinematic_lighting_v2)" width={1200} height={760}>
+              <div data-theme="quarry" className="ds-surface" style={{height:'100%'}}>
+                <LibraryV2 />
+              </div>
+            </DCArtboard>
+            <DCArtboard id="lib-v2-new" label="Create page · /library/loras/new" width={1000} height={900}>
+              <div data-theme="quarry" className="ds-surface" style={{height:'100%'}}>
+                <LibraryV2Create />
+              </div>
+            </DCArtboard>
+          </DCSection>
+
+          <DCSection id="components" title="Components" subtitle="drawer · dialog · popover · markdown · states · icons">
+            <DCArtboard id="drawer" label="Session drawer" width={900} height={640}>
+              <div data-theme="quarry" className="ds-surface" style={{height:'100%'}}>
+                <DrawerMock />
+              </div>
+            </DCArtboard>
+            <DCArtboard id="dialog" label="Confirm dialog" width={640} height={420}>
+              <div data-theme="quarry" className="ds-surface" style={{height:'100%'}}>
+                <DialogMock />
+              </div>
+            </DCArtboard>
+            <DCArtboard id="popover" label="Filter popover" width={520} height={420}>
+              <div data-theme="quarry" className="ds-surface" style={{height:'100%', background:'var(--bg)'}}>
+                <PopoverMock />
+              </div>
+            </DCArtboard>
+            <DCArtboard id="md" label="Markdown editor" width={1000} height={420}>
+              <div data-theme="quarry" className="ds-surface" style={{padding:24, height:'100%', boxSizing:'border-box'}}>
+                <MdEditor />
+              </div>
+            </DCArtboard>
+            <DCArtboard id="states" label="Empty / Loading / Error" width={1100} height={360}>
+              <div data-theme="quarry" className="ds-surface" style={{padding:24, height:'100%', boxSizing:'border-box', display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:16}}>
+                <EmptyState />
+                <LoadingState />
+                <ErrorState />
+              </div>
+            </DCArtboard>
+            <DCArtboard id="icons" label="Iconography" width={900} height={360}>
+              <div data-theme="quarry" className="ds-surface" style={{padding:24, height:'100%', boxSizing:'border-box'}}>
+                <IconShowcase />
+              </div>
+            </DCArtboard>
+          </DCSection>
+        </DesignCanvas>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+
+</body>
+</html>

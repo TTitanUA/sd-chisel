@@ -1,0 +1,424 @@
+/* Primitives — all theme-agnostic, consume CSS vars from tokens.css */
+
+/* ─── Button ──────────────────────────────────────────────────────── */
+.ds-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s-2);
+  font-family: var(--font-ui);
+  font-weight: 500;
+  letter-spacing: var(--tracking-normal);
+  border-radius: var(--r-sm);
+  border: var(--stroke-thin) solid transparent;
+  cursor: pointer;
+  transition: background .12s, border-color .12s, color .12s, transform .08s;
+  white-space: nowrap;
+  user-select: none;
+}
+.ds-btn:active { transform: translateY(0.5px); }
+
+.ds-btn-sm { padding: 4px 10px; font-size: var(--text-xs); height: 24px; }
+.ds-btn-md { padding: 6px 14px; font-size: var(--text-sm); height: 30px; }
+.ds-btn-lg { padding: 8px 18px; font-size: var(--text-base); height: 36px; }
+
+.ds-btn-primary {
+  background: var(--accent);
+  color: var(--accent-text);
+  box-shadow: var(--shadow-inset);
+}
+.ds-btn-primary:hover { background: var(--accent-hover); }
+
+.ds-btn-secondary {
+  background: var(--surface);
+  color: var(--text);
+  border-color: var(--border);
+}
+.ds-btn-secondary:hover {
+  background: var(--surface-alt);
+  border-color: var(--border-strong);
+}
+
+.ds-btn-ghost {
+  background: transparent;
+  color: var(--text-muted);
+}
+.ds-btn-ghost:hover { background: var(--surface); color: var(--text); }
+
+.ds-btn-danger {
+  background: transparent;
+  color: var(--danger);
+  border-color: var(--border);
+}
+.ds-btn-danger:hover { background: color-mix(in oklab, var(--danger) 10%, transparent); border-color: var(--danger); }
+
+.ds-btn-icon { display: inline-flex; }
+
+/* ─── Field / Input ──────────────────────────────────────────────── */
+.ds-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  font-family: var(--font-ui);
+}
+.ds-field-label {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  font-weight: 500;
+  letter-spacing: var(--tracking-wide);
+}
+.ds-field-hint { font-size: var(--text-xs); color: var(--text-subtle); }
+.ds-field-error { font-size: var(--text-xs); color: var(--danger); }
+
+.ds-input, .ds-textarea {
+  font-family: var(--font-ui);
+  font-size: var(--text-base);
+  color: var(--text);
+  background: var(--bg-raised);
+  border: var(--stroke-thin) solid var(--border);
+  border-radius: var(--r-sm);
+  padding: 7px 10px;
+  transition: border-color .12s, box-shadow .12s;
+  outline: none;
+  width: 100%;
+}
+.ds-input::placeholder, .ds-textarea::placeholder { color: var(--text-subtle); }
+.ds-input:hover, .ds-textarea:hover { border-color: var(--border-strong); }
+.ds-input:focus, .ds-textarea:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--accent) 18%, transparent);
+}
+.ds-textarea {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  line-height: var(--leading-relaxed);
+  resize: vertical;
+}
+
+.ds-select {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.ds-select select {
+  appearance: none;
+  font-family: var(--font-ui);
+  font-size: var(--text-base);
+  color: var(--text);
+  background: var(--bg-raised);
+  border: var(--stroke-thin) solid var(--border);
+  border-radius: var(--r-sm);
+  padding: 7px 32px 7px 10px;
+  width: 100%;
+  cursor: pointer;
+}
+.ds-select svg {
+  position: absolute;
+  right: 10px;
+  pointer-events: none;
+  color: var(--text-muted);
+}
+
+/* ─── Badge ──────────────────────────────────────────────────────── */
+.ds-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--font-ui);
+  font-size: var(--text-2xs);
+  font-weight: 500;
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border-radius: var(--r-sm);
+  border: var(--stroke-thin) solid var(--border);
+  background: var(--surface);
+  color: var(--text-muted);
+}
+.ds-badge-dot {
+  width: 5px; height: 5px; border-radius: 50%;
+  background: currentColor;
+}
+.ds-badge-accent  { color: var(--accent); border-color: color-mix(in oklab, var(--accent) 30%, var(--border)); background: var(--accent-subtle); }
+.ds-badge-success { color: var(--success); border-color: color-mix(in oklab, var(--success) 30%, var(--border)); background: color-mix(in oklab, var(--success) 8%, transparent); }
+.ds-badge-warning { color: var(--warning); border-color: color-mix(in oklab, var(--warning) 30%, var(--border)); background: color-mix(in oklab, var(--warning) 8%, transparent); }
+.ds-badge-danger  { color: var(--danger);  border-color: color-mix(in oklab, var(--danger) 30%, var(--border));  background: color-mix(in oklab, var(--danger) 8%, transparent); }
+.ds-badge-info    { color: var(--info);    border-color: color-mix(in oklab, var(--info) 30%, var(--border));    background: color-mix(in oklab, var(--info) 8%, transparent); }
+
+/* ─── Chip ───────────────────────────────────────────────────────── */
+.ds-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--font-ui);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  background: var(--surface);
+  border: var(--stroke-thin) solid var(--border);
+  border-radius: var(--r-sm);
+  padding: 2px 8px;
+  height: 22px;
+}
+.ds-chip-x {
+  display: inline-flex;
+  padding: 2px;
+  margin-right: -3px;
+  background: none;
+  border: none;
+  color: var(--text-subtle);
+  cursor: pointer;
+  border-radius: var(--r-xs);
+}
+.ds-chip-x:hover { background: var(--surface-alt); color: var(--text); }
+
+/* ─── Slider ─────────────────────────────────────────────────────── */
+.ds-slider { width: 100%; font-family: var(--font-ui); }
+.ds-slider-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: var(--s-2);
+}
+.ds-slider-label { font-size: var(--text-xs); color: var(--text-muted); }
+.ds-slider-value {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+.ds-slider-track {
+  position: relative;
+  height: 20px;
+  display: flex;
+  align-items: center;
+}
+.ds-slider-track::before {
+  content: '';
+  position: absolute;
+  left: 0; right: 0; top: 50%;
+  height: 3px;
+  margin-top: -1.5px;
+  background: var(--surface-alt);
+  border-radius: var(--r-full);
+}
+.ds-slider-tick {
+  position: absolute;
+  top: 50%;
+  width: 1px;
+  height: 9px;
+  margin-top: -4.5px;
+  background: var(--border-strong);
+  transform: translateX(-0.5px);
+}
+.ds-slider-fill {
+  position: absolute;
+  top: 50%;
+  height: 3px;
+  margin-top: -1.5px;
+  background: var(--accent);
+  border-radius: var(--r-full);
+}
+.ds-slider-thumb {
+  position: absolute;
+  top: 50%;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--bg-raised);
+  border: var(--stroke-bold) solid var(--accent);
+  margin-left: -7px;
+  margin-top: -7px;
+  pointer-events: none;
+  box-shadow: var(--shadow-sm);
+}
+.ds-slider-track input[type="range"] {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  opacity: 0;
+  cursor: pointer;
+  margin: 0;
+}
+
+/* ─── Toggle ─────────────────────────────────────────────────────── */
+.ds-toggle { display: inline-flex; align-items: center; gap: var(--s-3); cursor: pointer; }
+.ds-toggle-track {
+  position: relative;
+  width: 30px; height: 17px;
+  border-radius: var(--r-full);
+  background: var(--surface-alt);
+  border: var(--stroke-thin) solid var(--border);
+  cursor: pointer;
+  padding: 0;
+  transition: background .15s;
+}
+.ds-toggle-track.is-on { background: var(--accent); border-color: var(--accent); }
+.ds-toggle-thumb {
+  position: absolute;
+  top: 1px; left: 1px;
+  width: 13px; height: 13px;
+  border-radius: 50%;
+  background: var(--bg-raised);
+  box-shadow: var(--shadow-sm);
+  transition: transform .15s;
+}
+.ds-toggle-track.is-on .ds-toggle-thumb { transform: translateX(13px); }
+.ds-toggle-label { font-size: var(--text-sm); color: var(--text); }
+
+/* ─── Chat bubble ────────────────────────────────────────────────── */
+.ds-chat {
+  display: flex;
+  gap: var(--s-3);
+  font-family: var(--font-ui);
+  font-size: var(--text-base);
+  line-height: var(--leading-relaxed);
+  color: var(--text);
+}
+.ds-chat-avatar {
+  flex-shrink: 0;
+  width: 26px; height: 26px;
+  border-radius: var(--r-sm);
+  background: var(--accent-subtle);
+  color: var(--accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 2px;
+}
+.ds-chat-body { flex: 1; min-width: 0; }
+.ds-chat-meta {
+  font-size: var(--text-xs);
+  color: var(--text-subtle);
+  margin-bottom: var(--s-1);
+  letter-spacing: var(--tracking-wide);
+}
+.ds-chat-content { color: var(--text); }
+.ds-chat-user .ds-chat-body {
+  background: var(--surface);
+  border: var(--stroke-thin) solid var(--border);
+  border-radius: var(--r-sm);
+  padding: 10px 14px;
+}
+.ds-chat-user .ds-chat-avatar { display: none; }
+.ds-chat-cursor {
+  display: inline-block;
+  width: 8px; height: 14px;
+  background: var(--accent);
+  vertical-align: text-bottom;
+  margin-left: 2px;
+  animation: ds-cursor-blink 1s infinite;
+}
+@keyframes ds-cursor-blink { 50% { opacity: 0; } }
+
+/* ─── Row (list item) ────────────────────────────────────────────── */
+.ds-row {
+  display: grid;
+  grid-template-columns: 2fr 2fr 1fr 70px;
+  gap: var(--s-4);
+  align-items: center;
+  padding: var(--s-3) var(--s-4);
+  border-bottom: var(--stroke-hair) solid var(--border);
+  font-family: var(--font-ui);
+  font-size: var(--text-sm);
+  transition: background .1s;
+}
+.ds-row:hover { background: var(--surface); }
+.ds-row-name { color: var(--text); font-weight: 500; }
+.ds-row-meta { margin-top: 2px; }
+.ds-row-tags { display: flex; gap: 4px; flex-wrap: wrap; }
+.ds-row-weight {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+  text-align: right;
+}
+
+.ds-code {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  background: var(--surface);
+  padding: 1px 5px;
+  border-radius: var(--r-xs);
+  border: var(--stroke-hair) solid var(--border);
+}
+
+/* ─── Panel (section frame) ──────────────────────────────────────── */
+.ds-panel {
+  background: var(--bg);
+  color: var(--text);
+  border-radius: var(--r-sm);
+  border: var(--stroke-thin) solid var(--border);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.ds-panel-header {
+  padding: var(--s-4) var(--s-5);
+  border-bottom: var(--stroke-thin) solid var(--border);
+  background: var(--bg-sunken);
+}
+.ds-panel-title {
+  font-family: var(--font-display);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--text);
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+}
+.ds-panel-subtitle {
+  font-size: var(--text-xs);
+  color: var(--text-subtle);
+  margin-top: 2px;
+}
+.ds-panel-body {
+  padding: var(--s-5);
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-4);
+}
+
+/* ─── Swatch grid ────────────────────────────────────────────────── */
+.ds-swatch-grid {
+  display: grid;
+  grid-template-columns: repeat(11, 1fr);
+  gap: 2px;
+}
+.ds-swatch {
+  aspect-ratio: 1;
+  border-radius: var(--r-xs);
+  border: var(--stroke-hair) solid rgba(0,0,0,0.08);
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  padding: 3px 4px;
+  font-family: var(--font-mono);
+  font-size: 8.5px;
+  color: rgba(255,255,255,0.9);
+  text-shadow: 0 0 2px rgba(0,0,0,0.5);
+}
+.ds-swatch.is-light { color: rgba(0,0,0,0.7); text-shadow: none; }
+
+/* ─── Accent patch ──────────────────────────────────────────────── */
+.ds-patch {
+  aspect-ratio: 1;
+  border-radius: var(--r-sm);
+  display: flex;
+  align-items: flex-end;
+  padding: var(--s-2);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
+/* ─── Misc ───────────────────────────────────────────────────────── */
+.ds-hstack { display: flex; gap: var(--s-3); align-items: center; flex-wrap: wrap; }
+.ds-vstack { display: flex; flex-direction: column; gap: var(--s-3); }
+.ds-divider { height: 1px; background: var(--border); margin: var(--s-2) 0; }
+.ds-label-caps {
+  font-size: var(--text-2xs);
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+  color: var(--text-subtle);
+  font-weight: 600;
+}
