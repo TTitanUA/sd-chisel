@@ -19,8 +19,7 @@ node_modules/
 frontend/dist/
 frontend/.vite/
 frontend/*.tsbuildinfo
-frontend/vite.config.js
-frontend/vite.config.d.ts
+frontend/.tsbuild-node/
 
 # editors / OS
 .idea/
