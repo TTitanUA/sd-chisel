@@ -1,0 +1,144 @@
+/* Full-height create/edit form in library detail column (from mvp lib-form + libv2-create) */
+
+.page {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+  background: var(--bg);
+  border: var(--stroke-thin) solid var(--border);
+  border-radius: var(--r-sm, 6px);
+  overflow: hidden;
+  margin-top: 4px;
+}
+
+.head {
+  padding: 20px 36px 14px;
+  border-bottom: var(--stroke-thin) solid var(--border);
+  flex-shrink: 0;
+}
+
+.title {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 500;
+  font-family: var(--font-mono);
+  color: var(--text);
+  letter-spacing: -0.01em;
+}
+
+.body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0 0 32px;
+  min-height: 0;
+}
+
+.foot {
+  flex-shrink: 0;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 14px 36px;
+  background: var(--bg);
+  border-top: var(--stroke-thin) solid var(--border);
+}
+
+.section {
+  display: grid;
+  grid-template-columns: 200px 1fr;
+  gap: 32px 48px;
+  padding: 24px 36px;
+  border-bottom: var(--stroke-thin) solid var(--border);
+  align-items: start;
+}
+
+.section:last-of-type {
+  border-bottom: none;
+}
+
+.sectionHead {
+  min-width: 0;
+}
+
+.sectionTitle {
+  margin: 0 0 4px;
+  font-family: var(--font-display);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.sectionSub {
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.5;
+  margin: 0;
+}
+
+.sectionFields {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+
+.grid2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.pillGroup {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 28px;
+  padding: 0 12px;
+  font-size: 12.5px;
+  color: var(--text-muted);
+  background: var(--bg-raised);
+  border: var(--stroke-thin) solid var(--border);
+  border-radius: var(--r-sm, 6px);
+  cursor: pointer;
+  font-family: var(--font-ui);
+}
+
+.pill:hover {
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+
+.pillOn {
+  background: var(--accent-subtle);
+  border-color: color-mix(in oklab, var(--accent) 30%, var(--border));
+  color: var(--accent);
+}
+
+.caption {
+  font-size: 11px;
+  color: var(--text-subtle);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  margin-bottom: 8px;
+}
+
+.fieldError {
+  color: var(--danger);
+  font-size: 11px;
+  margin-top: 5px;
+}
+
+@media (max-width: 800px) {
+  .section {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+}

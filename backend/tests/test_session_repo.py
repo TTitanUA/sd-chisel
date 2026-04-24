@@ -77,11 +77,11 @@ def test_update_session_missing_returns_none(conn):
 def test_pinned_loras_replace_semantics(conn):
     library_repo.create_lora(
         conn, name="a", display_name="A", description="x",
-        tags=[], trigger_words=[], family_compat=[],
+        tags=[], trigger_words=[], family_id="sdxl",
     )
     library_repo.create_lora(
         conn, name="b", display_name="B", description="x",
-        tags=[], trigger_words=[], family_compat=[],
+        tags=[], trigger_words=[], family_id="sdxl",
     )
     p = session_repo.create_project(conn, name="P")
     s = session_repo.create_session(conn, project_id=p["id"])
@@ -114,7 +114,7 @@ def test_source_image_set_and_clear(conn):
 def test_get_session_with_pinned_hydrates_list(conn):
     library_repo.create_lora(
         conn, name="a", display_name="A", description="x",
-        tags=[], trigger_words=[], family_compat=[],
+        tags=[], trigger_words=[], family_id="sdxl",
     )
     p = session_repo.create_project(conn, name="P")
     s = session_repo.create_session(conn, project_id=p["id"])

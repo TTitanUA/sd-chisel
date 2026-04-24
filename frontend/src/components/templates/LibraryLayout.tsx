@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
-import { NavLink } from "react-router-dom";
+import { Link, NavLink } from "react-router-dom";
 import { useFamilies, useLoras, useModels } from "@/api/library";
+import { Icon } from "@/components/atoms/Icon";
 import styles from "./LibraryLayout.module.css";
 
 export function LibraryLayout({ children }: { children: ReactNode }) {
@@ -43,6 +44,11 @@ export function LibraryLayout({ children }: { children: ReactNode }) {
           <span>Families</span>
           <span className={styles.count}>{fCount === undefined ? "—" : fCount}</span>
         </NavLink>
+        <div className={styles.navSpacer} />
+        <Link to="/" className={styles.backLink}>
+          <Icon name="ChevronLeft" size={10} strokeWidth={2} />
+          Back
+        </Link>
       </nav>
       <div className={styles.libraryBody}>{children}</div>
     </div>

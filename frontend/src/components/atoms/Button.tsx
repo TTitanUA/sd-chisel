@@ -2,7 +2,7 @@ import { forwardRef, type ButtonHTMLAttributes, type ReactNode } from "react";
 import styles from "./Button.module.css";
 
 type Props = ButtonHTMLAttributes<HTMLButtonElement> & {
-  variant?: "secondary" | "primary";
+  variant?: "secondary" | "primary" | "ghost";
   size?: "sm" | "md" | "lg";
   icon?: ReactNode;
 };
@@ -12,6 +12,7 @@ export const Button = forwardRef<HTMLButtonElement, Props>(
     const cls = [
       styles.button,
       variant === "primary" ? styles.primary : null,
+      variant === "ghost" ? styles.ghost : null,
       size === "sm" ? styles.sm : size === "lg" ? styles.lg : null,
       className,
     ]

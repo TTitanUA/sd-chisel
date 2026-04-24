@@ -88,24 +88,20 @@ def run_dev_seed(
         if lib.get_lora(conn, name):
             lora_s += 1
             continue
-        raw_fc = row.get("family_compat") or []
-        if not isinstance(raw_fc, list):
-            warnings.append(f"lora {name!r}: family_compat is not a list; skipped")
+        raw_fid = row.get("family_id")
+        if raw_fid is None or (isinstance(raw_fid, str) and not raw_fid.strip()):
+            warnings.append(f"lora {name!r}: family_id is required; skipped")
             lora_s += 1
             continue
-        fc = [str(x) for x in raw_fc]
-        missing = [x for x in fc if x not in fam_ids]
-        if missing:
+        family_id = str(raw_fid).strip()
+        if family_id not in fam_ids:
             warnings.append(
-                f"lora {name!r}: family_compat references unknown families {missing!r}; skipped"
+                f"lora {name!r}: family_id {family_id!r} not in mvp FAMILIES; skipped"
             )
             lora_s += 1
             continue
-        missing_db = [x for x in fc if lib.get_family(conn, x) is None]
-        if missing_db:
-            warnings.append(
-                f"lora {name!r}: families missing in DB {missing_db!r}; skipped"
-            )
+        if lib.get_family(conn, family_id) is None:
+            warnings.append(f"lora {name!r}: family missing in DB {family_id!r}; skipped")
             lora_s += 1
             continue
 
@@ -124,7 +120,7 @@ def run_dev_seed(
             description=str(row["description"]),
             tags=[str(t) for t in tags],
             trigger_words=[str(t) for t in triggers],
-            family_compat=fc,
+            family_id=family_id,
             recommended_weight=float(rw) if rw is not None else None,
             author=None if row.get("author") is None else str(row["author"]),
             version=None if row.get("version") is None else str(row["version"]),

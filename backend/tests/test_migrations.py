@@ -30,7 +30,7 @@ def test_apply_pending_creates_schema_migrations_and_runs_all(fresh_conn, tmp_pa
     )}
     expected = {
         "schema_migrations",
-        "families", "models", "loras", "lora_family_compat",
+        "families", "models", "loras",
         "lora_vec_map",
         "projects", "sessions", "session_pinned_loras",
         "messages", "prompts",

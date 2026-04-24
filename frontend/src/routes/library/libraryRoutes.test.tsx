@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import FamiliesRoute from "./families";
 import ModelsRoute from "./models";
@@ -50,7 +50,7 @@ describe("library routes", () => {
 
     renderRoute(<ModelsRoute />);
     await waitFor(() => {
-      expect(screen.getAllByText("Juggernaut").length).toBeGreaterThan(0);
+      expect(screen.getAllByText("juggernaut").length).toBeGreaterThan(0);
     });
     expect(screen.getByText(/General model/)).toBeInTheDocument();
   });
@@ -67,7 +67,7 @@ describe("library routes", () => {
           description: "Rim light",
           tags: ["light"],
           trigger_words: ["cinematic light"],
-          family_compat: ["sdxl"],
+          family_id: "sdxl",
           recommended_weight: 0.8,
           author: null,
           version: null,
@@ -80,8 +80,75 @@ describe("library routes", () => {
 
     renderRoute(<LorasRoute />);
     await waitFor(() => {
-      expect(screen.getAllByText("Cinematic Light").length).toBeGreaterThan(0);
+      expect(screen.getAllByText("cinematic_light").length).toBeGreaterThan(0);
     });
     expect(screen.getByText(/Rim light/)).toBeInTheDocument();
+  });
+
+  it("replaces family filter when choosing another family (LoRA, like models)", async () => {
+    vi.stubGlobal("fetch", vi.fn((url: string) => {
+      if (url.includes("/families")) {
+        return json([
+          { id: "sdxl", display_name: "SDXL", prompt_guide: "A", created_at: 1, updated_at: 1 },
+          { id: "sd1", display_name: "SD1", prompt_guide: "B", created_at: 1, updated_at: 1 },
+        ]);
+      }
+      return json([
+        {
+          name: "lora_sdxl",
+          display_name: "LoRA SDXL",
+          description: "for sdxl",
+          tags: [],
+          trigger_words: [],
+          family_id: "sdxl",
+          recommended_weight: 0.8,
+          author: null,
+          version: null,
+          source_url: null,
+          created_at: 1,
+          updated_at: 1,
+        },
+        {
+          name: "lora_sd1",
+          display_name: "LoRA SD1",
+          description: "for sd1",
+          tags: [],
+          trigger_words: [],
+          family_id: "sd1",
+          recommended_weight: 0.7,
+          author: null,
+          version: null,
+          source_url: null,
+          created_at: 1,
+          updated_at: 1,
+        },
+      ]);
+    }));
+
+    renderRoute(<LorasRoute />);
+    const list = await screen.findByRole("complementary", { name: "LoRA list" });
+    await waitFor(() => {
+      expect(within(list).getAllByText("lora_sdxl").length).toBeGreaterThan(0);
+    });
+    expect(within(list).getByText("lora_sd1")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Family" }));
+    const dialog1 = await screen.findByRole("dialog", { name: "Filter by family" });
+    fireEvent.click(within(dialog1).getByText("SDXL"));
+    await waitFor(() => {
+      expect(within(list).getByText("1 of 2")).toBeInTheDocument();
+    });
+    expect(within(list).getByText("lora_sdxl")).toBeInTheDocument();
+    expect(within(list).queryByText("lora_sd1")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Family" }));
+    const dialog2 = await screen.findByRole("dialog", { name: "Filter by family" });
+    fireEvent.click(within(dialog2).getByText("SD1"));
+    await waitFor(() => {
+      expect(within(list).getByText("1 of 2")).toBeInTheDocument();
+    });
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    expect(within(list).getByText("lora_sd1")).toBeInTheDocument();
+    expect(within(list).queryByText("lora_sdxl")).not.toBeInTheDocument();
   });
 });

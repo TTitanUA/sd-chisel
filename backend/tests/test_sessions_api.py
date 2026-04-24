@@ -17,7 +17,7 @@ def conn(tmp_path):
     library_repo.create_lora(
         c, name="cinematic_light", display_name="Cinematic Light",
         description="x", tags=["light"], trigger_words=["cinematic light"],
-        family_compat=["sdxl"], recommended_weight=0.8,
+        family_id="sdxl", recommended_weight=0.8,
     )
     yield c
     c.close()

@@ -33,7 +33,7 @@ export type Lora = {
   description: string;
   tags: string[];
   trigger_words: string[];
-  family_compat: string[];
+  family_id: string;
   recommended_weight: number | null;
   author: string | null;
   version: string | null;

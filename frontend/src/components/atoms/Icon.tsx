@@ -1,10 +1,34 @@
 import {
-  Check, ChevronDown, Copy, Folder, Link, Pin, Plus, Settings, Trash2, X,
+  Check,
+  ChevronDown,
+  ChevronLeft,
+  Copy,
+  Folder,
+  Link,
+  Pencil,
+  Pin,
+  Plus,
+  Search,
+  Settings,
+  Trash2,
+  X,
   type LucideIcon,
 } from "lucide-react";
 
 const ICONS = {
-  Check, ChevronDown, Copy, Folder, Link, Pin, Plus, Settings, Trash2, X,
+  Check,
+  ChevronDown,
+  ChevronLeft,
+  Copy,
+  Folder,
+  Link,
+  Pencil,
+  Pin,
+  Plus,
+  Search,
+  Settings,
+  Trash2,
+  X,
 } as const satisfies Record<string, LucideIcon>;
 
 export type IconName = keyof typeof ICONS;

@@ -92,7 +92,7 @@ function App() {
       });
       // naive retrieval: pick 2-3 LoRAs matching model family
       const fam = MODELS.find(m => m.name === activeSession.model_name)?.family_id;
-      const candidates = LORAS.filter(l => l.family_compat.includes(fam) && !pinned.find(p => p.name === l.name));
+      const candidates = LORAS.filter(l => l.family_id === fam && !pinned.find(p => p.name === l.name));
       const picked = shuffle(candidates).slice(0, 3).map(l => ({
         name: l.name, weight: l.recommended_weight, kind: 'retrieved'
       }));

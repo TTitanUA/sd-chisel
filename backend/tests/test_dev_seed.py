@@ -17,7 +17,7 @@ const MODELS = [
   { name: 'm1', display_name: 'M1', family_id: 'sdxl', description: 'd', author: 'a', version: '1' },
 ];
 const LORAS = [
-  { name: 'l1', display_name: 'L1', family_compat: ['sdxl'], tags: ['t'], trigger_words: ['tw'], recommended_weight: 0.5, author: 'x', description: 'desc' },
+  { name: 'l1', display_name: 'L1', family_id: 'sdxl', tags: ['t'], trigger_words: ['tw'], recommended_weight: 0.5, author: 'x', description: 'desc' },
 ];
 """
 
@@ -52,7 +52,7 @@ def test_load_real_mvp_data_js():
     assert len(loras) == 50
 
 
-def test_run_dev_seed_inserts_and_compat_rows(conn, tmp_path):
+def test_run_dev_seed_inserts_lora_family(conn, tmp_path):
     p = tmp_path / "data.js"
     p.write_text(MINIMAL_DATA_JS, encoding="utf-8")
     stats = run_dev_seed(conn, data_js=p)
@@ -69,9 +69,9 @@ def test_run_dev_seed_inserts_and_compat_rows(conn, tmp_path):
 
     lora = library_repo.get_lora(conn, "l1")
     assert lora is not None
-    assert lora["family_compat"] == ["sdxl"]
-    rows = list(conn.execute("SELECT family_id FROM lora_family_compat WHERE lora_name = ?", ("l1",)))
-    assert [r[0] for r in rows] == ["sdxl"]
+    assert lora["family_id"] == "sdxl"
+    row = conn.execute("SELECT family_id FROM loras WHERE name = ?", ("l1",)).fetchone()
+    assert row is not None and row[0] == "sdxl"
 
 
 def test_run_dev_seed_idempotent(conn, tmp_path):
@@ -94,7 +94,7 @@ const MODELS = [
   { name: 'bad_m', display_name: 'Bad', family_id: 'missing', description: 'd' },
 ];
 const LORAS = [
-  { name: 'l2', display_name: 'L2', family_compat: ['sdxl'], tags: [], trigger_words: [], description: 'x' },
+  { name: 'l2', display_name: 'L2', family_id: 'sdxl', tags: [], trigger_words: [], description: 'x' },
 ];
 """
     p = tmp_path / "data.js"

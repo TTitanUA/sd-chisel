@@ -1,7 +1,9 @@
 import { useState } from "react";
 import { Button } from "@/components/atoms/Button";
-import { Badge } from "@/components/atoms/Badge";
+import { Icon } from "@/components/atoms/Icon";
 import { TextInput } from "@/components/molecules/FormField";
+import { LibraryFormPage, LibraryFormSection } from "@/components/organisms/LibraryFormSection";
+import libForm from "@/components/organisms/libraryForm.module.css";
 import { MarkdownField } from "@/components/molecules/MarkdownField";
 import { TextListInput } from "@/components/molecules/TextListInput";
 import type { Family, Lora, LoraCreate, LoraUpdate } from "@/api/library";
@@ -24,7 +26,7 @@ export function LoraForm({
   const [description, setDescription] = useState(lora?.description ?? "");
   const [tags, setTags] = useState<string[]>(lora?.tags ?? []);
   const [triggerWords, setTriggerWords] = useState<string[]>(lora?.trigger_words ?? []);
-  const [familyCompat, setFamilyCompat] = useState<string[]>(lora?.family_compat ?? []);
+  const [familyId, setFamilyId] = useState(lora?.family_id ?? families[0]?.id ?? "");
   const [recommendedWeight, setRecommendedWeight] = useState(
     lora?.recommended_weight === null || lora?.recommended_weight === undefined
       ? ""
@@ -34,17 +36,14 @@ export function LoraForm({
   const [version, setVersion] = useState(lora?.version ?? "");
   const [sourceUrl, setSourceUrl] = useState(lora?.source_url ?? "");
 
+  const isEdit = Boolean(lora);
+  const pageTitle = isEdit && lora ? `Edit · ${lora.name}` : "New LoRA";
+
   const canSave =
     displayName.trim() !== "" &&
     description.trim() !== "" &&
-    familyCompat.length > 0 &&
+    familyId !== "" &&
     (Boolean(lora) || name.trim() !== "");
-
-  function toggleFamily(id: string) {
-    setFamilyCompat((current) =>
-      current.includes(id) ? current.filter((value) => value !== id) : [...current, id],
-    );
-  }
 
   return (
     <form
@@ -57,7 +56,7 @@ export function LoraForm({
           description: description.trim(),
           tags,
           trigger_words: triggerWords,
-          family_compat: familyCompat,
+          family_id: familyId,
           recommended_weight: Number.isFinite(weight) ? weight : null,
           author: author.trim() || null,
           version: version.trim() || null,
@@ -66,57 +65,90 @@ export function LoraForm({
         onSubmit(lora ? common : { name: name.trim(), ...common });
       }}
     >
-      {!lora && <TextInput label="Name" value={name} onChange={(event) => setName(event.currentTarget.value)} />}
-      <TextInput
-        label="Display name"
-        value={displayName}
-        onChange={(event) => setDisplayName(event.currentTarget.value)}
-      />
-      <MarkdownField
-        label="Description"
-        value={description}
-        onChange={setDescription}
-        hint="Markdown. LLM sees this when picking LoRAs."
-      />
-      <TextListInput label="Tags" value={tags} onChange={setTags} placeholder="detail, light, portrait" />
-      <TextListInput
-        label="Trigger words"
-        value={triggerWords}
-        onChange={setTriggerWords}
-        placeholder="cinematic light, rim light"
-      />
-      <div>
-        <div style={{ marginBottom: 8 }}>Family compatibility</div>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-          {families.map((family) => (
-            <button type="button" key={family.id} onClick={() => toggleFamily(family.id)}>
-              <Badge variant={familyCompat.includes(family.id) ? "accent" : "neutral"}>
-                {family.display_name}
-              </Badge>
-            </button>
-          ))}
-        </div>
-      </div>
-      <TextInput
-        label="Recommended weight"
-        type="number"
-        step="0.05"
-        min="-2"
-        max="2"
-        value={recommendedWeight}
-        onChange={(event) => setRecommendedWeight(event.currentTarget.value)}
-      />
-      <TextInput label="Author" value={author} onChange={(event) => setAuthor(event.currentTarget.value)} />
-      <TextInput label="Version" value={version} onChange={(event) => setVersion(event.currentTarget.value)} />
-      <TextInput label="Source URL" value={sourceUrl} onChange={(event) => setSourceUrl(event.currentTarget.value)} />
-      <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
-        <Button type="button" onClick={onCancel}>
-          Cancel
-        </Button>
-        <Button type="submit" variant="primary" disabled={!canSave || isSaving}>
-          {isSaving ? "Saving..." : "Save"}
-        </Button>
-      </div>
+      <LibraryFormPage
+        title={pageTitle}
+        foot={
+          <>
+            <Button type="button" variant="secondary" onClick={onCancel}>
+              Cancel
+            </Button>
+            <Button type="submit" variant="primary" disabled={!canSave || isSaving} icon={<Icon name="Check" />}>
+              {isSaving ? "Saving…" : isEdit ? "Save changes" : "Create LoRA"}
+            </Button>
+          </>
+        }
+      >
+        <LibraryFormSection
+          title="Identity"
+          subtitle="Filename and display info. LLM uses description when choosing LoRAs."
+        >
+          {!lora && <TextInput label="Name" value={name} onChange={(e) => setName(e.currentTarget.value)} />}
+          <TextInput
+            label="Display name"
+            value={displayName}
+            onChange={(e) => setDisplayName(e.currentTarget.value)}
+          />
+          <div className={libForm.grid2}>
+            <TextInput label="Author" value={author} onChange={(e) => setAuthor(e.currentTarget.value)} />
+            <TextInput label="Version" value={version} onChange={(e) => setVersion(e.currentTarget.value)} />
+          </div>
+          <TextInput
+            label="Source URL"
+            value={sourceUrl}
+            onChange={(e) => setSourceUrl(e.currentTarget.value)}
+            placeholder="https://…"
+          />
+        </LibraryFormSection>
+
+        <LibraryFormSection title="Family" subtitle="Which base family this LoRA is for.">
+          <div>
+            <div className={libForm.caption}>Family</div>
+            <div className={libForm.pillGroup}>
+              {families.map((f) => (
+                <button
+                  key={f.id}
+                  type="button"
+                  className={`${libForm.pill} ${familyId === f.id ? libForm.pillOn : ""}`}
+                  onClick={() => setFamilyId(f.id)}
+                >
+                  {familyId === f.id && <Icon name="Check" size={10} />}
+                  {f.display_name}
+                </button>
+              ))}
+            </div>
+            {familyId === "" && <div className={libForm.fieldError}>Select a family</div>}
+          </div>
+          <TextInput
+            label="Recommended weight"
+            type="number"
+            step="0.05"
+            min="-2"
+            max="2"
+            value={recommendedWeight}
+            onChange={(e) => setRecommendedWeight(e.currentTarget.value)}
+            hint="Typical 0.5–0.9 depending on the asset."
+          />
+        </LibraryFormSection>
+
+        <LibraryFormSection title="Taxonomy" subtitle="Tags and trigger words for retrieval.">
+          <TextListInput label="Tags" value={tags} onChange={setTags} placeholder="detail, light, portrait" />
+          <TextListInput
+            label="Trigger words"
+            value={triggerWords}
+            onChange={setTriggerWords}
+            placeholder="cinematic light, rim light"
+          />
+        </LibraryFormSection>
+
+        <LibraryFormSection title="Description" subtitle="Markdown. LLM sees this verbatim.">
+          <MarkdownField
+            label="Content"
+            value={description}
+            onChange={setDescription}
+            hint="Be specific: quality, incompatibilities, and when to use."
+          />
+        </LibraryFormSection>
+      </LibraryFormPage>
     </form>
   );
 }

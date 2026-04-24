@@ -105,15 +105,9 @@ CREATE TABLE loras (
   author              TEXT,
   version             TEXT,
   source_url          TEXT,
+  family_id           TEXT NOT NULL REFERENCES families(id) ON DELETE RESTRICT,
   created_at          INTEGER NOT NULL,
   updated_at          INTEGER NOT NULL
-);
-
--- M:N совместимость LoRA ↔ семейства
-CREATE TABLE lora_family_compat (
-  lora_name  TEXT NOT NULL REFERENCES loras(name)  ON DELETE CASCADE,
-  family_id  TEXT NOT NULL REFERENCES families(id) ON DELETE RESTRICT,
-  PRIMARY KEY (lora_name, family_id)
 );
 
 -- Вектор-индекс
@@ -136,7 +130,7 @@ CREATE TABLE lora_vec_map (
 - `tags` и `trigger_words` — JSON-массивы, фильтрация через `json_each()`.
   Нормализация в junction-таблицы отложена до реальной потребности (статистика,
   производительность на 10K+ LoRA).
-- Удаление LoRA → CASCADE в `lora_family_compat` и `lora_vec_map`; строку в
+- Удаление LoRA → CASCADE в `lora_vec_map`; строку в
   `vec_loras` дропаем явно в той же транзакции.
 - Удаление family блокируется RESTRICT, пока на него есть ссылки.
 - `author`, `version`, `source_url` — всё опционально.

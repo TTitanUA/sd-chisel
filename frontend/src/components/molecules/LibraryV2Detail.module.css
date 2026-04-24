@@ -1,0 +1,83 @@
+/* Detail column — v2 master-detail (aligned with mvp-ui-mock libv2-detail) */
+
+.meta {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--s-5, 20px);
+  padding: 18px 0;
+  border-bottom: var(--stroke-thin) solid var(--border);
+}
+
+.metaCell {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.labelCaps {
+  font-size: var(--text-2xs, 10px);
+  letter-spacing: var(--tracking-caps, 0.08em);
+  text-transform: uppercase;
+  color: var(--text-subtle);
+  font-weight: 600;
+}
+
+.metaValue {
+  font-size: 13px;
+  color: var(--text-muted);
+  min-width: 0;
+}
+
+.block {
+  display: flex;
+  gap: var(--s-6, 24px);
+  padding: 18px 0;
+  border-bottom: var(--stroke-thin) solid var(--border);
+  align-items: flex-start;
+}
+
+.blockLast {
+  border-bottom: none;
+}
+
+.blockLabel {
+  width: 120px;
+  flex-shrink: 0;
+  padding-top: 3px;
+}
+
+.blockBody {
+  flex: 1;
+  min-width: 0;
+}
+
+.desc {
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-muted);
+  white-space: pre-wrap;
+  margin: 0;
+}
+
+.codeRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.code {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs, 11px);
+  color: var(--text-muted);
+  background: var(--surface);
+  padding: 1px 5px;
+  border-radius: var(--r-xs, 4px);
+  border: var(--stroke-hair) solid var(--border);
+}
+
+@media (max-width: 900px) {
+  .meta {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

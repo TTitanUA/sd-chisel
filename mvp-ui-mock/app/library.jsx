@@ -65,7 +65,7 @@ function LorasTab({ loras, families, onSave, onDelete }) {
   const filtered = loras.filter(r => {
     if (search && !(r.name + ' ' + r.tags.join(' ') + ' ' + r.trigger_words.join(' ')).toLowerCase().includes(search.toLowerCase())) return false;
     return filters.every(f =>
-      f.kind === 'family' ? r.family_compat.includes(f.value) :
+      f.kind === 'family' ? r.family_id === f.value :
       f.kind === 'tag' ? r.tags.includes(f.value) : true
     );
   });
@@ -116,7 +116,7 @@ function LorasTab({ loras, families, onSave, onDelete }) {
                   <div className="libv2-popover-items">
                     {families.map(f => (
                       <button key={f.id} className="libv2-popover-row"
-                        onClick={() => { setFilters([...filters, { kind: 'family', value: f.id }]); setPopoverOpen(false); }}>
+                        onClick={() => { setFilters([...filters.filter((x) => x.kind !== 'family'), { kind: 'family', value: f.id }]); setPopoverOpen(false); }}>
                         {f.display_name}
                       </button>
                     ))}
@@ -149,7 +149,7 @@ function LorasTab({ loras, families, onSave, onDelete }) {
               className={'libv2-row' + (r.name === item?.name ? ' is-selected' : '')}>
               <div className="libv2-row-top">
                 <span className="libv2-row-name">{r.name}</span>
-                <span className="libv2-row-family">{r.family_compat[0]}</span>
+                <span className="libv2-row-family">{r.family_id}</span>
               </div>
               <div className="libv2-row-tags">
                 {r.tags.slice(0,2).map(t => <span key={t} className="libv2-row-tag">{t}</span>)}
@@ -188,8 +188,8 @@ function LoraDetail({ item, onEdit, onDelete }) {
       </div>
       <div className="libv2-detail-meta">
         <div className="libv2-detail-meta-cell">
-          <span className="ds-label-caps">Families</span>
-          <div className="ds-hstack" style={{gap:4}}>{item.family_compat.map(f => <Badge key={f} variant="neutral">{f.toUpperCase()}</Badge>)}</div>
+          <span className="ds-label-caps">Family</span>
+          <div className="ds-hstack" style={{gap:4}}><Badge variant="neutral">{item.family_id.toUpperCase()}</Badge></div>
         </div>
         <div className="libv2-detail-meta-cell">
           <span className="ds-label-caps">Weight · rec.</span>
@@ -235,7 +235,7 @@ function LoraForm({ item, families, onSave, onCancel }) {
   const isEdit = !!item;
   const [form, setForm] = useLS(item ? { ...item } : {
     name: '', display_name: '', author: '', version: '', source_url: '',
-    family_compat: [], recommended_weight: 0.75,
+    family_id: (families[0] && families[0].id) || '', recommended_weight: 0.75,
     tags: [], trigger_words: [], description: '',
     updated: 'just now',
   });
@@ -245,11 +245,7 @@ function LoraForm({ item, families, onSave, onCancel }) {
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
-  const toggleFamily = (id) => {
-    set('family_compat', form.family_compat.includes(id)
-      ? form.family_compat.filter(x => x !== id)
-      : [...form.family_compat, id]);
-  };
+  const setFamily = (id) => set('family_id', id);
 
   const addTag = (val) => {
     const t = val.trim().toLowerCase();
@@ -266,7 +262,7 @@ function LoraForm({ item, families, onSave, onCancel }) {
     const e = {};
     if (!form.name.trim()) e.name = 'Required';
     if (!form.description.trim()) e.description = 'Required — LLM sees this verbatim';
-    if (form.family_compat.length === 0) e.family_compat = 'Select at least one family';
+    if (!form.family_id) e.family_id = 'Select a family';
     setErrors(e);
     return Object.keys(e).length === 0;
   };
@@ -300,20 +296,20 @@ function LoraForm({ item, families, onSave, onCancel }) {
             value={form.source_url} onChange={e => set('source_url', e.target.value)} />
         </FormSection>
 
-        <FormSection title="Compatibility" sub="Which families this LoRA works with.">
+        <FormSection title="Family" sub="Which base family this LoRA is for.">
           <div>
-            <div className="ds-label-caps" style={{ marginBottom: 8 }}>Families (multi-select)</div>
+            <div className="ds-label-caps" style={{ marginBottom: 8 }}>Family</div>
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
               {families.map(f => (
                 <button key={f.id}
-                  className={'libv2-pill' + (form.family_compat.includes(f.id) ? ' is-on' : '')}
-                  onClick={() => toggleFamily(f.id)}>
-                  {form.family_compat.includes(f.id) && <Icon name="Check" size={10} />}
+                  className={'libv2-pill' + (form.family_id === f.id ? ' is-on' : '')}
+                  onClick={() => setFamily(f.id)}>
+                  {form.family_id === f.id && <Icon name="Check" size={10} />}
                   {f.display_name}
                 </button>
               ))}
             </div>
-            {errors.family_compat && <div style={{ color: 'var(--danger)', fontSize: 11, marginTop: 5 }}>{errors.family_compat}</div>}
+            {errors.family_id && <div style={{ color: 'var(--danger)', fontSize: 11, marginTop: 5 }}>{errors.family_id}</div>}
           </div>
           <div>
             <div className="ds-label-caps" style={{ marginBottom: 8 }}>Recommended weight</div>

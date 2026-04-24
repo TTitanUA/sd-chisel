@@ -54,6 +54,28 @@
   border-color: var(--border);
 }
 
+.navSpacer {
+  flex: 1;
+  min-height: 8px;
+}
+
+.backLink {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 9px;
+  font-size: 12px;
+  color: var(--text-muted);
+  text-decoration: none;
+  border-radius: var(--r-xs, 4px);
+  opacity: 0.85;
+}
+
+.backLink:hover {
+  color: var(--text);
+  background: var(--surface, var(--surface-alt));
+}
+
 .count {
   margin-left: auto;
   font-family: var(--font-mono, ui-monospace, monospace);

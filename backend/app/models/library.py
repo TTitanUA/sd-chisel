@@ -63,7 +63,7 @@ class LoraOut(StrictModel):
     description: str
     tags: list[str]
     trigger_words: list[str]
-    family_compat: list[str]
+    family_id: str
     recommended_weight: float | None
     author: str | None
     version: str | None
@@ -78,7 +78,7 @@ class LoraCreate(StrictModel):
     description: str = Field(min_length=1)
     tags: list[str] = Field(default_factory=list)
     trigger_words: list[str] = Field(default_factory=list)
-    family_compat: list[str] = Field(default_factory=list)
+    family_id: str = Field(min_length=1)
     recommended_weight: float | None = Field(default=None, ge=-2.0, le=2.0)
     author: str | None = None
     version: str | None = None
@@ -90,7 +90,7 @@ class LoraUpdate(StrictModel):
     description: str = Field(min_length=1)
     tags: list[str] = Field(default_factory=list)
     trigger_words: list[str] = Field(default_factory=list)
-    family_compat: list[str] = Field(default_factory=list)
+    family_id: str = Field(min_length=1)
     recommended_weight: float | None = Field(default=None, ge=-2.0, le=2.0)
     author: str | None = None
     version: str | None = None

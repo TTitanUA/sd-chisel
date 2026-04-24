@@ -90,7 +90,7 @@ function SessionDrawer({ session, lorasByName, models, onClose, onSave }) {
                 {availableLoras.slice(0, 8).map(l => (
                   <button key={l.name} className="item" onClick={() => { togglePin(l.name); setLoraSearch(''); }}>
                     <span>{l.name}</span>
-                    <span className="fam">{l.family_compat[0]}</span>
+                    <span className="fam">{l.family_id}</span>
                   </button>
                 ))}
                 {availableLoras.length === 0 && (

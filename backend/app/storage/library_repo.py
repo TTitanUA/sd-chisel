@@ -161,13 +161,6 @@ def _hydrate_lora(conn: sqlite3.Connection, row: sqlite3.Row) -> dict[str, Any]:
     d = dict(row)
     d["tags"] = json.loads(d.get("tags") or "[]")
     d["trigger_words"] = json.loads(d.get("trigger_words") or "[]")
-    d["family_compat"] = [
-        r[0]
-        for r in conn.execute(
-            "SELECT family_id FROM lora_family_compat WHERE lora_name = ? ORDER BY family_id",
-            (row["name"],),
-        )
-    ]
     return d
 
 
@@ -181,10 +174,7 @@ def list_loras(
     clauses: list[str] = []
     params: list[Any] = []
     if family_id:
-        clauses.append(
-            "EXISTS (SELECT 1 FROM lora_family_compat c "
-            "WHERE c.lora_name = loras.name AND c.family_id = ?)"
-        )
+        clauses.append("family_id = ?")
         params.append(family_id)
     if tag:
         clauses.append("EXISTS (SELECT 1 FROM json_each(loras.tags) WHERE value = ?)")
@@ -216,7 +206,7 @@ def create_lora(
     description: str,
     tags: list[str],
     trigger_words: list[str],
-    family_compat: list[str],
+    family_id: str,
     recommended_weight: float | None = None,
     author: str | None = None,
     version: str | None = None,
@@ -227,8 +217,8 @@ def create_lora(
         conn.execute("BEGIN")
         conn.execute(
             "INSERT INTO loras(name, display_name, description, tags, trigger_words, "
-            "recommended_weight, author, version, source_url, created_at, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "recommended_weight, author, version, source_url, created_at, updated_at, family_id) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 name,
                 display_name,
@@ -241,13 +231,9 @@ def create_lora(
                 source_url,
                 now,
                 now,
+                family_id,
             ),
         )
-        for fam in family_compat:
-            conn.execute(
-                "INSERT INTO lora_family_compat(lora_name, family_id) VALUES (?, ?)",
-                (name, fam),
-            )
         conn.execute("COMMIT")
     except Exception:
         try:
@@ -266,7 +252,7 @@ def update_lora(
     description: str,
     tags: list[str],
     trigger_words: list[str],
-    family_compat: list[str],
+    family_id: str,
     recommended_weight: float | None = None,
     author: str | None = None,
     version: str | None = None,
@@ -277,7 +263,7 @@ def update_lora(
         conn.execute("BEGIN")
         cur = conn.execute(
             "UPDATE loras SET display_name = ?, description = ?, tags = ?, trigger_words = ?, "
-            "recommended_weight = ?, author = ?, version = ?, source_url = ?, updated_at = ? "
+            "recommended_weight = ?, author = ?, version = ?, source_url = ?, updated_at = ?, family_id = ? "
             "WHERE name = ?",
             (
                 display_name,
@@ -289,18 +275,13 @@ def update_lora(
                 version,
                 source_url,
                 now,
+                family_id,
                 name,
             ),
         )
         if cur.rowcount == 0:
             conn.execute("ROLLBACK")
             return None
-        conn.execute("DELETE FROM lora_family_compat WHERE lora_name = ?", (name,))
-        for fam in family_compat:
-            conn.execute(
-                "INSERT INTO lora_family_compat(lora_name, family_id) VALUES (?, ?)",
-                (name, fam),
-            )
         conn.execute("COMMIT")
     except Exception:
         try:

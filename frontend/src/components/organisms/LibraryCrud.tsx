@@ -7,8 +7,10 @@ import styles from "./LibraryCrud.module.css";
 export type CrudMode = "detail" | "create" | "edit";
 
 export function LibraryCrud({
-  title,
-  count,
+  listTitle,
+  filteredCount,
+  totalCount,
+  searchPlaceholder,
   search,
   onSearch,
   items,
@@ -18,12 +20,18 @@ export function LibraryCrud({
   mode,
   detailTitle,
   detailEyebrow,
+  detailTitleVariant = "mono",
   onEdit,
   onDelete,
+  filters,
+  emptySelection,
+  emptySelectionMessage,
   children,
 }: {
-  title: string;
-  count: number;
+  listTitle: string;
+  filteredCount: number;
+  totalCount: number;
+  searchPlaceholder?: string;
   search: string;
   onSearch: (value: string) => void;
   items: LibraryListItem[];
@@ -33,44 +41,88 @@ export function LibraryCrud({
   mode: CrudMode;
   detailTitle: string;
   detailEyebrow: string;
+  /** Detail page title uses monospace (filename / id) */
+  detailTitleVariant?: "mono" | "default";
   onEdit?: () => void;
   onDelete?: () => void;
+  filters?: ReactNode;
+  /** When in detail mode but nothing selected, show centered hint */
+  emptySelection?: boolean;
+  emptySelectionMessage?: string;
   children: ReactNode;
 }) {
+  const placeholder = searchPlaceholder ?? `Search ${listTitle.toLowerCase()}…`;
+
   return (
     <div className={styles.page}>
       <LibraryList
-        title={title}
-        count={count}
+        listTitle={listTitle}
+        filteredCount={filteredCount}
+        totalCount={totalCount}
+        searchPlaceholder={placeholder}
         search={search}
         onSearch={onSearch}
         selectedId={selectedId}
         items={items}
         onSelect={onSelect}
         onNew={onNew}
+        filters={filters}
       />
       <section className={styles.detail}>
-        <div className={styles.detailHead}>
-          <div>
-            <div className={styles.eyebrow}>{detailEyebrow}</div>
-            <h1 className={styles.title}>{detailTitle}</h1>
-          </div>
-          {mode === "detail" && (
-            <div className={styles.actions}>
-              {onDelete && (
-                <Button size="sm" icon={<Icon name="Trash2" />} onClick={onDelete}>
-                  Delete
-                </Button>
-              )}
-              {onEdit && (
-                <Button size="sm" variant="primary" onClick={onEdit}>
-                  Edit
-                </Button>
-              )}
+        {emptySelection && mode === "detail" ? (
+          <>
+            <div className={styles.form}>{children}</div>
+            <div className={styles.detailEmpty}>
+              <Icon name="Folder" size={24} aria-hidden />
+              <div className={styles.detailEmptyMsg}>
+                {emptySelectionMessage ?? `Select a ${detailEyebrow} to see details`}
+              </div>
             </div>
-          )}
-        </div>
-        <div className={mode === "detail" ? styles.body : styles.form}>{children}</div>
+          </>
+        ) : (
+          <>
+            {mode === "detail" && (
+              <div className={styles.detailHead}>
+                <div>
+                  <div className={styles.eyebrow}>{detailEyebrow}</div>
+                  <h1
+                    className={
+                      detailTitleVariant === "mono" ? `${styles.title} ${styles.titleMono}` : styles.title
+                    }
+                  >
+                    {detailTitle}
+                  </h1>
+                </div>
+                {(onDelete || onEdit) && (
+                  <div className={styles.actions}>
+                    {onDelete && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        type="button"
+                        icon={<Icon name="Trash2" />}
+                        onClick={onDelete}
+                        aria-label="Delete"
+                      />
+                    )}
+                    {onEdit && (
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        type="button"
+                        icon={<Icon name="Pencil" />}
+                        onClick={onEdit}
+                      >
+                        Edit
+                      </Button>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+            <div className={mode === "detail" ? styles.body : styles.form}>{children}</div>
+          </>
+        )}
       </section>
     </div>
   );

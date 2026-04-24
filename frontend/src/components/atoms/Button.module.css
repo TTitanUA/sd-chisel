@@ -17,6 +17,17 @@
   background: var(--surface-alt);
 }
 
+.ghost {
+  background: transparent;
+  border-color: transparent;
+  color: var(--text-muted);
+}
+
+.ghost:hover {
+  background: var(--surface);
+  color: var(--text);
+}
+
 .button:disabled {
   opacity: 0.5;
   cursor: not-allowed;

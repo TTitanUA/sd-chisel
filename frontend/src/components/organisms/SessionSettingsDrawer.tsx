@@ -123,7 +123,7 @@ export function SessionSettingsDrawer({
                     >
                       {isPinned && <Icon name="Pin" size={12} />}
                       <span className={styles.loraName}>{l.display_name}</span>
-                      <span className={styles.loraMeta}>{l.family_compat.join(", ")}</span>
+                      <span className={styles.loraMeta}>{l.family_id}</span>
                     </button>
                   );
                 })}

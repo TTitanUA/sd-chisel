@@ -10,6 +10,10 @@ import {
 } from "@/api/library";
 import { FamilyForm } from "@/components/organisms/FamilyForm";
 import { LibraryCrud, type CrudMode } from "@/components/organisms/LibraryCrud";
+import { LibraryDetailBlock, LibraryDetailMeta } from "@/components/molecules/LibraryV2Detail";
+import detailStyles from "@/components/molecules/LibraryV2Detail.module.css";
+import { formatUpdated } from "@/lib/formatUpdated";
+import listStyles from "@/components/organisms/LibraryCrud.module.css";
 
 export default function FamiliesRoute() {
   const [search, setSearch] = useState("");
@@ -18,10 +22,12 @@ export default function FamiliesRoute() {
   const invalidate = useLibraryInvalidation();
   const families = useFamilies(search);
 
+  const list = useMemo(() => families.data ?? [], [families.data]);
+  const total = list.length;
+
   const selected = useMemo(() => {
-    const rows = families.data ?? [];
-    return rows.find((family) => family.id === selectedId) ?? rows[0] ?? null;
-  }, [families.data, selectedId]);
+    return list.find((family) => family.id === selectedId) ?? list[0] ?? null;
+  }, [list, selectedId]);
 
   const create = useMutation({ mutationFn: libraryApi.createFamily, onSuccess: invalidate });
   const update = useMutation({
@@ -30,10 +36,10 @@ export default function FamiliesRoute() {
   });
   const remove = useMutation({ mutationFn: libraryApi.deleteFamily, onSuccess: invalidate });
 
-  const rows = (families.data ?? []).map((family) => ({
+  const rows = list.map((family) => ({
     id: family.id,
-    title: family.display_name,
-    meta: family.id,
+    primary: family.display_name,
+    tags: [family.id],
   }));
 
   function submit(body: FamilyCreate | FamilyUpdate) {
@@ -56,10 +62,21 @@ export default function FamiliesRoute() {
 
   const error = create.error ?? update.error ?? remove.error ?? families.error;
 
+  const detailTitle =
+    mode === "create"
+      ? "New family"
+      : mode === "edit" && selected
+        ? `Edit · ${selected.display_name}`
+        : selected?.display_name ?? "—";
+  const detailTitleVariant: "mono" | "default" =
+    mode === "detail" && selected ? "default" : mode === "edit" && selected ? "default" : "default";
+
   return (
     <LibraryCrud
-      title="Families"
-      count={families.data?.length ?? 0}
+      listTitle="Families"
+      filteredCount={total}
+      totalCount={total}
+      searchPlaceholder="Search display name, id…"
       search={search}
       onSearch={setSearch}
       items={rows}
@@ -71,15 +88,22 @@ export default function FamiliesRoute() {
       onNew={() => setMode("create")}
       mode={mode}
       detailEyebrow="Family"
-      detailTitle={mode === "create" ? "New family" : selected?.display_name ?? "No family selected"}
-      onEdit={selected ? () => setMode("edit") : undefined}
+      detailTitle={detailTitle}
+      detailTitleVariant={detailTitleVariant}
+      onEdit={selected && mode === "detail" ? () => setMode("edit") : undefined}
       onDelete={
-        selected
+        selected && mode === "detail"
           ? () => remove.mutate(selected.id, { onSuccess: () => setSelectedId(null) })
           : undefined
       }
+      emptySelection={mode === "detail" && !selected}
+      emptySelectionMessage="Select a family to see details"
     >
-      {error && <div role="alert">{String(error)}</div>}
+      {error && (
+        <div role="alert" className={listStyles.error}>
+          {String(error)}
+        </div>
+      )}
       {mode === "create" && (
         <FamilyForm onCancel={() => setMode("detail")} onSubmit={submit} isSaving={create.isPending} />
       )}
@@ -93,10 +117,25 @@ export default function FamiliesRoute() {
       )}
       {mode === "detail" && selected && (
         <>
-          <p>
-            <strong>ID:</strong> {selected.id}
-          </p>
-          <pre style={{ whiteSpace: "pre-wrap" }}>{selected.prompt_guide}</pre>
+          <LibraryDetailMeta
+            cells={[
+              {
+                label: "ID",
+                value: <code className="ds-code">{selected.id}</code>,
+              },
+              {
+                label: "Display name",
+                value: <span>{selected.display_name}</span>,
+              },
+              {
+                label: "Updated",
+                value: <span>{formatUpdated(selected.updated_at)}</span>,
+              },
+            ]}
+          />
+          <LibraryDetailBlock label="Prompt guide" isLast>
+            <p className={detailStyles.desc}>{selected.prompt_guide}</p>
+          </LibraryDetailBlock>
         </>
       )}
     </LibraryCrud>

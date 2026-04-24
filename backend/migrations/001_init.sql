@@ -32,14 +32,9 @@ CREATE TABLE loras (
   author              TEXT,
   version             TEXT,
   source_url          TEXT,
+  family_id           TEXT NOT NULL REFERENCES families(id) ON DELETE RESTRICT,
   created_at          INTEGER NOT NULL,
   updated_at          INTEGER NOT NULL
-);
-
-CREATE TABLE lora_family_compat (
-  lora_name  TEXT NOT NULL REFERENCES loras(name)  ON DELETE CASCADE,
-  family_id  TEXT NOT NULL REFERENCES families(id) ON DELETE RESTRICT,
-  PRIMARY KEY (lora_name, family_id)
 );
 
 -- sqlite-vec virtual table. Dimension 1024 = BAAI/bge-m3 (spec §7).

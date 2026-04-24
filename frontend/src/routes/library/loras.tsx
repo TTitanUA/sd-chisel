@@ -11,15 +11,29 @@ import {
   type LoraUpdate,
 } from "@/api/library";
 import { LibraryCrud, type CrudMode } from "@/components/organisms/LibraryCrud";
+import { LibraryDetailBlock, LibraryDetailMeta } from "@/components/molecules/LibraryV2Detail";
+import detailStyles from "@/components/molecules/LibraryV2Detail.module.css";
 import { LoraForm } from "@/components/organisms/LoraForm";
+import { formatUpdated } from "@/lib/formatUpdated";
+import { ModelFilterControls } from "./ModelFilterControls";
+import listStyles from "@/components/organisms/LibraryCrud.module.css";
 
 export default function LorasRoute() {
   const [search, setSearch] = useState("");
+  const [familyIdFilter, setFamilyIdFilter] = useState<string | null>(null);
   const [selectedName, setSelectedName] = useState<string | null>(null);
   const [mode, setMode] = useState<CrudMode>("detail");
   const invalidate = useLibraryInvalidation();
   const families = useFamilies();
   const loras = useLoras({ q: search });
+
+  const filteredLoras = useMemo(() => {
+    let list = loras.data ?? [];
+    if (familyIdFilter) {
+      list = list.filter((l) => l.family_id === familyIdFilter);
+    }
+    return list;
+  }, [loras.data, familyIdFilter]);
 
   const selected = useMemo(() => {
     const rows = loras.data ?? [];
@@ -48,18 +62,27 @@ export default function LorasRoute() {
     }
   }
 
-  const rows = (loras.data ?? []).map((lora) => ({
+  const rows = filteredLoras.map((lora) => ({
     id: lora.name,
-    title: lora.display_name,
-    meta: `${lora.family_compat.join(", ")} | ${lora.tags.join(", ")}`,
+    primary: lora.name,
+    rightMeta: lora.family_id.toUpperCase(),
+    tags: lora.tags.slice(0, 2),
   }));
   const familyRows = families.data ?? [];
   const error = create.error ?? update.error ?? remove.error ?? loras.error ?? families.error;
+  const total = loras.data?.length ?? 0;
+
+  const detailTitle =
+    mode === "create" ? "New LoRA" : mode === "edit" && selected ? `Edit · ${selected.name}` : selected?.name ?? "—";
+  const detailTitleVariant: "mono" | "default" =
+    mode === "detail" && selected ? "mono" : mode === "edit" && selected ? "mono" : "default";
 
   return (
     <LibraryCrud
-      title="LoRAs"
-      count={loras.data?.length ?? 0}
+      listTitle="LoRA"
+      filteredCount={filteredLoras.length}
+      totalCount={total}
+      searchPlaceholder="Search name, tag, trigger…"
       search={search}
       onSearch={setSearch}
       items={rows}
@@ -71,13 +94,29 @@ export default function LorasRoute() {
       onNew={() => setMode("create")}
       mode={mode}
       detailEyebrow="LoRA"
-      detailTitle={mode === "create" ? "New LoRA" : selected?.display_name ?? "No LoRA selected"}
-      onEdit={selected ? () => setMode("edit") : undefined}
+      detailTitle={detailTitle}
+      detailTitleVariant={detailTitleVariant}
+      onEdit={selected && mode === "detail" ? () => setMode("edit") : undefined}
       onDelete={
-        selected ? () => remove.mutate(selected.name, { onSuccess: () => setSelectedName(null) }) : undefined
+        selected && mode === "detail"
+          ? () => remove.mutate(selected.name, { onSuccess: () => setSelectedName(null) })
+          : undefined
       }
+      filters={
+        <ModelFilterControls
+          families={familyRows}
+          familyId={familyIdFilter}
+          onChange={setFamilyIdFilter}
+        />
+      }
+      emptySelection={mode === "detail" && !selected}
+      emptySelectionMessage="Select a LoRA to see details"
     >
-      {error && <div role="alert">{String(error)}</div>}
+      {error && (
+        <div role="alert" className={listStyles.error}>
+          {String(error)}
+        </div>
+      )}
       {mode === "create" && (
         <LoraForm
           families={familyRows}
@@ -97,28 +136,63 @@ export default function LorasRoute() {
       )}
       {mode === "detail" && selected && (
         <>
-          <p>
-            <strong>Name:</strong> {selected.name}
-          </p>
-          <p>
-            <strong>Weight:</strong> {selected.recommended_weight ?? "none"}
-          </p>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-            {selected.family_compat.map((family) => (
-              <Badge key={family}>{family}</Badge>
-            ))}
-          </div>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-            {selected.tags.map((tag) => (
-              <Badge key={tag} variant="accent">
-                {tag}
-              </Badge>
-            ))}
-          </div>
-          <p>
-            <strong>Triggers:</strong> {selected.trigger_words.join(", ") || "none"}
-          </p>
-          <pre style={{ whiteSpace: "pre-wrap" }}>{selected.description}</pre>
+          <LibraryDetailMeta
+            cells={[
+              {
+                label: "Family",
+                value: <Badge variant="neutral">{selected.family_id.toUpperCase()}</Badge>,
+              },
+              {
+                label: "Weight · rec.",
+                value: (
+                  <code className="ds-code">
+                    {selected.recommended_weight == null
+                      ? "—"
+                      : selected.recommended_weight.toFixed(2)}
+                  </code>
+                ),
+              },
+              {
+                label: "Author",
+                value: <span>{selected.author ?? "—"}</span>,
+              },
+              {
+                label: "Updated",
+                value: <span>{formatUpdated(selected.updated_at)}</span>,
+              },
+            ]}
+          />
+          <LibraryDetailBlock label="Trigger words">
+            <div className={detailStyles.codeRow}>
+              {selected.trigger_words.length === 0 ? (
+                <span className="ds-label-caps" style={{ fontSize: 12, color: "var(--text-subtle)" }}>
+                  —
+                </span>
+              ) : (
+                selected.trigger_words.map((t) => (
+                  <code key={t} className="ds-code">
+                    {t}
+                  </code>
+                ))
+              )}
+            </div>
+          </LibraryDetailBlock>
+          <LibraryDetailBlock label="Tags">
+            <div className={detailStyles.codeRow} style={{ gap: 6 }}>
+              {selected.tags.length === 0 ? (
+                <span style={{ color: "var(--text-subtle)", fontSize: 13 }}>—</span>
+              ) : (
+                selected.tags.map((tag) => (
+                  <Badge key={tag} variant="accent">
+                    {tag}
+                  </Badge>
+                ))
+              )}
+            </div>
+          </LibraryDetailBlock>
+          <LibraryDetailBlock label="Description" isLast>
+            <p className={detailStyles.desc}>{selected.description || "—"}</p>
+          </LibraryDetailBlock>
         </>
       )}
     </LibraryCrud>

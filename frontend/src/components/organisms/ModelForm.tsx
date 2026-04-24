@@ -1,6 +1,9 @@
 import { useState } from "react";
 import { Button } from "@/components/atoms/Button";
+import { Icon } from "@/components/atoms/Icon";
 import { TextArea, TextInput } from "@/components/molecules/FormField";
+import { LibraryFormPage, LibraryFormSection } from "@/components/organisms/LibraryFormSection";
+import libForm from "@/components/organisms/libraryForm.module.css";
 import type { Family, Model, ModelCreate, ModelUpdate } from "@/api/library";
 
 export function ModelForm({
@@ -24,6 +27,9 @@ export function ModelForm({
   const [version, setVersion] = useState(model?.version ?? "");
   const [sourceUrl, setSourceUrl] = useState(model?.source_url ?? "");
 
+  const isEdit = Boolean(model);
+  const pageTitle = isEdit && model ? `Edit · ${model.name}` : "New model";
+
   const canSave = displayName.trim() !== "" && familyId !== "" && (Boolean(model) || name.trim() !== "");
 
   return (
@@ -42,47 +48,74 @@ export function ModelForm({
         onSubmit(model ? common : { name: name.trim(), ...common });
       }}
     >
-      {!model && (
-        <TextInput label="Name" value={name} onChange={(event) => setName(event.currentTarget.value)} />
-      )}
-      <TextInput
-        label="Display name"
-        value={displayName}
-        onChange={(event) => setDisplayName(event.currentTarget.value)}
-      />
-      <label>
-        <span>Family</span>
-        <select
-          value={familyId}
-          onChange={(event) => setFamilyId(event.currentTarget.value)}
-        >
-          {families.map((family) => (
-            <option key={family.id} value={family.id}>
-              {family.display_name}
-            </option>
-          ))}
-        </select>
-      </label>
-      <TextArea
-        label="Description"
-        value={description}
-        onChange={(event) => setDescription(event.currentTarget.value)}
-      />
-      <TextInput label="Author" value={author} onChange={(event) => setAuthor(event.currentTarget.value)} />
-      <TextInput label="Version" value={version} onChange={(event) => setVersion(event.currentTarget.value)} />
-      <TextInput
-        label="Source URL"
-        value={sourceUrl}
-        onChange={(event) => setSourceUrl(event.currentTarget.value)}
-      />
-      <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
-        <Button type="button" onClick={onCancel}>
-          Cancel
-        </Button>
-        <Button type="submit" variant="primary" disabled={!canSave || isSaving}>
-          {isSaving ? "Saving..." : "Save"}
-        </Button>
-      </div>
+      <LibraryFormPage
+        title={pageTitle}
+        foot={
+          <>
+            <Button type="button" variant="secondary" onClick={onCancel}>
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              variant="primary"
+              disabled={!canSave || isSaving}
+              icon={<Icon name="Check" />}
+            >
+              {isSaving ? "Saving…" : isEdit ? "Save changes" : "Create model"}
+            </Button>
+          </>
+        }
+      >
+        <LibraryFormSection title="Identity" subtitle="Checkpoint filename and display info.">
+          {!model && <TextInput label="Name" value={name} onChange={(e) => setName(e.currentTarget.value)} />}
+          <TextInput
+            label="Display name"
+            value={displayName}
+            onChange={(e) => setDisplayName(e.currentTarget.value)}
+          />
+          <div className={libForm.grid2}>
+            <TextInput label="Author" value={author} onChange={(e) => setAuthor(e.currentTarget.value)} />
+            <TextInput label="Version" value={version} onChange={(e) => setVersion(e.currentTarget.value)} />
+          </div>
+          <TextInput
+            label="Source URL"
+            value={sourceUrl}
+            onChange={(e) => setSourceUrl(e.currentTarget.value)}
+            placeholder="https://…"
+          />
+        </LibraryFormSection>
+
+        <LibraryFormSection title="Family" subtitle="Which base family this checkpoint belongs to.">
+          <div>
+            <div className={libForm.caption}>Family</div>
+            <div className={libForm.pillGroup}>
+              {families.map((f) => (
+                <button
+                  key={f.id}
+                  type="button"
+                  className={`${libForm.pill} ${familyId === f.id ? libForm.pillOn : ""}`}
+                  onClick={() => setFamilyId(f.id)}
+                >
+                  {familyId === f.id && <Icon name="Check" size={10} />}
+                  {f.display_name}
+                </button>
+              ))}
+            </div>
+            {familyId === "" && <div className={libForm.fieldError}>Select a family</div>}
+          </div>
+        </LibraryFormSection>
+
+        <LibraryFormSection title="Prompt delta" subtitle="Optional rules on top of the family guide.">
+          <TextArea
+            label="Delta"
+            value={description}
+            onChange={(e) => setDescription(e.currentTarget.value)}
+            placeholder="E.g. lower CFG, detail LoRA interactions…"
+            rows={5}
+            hint="LLM sees this when this checkpoint is selected."
+          />
+        </LibraryFormSection>
+      </LibraryFormPage>
     </form>
   );
 }

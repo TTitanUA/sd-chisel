@@ -37,7 +37,7 @@ def test_create_model_with_unknown_family_raises(conn):
         library_repo.create_model(conn, name="x", display_name="X", family_id="nope")
 
 
-def test_create_and_get_lora_with_compat(conn):
+def test_create_and_get_lora_with_family(conn):
     library_repo.create_lora(
         conn,
         name="cinematic_lighting_v2",
@@ -46,24 +46,23 @@ def test_create_and_get_lora_with_compat(conn):
         tags=["light", "mood"],
         trigger_words=["cinematic", "rim light"],
         recommended_weight=0.85,
-        family_compat=["sdxl", "illustrious"],
+        family_id="illustrious",
     )
     lora = library_repo.get_lora(conn, "cinematic_lighting_v2")
     assert lora is not None
     assert lora["tags"] == ["light", "mood"]
-    assert set(lora["family_compat"]) == {"sdxl", "illustrious"}
+    assert lora["family_id"] == "illustrious"
 
 
-def test_delete_lora_cascades_compat_and_vec_map(conn):
+def test_delete_lora_cascades_vec_map(conn):
     library_repo.create_lora(
         conn, name="ltest", display_name="L", description="d",
-        tags=[], trigger_words=[], family_compat=["sdxl"],
+        tags=[], trigger_words=[], family_id="sdxl",
     )
     # Simulate vec_map row (indexer would populate this in Slice 5)
     conn.execute("INSERT INTO lora_vec_map(lora_name, rowid) VALUES (?, ?)", ("ltest", 1))
     library_repo.delete_lora(conn, "ltest")
     assert library_repo.get_lora(conn, "ltest") is None
-    assert list(conn.execute("SELECT * FROM lora_family_compat WHERE lora_name='ltest'")) == []
     assert list(conn.execute("SELECT * FROM lora_vec_map WHERE lora_name='ltest'")) == []
 
 
@@ -138,7 +137,7 @@ def test_lora_update_delete_and_filters(conn):
         tags=["detail", "portrait"],
         trigger_words=["detail boost"],
         recommended_weight=0.7,
-        family_compat=["sdxl"],
+        family_id="sdxl",
     )
     library_repo.create_lora(
         conn,
@@ -147,7 +146,7 @@ def test_lora_update_delete_and_filters(conn):
         description="Adds line art.",
         tags=["line"],
         trigger_words=["line art"],
-        family_compat=["pony"],
+        family_id="pony",
     )
 
     by_family = library_repo.list_loras(conn, family_id="sdxl")
@@ -166,7 +165,7 @@ def test_lora_update_delete_and_filters(conn):
         description="Adds controlled detail.",
         tags=["detail"],
         trigger_words=["detail boost", "sharp detail"],
-        family_compat=["sdxl", "illustrious"],
+        family_id="illustrious",
         recommended_weight=0.8,
         author="me",
         version="v2",
@@ -175,7 +174,7 @@ def test_lora_update_delete_and_filters(conn):
     assert updated is not None
     assert updated["display_name"] == "Detail Boost 2"
     assert updated["tags"] == ["detail"]
-    assert set(updated["family_compat"]) == {"sdxl", "illustrious"}
+    assert updated["family_id"] == "illustrious"
 
     assert library_repo.delete_lora(conn, "detail_boost") is True
     assert library_repo.get_lora(conn, "detail_boost") is None
