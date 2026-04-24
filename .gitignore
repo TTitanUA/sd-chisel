@@ -1,5 +1,6 @@
 # app data (sqlite + images), создаётся бэком при первом запуске
 /data/
+.worktrees/
 
 # python
 __pycache__/
