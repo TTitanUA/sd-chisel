@@ -22,8 +22,7 @@ dev = [
 [project.scripts]
 db-init = "app.cli.init_db:main"
 dev = "app.cli.dev:main"
-sd-init-db = "app.cli.init_db:main"
-sd-reindex-all = "app.cli.reindex_all:main"
+reindex-all = "app.cli.reindex_all:main"
 
 [build-system]
 requires = ["hatchling"]
