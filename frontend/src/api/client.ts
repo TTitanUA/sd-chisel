@@ -1,6 +1,6 @@
 import { QueryClient } from "@tanstack/react-query";
 
-const API_BASE = import.meta.env.VITE_API_BASE ?? "";
+export const API_BASE = import.meta.env.VITE_API_BASE ?? "";
 
 export class ApiError extends Error {
   constructor(
@@ -12,9 +12,13 @@ export class ApiError extends Error {
 }
 
 export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
+  const headers: Record<string, string> = { ...(init?.headers as Record<string, string> | undefined) };
+  if (typeof init?.body === "string") {
+    headers["Content-Type"] = "application/json";
+  }
   const res = await fetch(`${API_BASE}${path}`, {
     ...init,
-    headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
+    headers,
   });
   if (!res.ok) {
     throw new ApiError(res.status, await res.text());

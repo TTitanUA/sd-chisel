@@ -1,0 +1,119 @@
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: var(--bg-overlay);
+  z-index: 20;
+}
+
+.panel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  z-index: 21;
+  width: min(420px, 100vw);
+  height: 100vh;
+  background: var(--bg-raised);
+  border-left: 1px solid var(--border);
+  padding: 20px;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  box-shadow: var(--shadow-lg);
+}
+
+.head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.title {
+  margin: 0;
+  font-size: var(--text-lg);
+}
+
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  flex: 1;
+}
+
+.foot {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.loraList {
+  max-height: 220px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+}
+
+.loraRow {
+  width: 100%;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 10px;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  color: var(--text);
+  cursor: pointer;
+  font-size: var(--text-sm);
+}
+
+.loraRow:hover {
+  background: var(--surface-alt);
+}
+
+.pinned {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent);
+}
+
+.loraName {
+  flex: 1;
+}
+
+.loraMeta {
+  color: var(--text-subtle);
+  font-size: var(--text-xs);
+}
+
+.closeBtn {
+  display: inline-flex;
+  padding: 4px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.closeBtn:hover {
+  background: var(--surface-alt);
+}
+
+.select {
+  width: 100%;
+  min-height: 34px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  padding: 7px 10px;
+}
+
+.labelBlock {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}

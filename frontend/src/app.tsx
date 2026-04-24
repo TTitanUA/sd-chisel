@@ -1,13 +1,28 @@
 import { QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { queryClient } from "./api/client";
+import { useProjects } from "./api/sessions";
 import { AppShell } from "./components/templates/AppShell";
 import { WorkspaceLayout } from "./components/templates/WorkspaceLayout";
 import { LibraryLayout } from "./components/templates/LibraryLayout";
-import WorkspaceRoute from "./routes/workspace";
+import WorkspaceRoute, { ProjectLanding } from "./routes/workspace";
 import FamiliesRoute from "./routes/library/families";
 import ModelsRoute from "./routes/library/models";
 import LorasRoute from "./routes/library/loras";
+
+function RootRedirect() {
+  const projects = useProjects();
+  if (projects.isLoading) return <div style={{ padding: 24 }}>Loading…</div>;
+  const first = projects.data?.[0];
+  if (!first) {
+    return (
+      <div style={{ padding: 24 }}>
+        No projects yet. Use the sidebar to create one.
+      </div>
+    );
+  }
+  return <Navigate to={`/projects/${first.id}`} replace />;
+}
 
 export function App() {
   return (
@@ -15,9 +30,14 @@ export function App() {
       <BrowserRouter>
         <Routes>
           <Route element={<AppShell />}>
+            <Route path="/" element={<RootRedirect />} />
             <Route
-              path="/"
-              element={<Navigate to="/projects/scrapyard/sessions/default" replace />}
+              path="/projects/:projectId"
+              element={
+                <WorkspaceLayout>
+                  <ProjectLanding />
+                </WorkspaceLayout>
+              }
             />
             <Route
               path="/projects/:projectId/sessions/:sessionId"

@@ -1,0 +1,125 @@
+from pathlib import Path
+
+import pytest
+from fastapi.testclient import TestClient
+
+from app.api.deps import get_conn
+from app.main import app
+from app.storage import db as db_mod
+from app.storage import library_repo
+from app.storage.migrations import apply_pending
+
+
+@pytest.fixture
+def conn(tmp_path):
+    c = db_mod.connect(tmp_path / "api.db")
+    apply_pending(c, Path(__file__).parent.parent / "migrations")
+    library_repo.create_lora(
+        c, name="cinematic_light", display_name="Cinematic Light",
+        description="x", tags=["light"], trigger_words=["cinematic light"],
+        family_compat=["sdxl"], recommended_weight=0.8,
+    )
+    yield c
+    c.close()
+
+
+@pytest.fixture
+def client(conn):
+    app.dependency_overrides[get_conn] = lambda: conn
+    try:
+        yield TestClient(app)
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_project_crud(client):
+    create = client.post("/api/projects", json={"name": "Scrapyard"})
+    assert create.status_code == 201
+    pid = create.json()["id"]
+    assert len(pid) == 10
+
+    listed = client.get("/api/projects").json()
+    assert [p["id"] for p in listed] == [pid]
+    assert listed[0]["session_count"] == 0
+
+    renamed = client.patch(f"/api/projects/{pid}", json={"name": "Renamed"})
+    assert renamed.status_code == 200
+    assert renamed.json()["name"] == "Renamed"
+
+    assert client.delete(f"/api/projects/{pid}").status_code == 204
+    assert client.delete(f"/api/projects/{pid}").status_code == 404
+
+
+def test_session_crud_nested_under_project(client):
+    pid = client.post("/api/projects", json={"name": "P"}).json()["id"]
+
+    create = client.post(
+        f"/api/projects/{pid}/sessions",
+        json={"name": "first", "model_name": None, "use_negative": True},
+    )
+    assert create.status_code == 201
+    sid = create.json()["id"]
+    assert create.json()["project_id"] == pid
+    assert create.json()["use_negative"] is True
+    assert create.json()["pinned_loras"] == []
+
+    listed = client.get(f"/api/projects/{pid}/sessions").json()
+    assert [s["id"] for s in listed] == [sid]
+
+    updated = client.patch(
+        f"/api/sessions/{sid}",
+        json={
+            "name": "renamed",
+            "model_name": None,
+            "use_negative": False,
+            "pinned_loras": [
+                {"lora_name": "cinematic_light", "weight_override": 0.65},
+            ],
+        },
+    )
+    assert updated.status_code == 200
+    body = updated.json()
+    assert body["name"] == "renamed"
+    assert body["use_negative"] is False
+    assert body["pinned_loras"] == [
+        {"lora_name": "cinematic_light", "weight_override": 0.65},
+    ]
+
+    fetched = client.get(f"/api/sessions/{sid}").json()
+    assert fetched["pinned_loras"] == body["pinned_loras"]
+
+
+def test_session_not_found(client):
+    assert client.get("/api/sessions/missing").status_code == 404
+    assert client.patch(
+        "/api/sessions/missing",
+        json={"name": None, "model_name": None, "use_negative": True, "pinned_loras": []},
+    ).status_code == 404
+    assert client.delete("/api/sessions/missing").status_code == 404
+
+
+def test_create_session_under_missing_project_is_409(client):
+    resp = client.post(
+        "/api/projects/nope/sessions",
+        json={"name": "x", "model_name": None, "use_negative": True},
+    )
+    assert resp.status_code == 409
+
+
+def test_pinned_fk_missing_lora_is_409(client):
+    pid = client.post("/api/projects", json={"name": "P"}).json()["id"]
+    sid = client.post(
+        f"/api/projects/{pid}/sessions",
+        json={"name": "s", "model_name": None, "use_negative": True},
+    ).json()["id"]
+
+    resp = client.patch(
+        f"/api/sessions/{sid}",
+        json={
+            "name": "s",
+            "model_name": None,
+            "use_negative": True,
+            "pinned_loras": [{"lora_name": "unknown", "weight_override": None}],
+        },
+    )
+    assert resp.status_code == 409

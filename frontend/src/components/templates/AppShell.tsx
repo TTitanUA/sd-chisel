@@ -1,5 +1,6 @@
-import { NavLink, Outlet } from "react-router-dom";
+import { Outlet } from "react-router-dom";
 import { useHealth } from "@/api/health";
+import { ProjectSidebar } from "@/components/organisms/ProjectSidebar";
 import styles from "./AppShell.module.css";
 
 export function AppShell() {
@@ -13,42 +14,9 @@ export function AppShell() {
           backend {status}
         </span>
       </header>
-      <aside className={styles.sidebar}>
-        <nav className={styles.sidebarNav}>
-          <NavLink
-            to="/projects/scrapyard/sessions/default"
-            className={({ isActive }) =>
-              isActive ? `${styles.sidebarLink} ${styles.active}` : styles.sidebarLink
-            }
-          >
-            Workspace
-          </NavLink>
-          <NavLink
-            to="/library/families"
-            className={({ isActive }) =>
-              isActive ? `${styles.sidebarLink} ${styles.active}` : styles.sidebarLink
-            }
-          >
-            Library — Families
-          </NavLink>
-          <NavLink
-            to="/library/models"
-            className={({ isActive }) =>
-              isActive ? `${styles.sidebarLink} ${styles.active}` : styles.sidebarLink
-            }
-          >
-            Library — Models
-          </NavLink>
-          <NavLink
-            to="/library/loras"
-            className={({ isActive }) =>
-              isActive ? `${styles.sidebarLink} ${styles.active}` : styles.sidebarLink
-            }
-          >
-            Library — LoRAs
-          </NavLink>
-        </nav>
-      </aside>
+      <div className={styles.sidebar}>
+        <ProjectSidebar />
+      </div>
       <main className={styles.main}>
         <Outlet />
       </main>

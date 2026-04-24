@@ -1,5 +1,58 @@
 .layout {
+  display: grid;
+  grid-template-rows: auto 1fr;
   height: 100%;
+  background: var(--bg);
+}
+
+.header {
   display: flex;
-  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.crumbs {
+  display: flex;
+  gap: 8px;
+  font-size: var(--text-sm);
+  align-items: baseline;
+}
+
+.sep {
+  color: var(--text-subtle);
+}
+
+.spacer {
+  flex: 1;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px;
+  padding: 12px;
+  min-height: 0;
+  height: 100%;
+}
+
+.placeholder {
+  border: 1px dashed var(--border);
+  border-radius: var(--r-md);
+  padding: 16px;
+  color: var(--text-subtle);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+
+.empty {
+  display: grid;
+  place-items: center;
+  height: 100%;
+  color: var(--text-subtle);
+  padding: 24px;
 }
