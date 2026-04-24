@@ -19,7 +19,7 @@ def connect(path: Path | None = None) -> sqlite3.Connection:
     """
     target = path or db_path()
     target.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(target, isolation_level=None)  # manual transactions
+    conn = sqlite3.connect(target, isolation_level=None, check_same_thread=False)  # manual transactions
     conn.row_factory = sqlite3.Row
     conn.enable_load_extension(True)
     sqlite_vec.load(conn)

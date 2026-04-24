@@ -21,6 +21,7 @@ frontend/dist/
 frontend/.vite/
 frontend/*.tsbuildinfo
 frontend/.tsbuild-node/
+.pnpm-store/
 
 # editors / OS
 .idea/

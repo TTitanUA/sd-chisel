@@ -65,3 +65,118 @@ def test_delete_lora_cascades_compat_and_vec_map(conn):
     assert library_repo.get_lora(conn, "ltest") is None
     assert list(conn.execute("SELECT * FROM lora_family_compat WHERE lora_name='ltest'")) == []
     assert list(conn.execute("SELECT * FROM lora_vec_map WHERE lora_name='ltest'")) == []
+
+
+def test_family_create_update_delete(conn):
+    created = library_repo.create_family(
+        conn,
+        id="testfam",
+        display_name="Test Family",
+        prompt_guide="Use test syntax.",
+    )
+    assert created["id"] == "testfam"
+
+    updated = library_repo.update_family(
+        conn,
+        "testfam",
+        display_name="Test Family 2",
+        prompt_guide="Updated guide.",
+    )
+    assert updated is not None
+    assert updated["display_name"] == "Test Family 2"
+    assert updated["updated_at"] >= created["updated_at"]
+
+    assert library_repo.delete_family(conn, "testfam") is True
+    assert library_repo.get_family(conn, "testfam") is None
+    assert library_repo.delete_family(conn, "testfam") is False
+
+
+def test_list_families_filters_by_query(conn):
+    library_repo.create_family(conn, id="abcxyz", display_name="Needle Family", prompt_guide="x")
+    rows = library_repo.list_families(conn, q="needle")
+    assert [r["id"] for r in rows] == ["abcxyz"]
+
+
+def test_model_update_delete_and_filters(conn):
+    library_repo.create_model(
+        conn,
+        name="model_a",
+        display_name="Model A",
+        family_id="sdxl",
+        description="alpha",
+    )
+    library_repo.create_model(conn, name="model_b", display_name="Model B", family_id="pony")
+
+    filtered = library_repo.list_models(conn, family_id="sdxl", q="alpha")
+    assert [m["name"] for m in filtered] == ["model_a"]
+
+    updated = library_repo.update_model(
+        conn,
+        "model_a",
+        display_name="Model A2",
+        family_id="sdxl",
+        description="beta",
+        author="me",
+        version="v1",
+        source_url="https://example.test/model",
+    )
+    assert updated is not None
+    assert updated["display_name"] == "Model A2"
+    assert updated["description"] == "beta"
+
+    assert library_repo.delete_model(conn, "model_a") is True
+    assert library_repo.get_model(conn, "model_a") is None
+    assert library_repo.delete_model(conn, "model_a") is False
+
+
+def test_lora_update_delete_and_filters(conn):
+    library_repo.create_lora(
+        conn,
+        name="detail_boost",
+        display_name="Detail Boost",
+        description="Adds crisp detail.",
+        tags=["detail", "portrait"],
+        trigger_words=["detail boost"],
+        recommended_weight=0.7,
+        family_compat=["sdxl"],
+    )
+    library_repo.create_lora(
+        conn,
+        name="linework",
+        display_name="Linework",
+        description="Adds line art.",
+        tags=["line"],
+        trigger_words=["line art"],
+        family_compat=["pony"],
+    )
+
+    by_family = library_repo.list_loras(conn, family_id="sdxl")
+    assert [row["name"] for row in by_family] == ["detail_boost"]
+
+    by_tag = library_repo.list_loras(conn, tag="detail")
+    assert [row["name"] for row in by_tag] == ["detail_boost"]
+
+    by_query = library_repo.list_loras(conn, q="crisp")
+    assert [row["name"] for row in by_query] == ["detail_boost"]
+
+    updated = library_repo.update_lora(
+        conn,
+        "detail_boost",
+        display_name="Detail Boost 2",
+        description="Adds controlled detail.",
+        tags=["detail"],
+        trigger_words=["detail boost", "sharp detail"],
+        family_compat=["sdxl", "illustrious"],
+        recommended_weight=0.8,
+        author="me",
+        version="v2",
+        source_url="https://example.test/lora",
+    )
+    assert updated is not None
+    assert updated["display_name"] == "Detail Boost 2"
+    assert updated["tags"] == ["detail"]
+    assert set(updated["family_compat"]) == {"sdxl", "illustrious"}
+
+    assert library_repo.delete_lora(conn, "detail_boost") is True
+    assert library_repo.get_lora(conn, "detail_boost") is None
+    assert library_repo.delete_lora(conn, "detail_boost") is False

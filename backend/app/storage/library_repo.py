@@ -1,6 +1,6 @@
-"""Raw CRUD over library tables. No business logic, no HTTP concerns.
+"""Raw CRUD over library tables. No HTTP concerns.
 
-Returns dicts (not sqlite3.Row) so the caller can JSON-serialize freely.
+Returns dicts (not sqlite3.Row) so callers can JSON-serialize freely.
 """
 from __future__ import annotations
 
@@ -18,30 +18,93 @@ def _row_to_dict(row: sqlite3.Row | None) -> dict[str, Any] | None:
     return dict(row) if row is not None else None
 
 
+def _like(value: str) -> str:
+    return f"%{value.lower()}%"
+
+
 # --- families ---------------------------------------------------------------
 
 
-def list_families(conn: sqlite3.Connection) -> list[dict[str, Any]]:
-    return [dict(r) for r in conn.execute("SELECT * FROM families ORDER BY id")]
+def list_families(conn: sqlite3.Connection, q: str | None = None) -> list[dict[str, Any]]:
+    sql = "SELECT * FROM families"
+    params: list[Any] = []
+    if q:
+        sql += " WHERE lower(id) LIKE ? OR lower(display_name) LIKE ? OR lower(prompt_guide) LIKE ?"
+        params.extend([_like(q), _like(q), _like(q)])
+    sql += " ORDER BY id"
+    return [dict(r) for r in conn.execute(sql, params)]
 
 
 def get_family(conn: sqlite3.Connection, family_id: str) -> dict[str, Any] | None:
-    return _row_to_dict(conn.execute(
-        "SELECT * FROM families WHERE id = ?", (family_id,)
-    ).fetchone())
+    return _row_to_dict(conn.execute("SELECT * FROM families WHERE id = ?", (family_id,)).fetchone())
+
+
+def create_family(
+    conn: sqlite3.Connection,
+    *,
+    id: str,
+    display_name: str,
+    prompt_guide: str,
+) -> dict[str, Any]:
+    now = _now()
+    conn.execute(
+        "INSERT INTO families(id, display_name, prompt_guide, created_at, updated_at) "
+        "VALUES (?, ?, ?, ?, ?)",
+        (id, display_name, prompt_guide, now, now),
+    )
+    return get_family(conn, id)  # type: ignore[return-value]
+
+
+def update_family(
+    conn: sqlite3.Connection,
+    family_id: str,
+    *,
+    display_name: str,
+    prompt_guide: str,
+) -> dict[str, Any] | None:
+    now = _now()
+    cur = conn.execute(
+        "UPDATE families SET display_name = ?, prompt_guide = ?, updated_at = ? WHERE id = ?",
+        (display_name, prompt_guide, now, family_id),
+    )
+    if cur.rowcount == 0:
+        return None
+    return get_family(conn, family_id)
+
+
+def delete_family(conn: sqlite3.Connection, family_id: str) -> bool:
+    cur = conn.execute("DELETE FROM families WHERE id = ?", (family_id,))
+    return cur.rowcount > 0
 
 
 # --- models -----------------------------------------------------------------
 
 
-def list_models(conn: sqlite3.Connection) -> list[dict[str, Any]]:
-    return [dict(r) for r in conn.execute("SELECT * FROM models ORDER BY name")]
+def list_models(
+    conn: sqlite3.Connection,
+    *,
+    family_id: str | None = None,
+    q: str | None = None,
+) -> list[dict[str, Any]]:
+    clauses: list[str] = []
+    params: list[Any] = []
+    if family_id:
+        clauses.append("family_id = ?")
+        params.append(family_id)
+    if q:
+        clauses.append(
+            "(lower(name) LIKE ? OR lower(display_name) LIKE ? OR lower(coalesce(description, '')) LIKE ?)"
+        )
+        params.extend([_like(q), _like(q), _like(q)])
+    sql = "SELECT * FROM models"
+    if clauses:
+        sql += " WHERE " + " AND ".join(clauses)
+    sql += " ORDER BY name"
+    return [dict(r) for r in conn.execute(sql, params)]
 
 
 def get_model(conn: sqlite3.Connection, name: str) -> dict[str, Any] | None:
-    return _row_to_dict(conn.execute(
-        "SELECT * FROM models WHERE name = ?", (name,)
-    ).fetchone())
+    return _row_to_dict(conn.execute("SELECT * FROM models WHERE name = ?", (name,)).fetchone())
 
 
 def create_model(
@@ -64,6 +127,33 @@ def create_model(
     return get_model(conn, name)  # type: ignore[return-value]
 
 
+def update_model(
+    conn: sqlite3.Connection,
+    name: str,
+    *,
+    display_name: str,
+    family_id: str,
+    description: str | None = None,
+    author: str | None = None,
+    version: str | None = None,
+    source_url: str | None = None,
+) -> dict[str, Any] | None:
+    now = _now()
+    cur = conn.execute(
+        "UPDATE models SET display_name = ?, family_id = ?, description = ?, author = ?, "
+        "version = ?, source_url = ?, updated_at = ? WHERE name = ?",
+        (display_name, family_id, description, author, version, source_url, now, name),
+    )
+    if cur.rowcount == 0:
+        return None
+    return get_model(conn, name)
+
+
+def delete_model(conn: sqlite3.Connection, name: str) -> bool:
+    cur = conn.execute("DELETE FROM models WHERE name = ?", (name,))
+    return cur.rowcount > 0
+
+
 # --- loras ------------------------------------------------------------------
 
 
@@ -72,7 +162,8 @@ def _hydrate_lora(conn: sqlite3.Connection, row: sqlite3.Row) -> dict[str, Any]:
     d["tags"] = json.loads(d.get("tags") or "[]")
     d["trigger_words"] = json.loads(d.get("trigger_words") or "[]")
     d["family_compat"] = [
-        r[0] for r in conn.execute(
+        r[0]
+        for r in conn.execute(
             "SELECT family_id FROM lora_family_compat WHERE lora_name = ? ORDER BY family_id",
             (row["name"],),
         )
@@ -80,8 +171,35 @@ def _hydrate_lora(conn: sqlite3.Connection, row: sqlite3.Row) -> dict[str, Any]:
     return d
 
 
-def list_loras(conn: sqlite3.Connection) -> list[dict[str, Any]]:
-    rows = conn.execute("SELECT * FROM loras ORDER BY name").fetchall()
+def list_loras(
+    conn: sqlite3.Connection,
+    *,
+    family_id: str | None = None,
+    tag: str | None = None,
+    q: str | None = None,
+) -> list[dict[str, Any]]:
+    clauses: list[str] = []
+    params: list[Any] = []
+    if family_id:
+        clauses.append(
+            "EXISTS (SELECT 1 FROM lora_family_compat c "
+            "WHERE c.lora_name = loras.name AND c.family_id = ?)"
+        )
+        params.append(family_id)
+    if tag:
+        clauses.append("EXISTS (SELECT 1 FROM json_each(loras.tags) WHERE value = ?)")
+        params.append(tag)
+    if q:
+        clauses.append(
+            "(lower(name) LIKE ? OR lower(display_name) LIKE ? OR lower(description) LIKE ? "
+            "OR lower(tags) LIKE ? OR lower(trigger_words) LIKE ?)"
+        )
+        params.extend([_like(q), _like(q), _like(q), _like(q), _like(q)])
+    sql = "SELECT * FROM loras"
+    if clauses:
+        sql += " WHERE " + " AND ".join(clauses)
+    sql += " ORDER BY name"
+    rows = conn.execute(sql, params).fetchall()
     return [_hydrate_lora(conn, r) for r in rows]
 
 
@@ -112,9 +230,17 @@ def create_lora(
             "recommended_weight, author, version, source_url, created_at, updated_at) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
-                name, display_name, description,
-                json.dumps(tags), json.dumps(trigger_words),
-                recommended_weight, author, version, source_url, now, now,
+                name,
+                display_name,
+                description,
+                json.dumps(tags),
+                json.dumps(trigger_words),
+                recommended_weight,
+                author,
+                version,
+                source_url,
+                now,
+                now,
             ),
         )
         for fam in family_compat:
@@ -132,7 +258,59 @@ def create_lora(
     return get_lora(conn, name)  # type: ignore[return-value]
 
 
-def delete_lora(conn: sqlite3.Connection, name: str) -> None:
-    # vec_loras rowid cleanup is Slice 5's responsibility (requires the map entry);
-    # here we only touch the main table. CASCADE handles lora_family_compat + lora_vec_map.
-    conn.execute("DELETE FROM loras WHERE name = ?", (name,))
+def update_lora(
+    conn: sqlite3.Connection,
+    name: str,
+    *,
+    display_name: str,
+    description: str,
+    tags: list[str],
+    trigger_words: list[str],
+    family_compat: list[str],
+    recommended_weight: float | None = None,
+    author: str | None = None,
+    version: str | None = None,
+    source_url: str | None = None,
+) -> dict[str, Any] | None:
+    now = _now()
+    try:
+        conn.execute("BEGIN")
+        cur = conn.execute(
+            "UPDATE loras SET display_name = ?, description = ?, tags = ?, trigger_words = ?, "
+            "recommended_weight = ?, author = ?, version = ?, source_url = ?, updated_at = ? "
+            "WHERE name = ?",
+            (
+                display_name,
+                description,
+                json.dumps(tags),
+                json.dumps(trigger_words),
+                recommended_weight,
+                author,
+                version,
+                source_url,
+                now,
+                name,
+            ),
+        )
+        if cur.rowcount == 0:
+            conn.execute("ROLLBACK")
+            return None
+        conn.execute("DELETE FROM lora_family_compat WHERE lora_name = ?", (name,))
+        for fam in family_compat:
+            conn.execute(
+                "INSERT INTO lora_family_compat(lora_name, family_id) VALUES (?, ?)",
+                (name, fam),
+            )
+        conn.execute("COMMIT")
+    except Exception:
+        try:
+            conn.execute("ROLLBACK")
+        except Exception:
+            pass
+        raise
+    return get_lora(conn, name)
+
+
+def delete_lora(conn: sqlite3.Connection, name: str) -> bool:
+    cur = conn.execute("DELETE FROM loras WHERE name = ?", (name,))
+    return cur.rowcount > 0

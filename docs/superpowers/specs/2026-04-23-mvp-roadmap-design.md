@@ -149,42 +149,112 @@ frontend/
 
 ## 4. Vertical slices — порядок и границы
 
-Каждый срез — отдельный план через `writing-plans` после завершения предыдущего. Границы срезов зафиксированы, чтобы planning-фаза каждого среза была коротким refinement'ом этого документа, а не заново-брейнштормом.
+Каждый срез — отдельный план через `writing-plans` после завершения предыдущего. Этот раздел задаёт **контракт между планами**: что срез получает на вход, какие границы обязан не пересекать, какой пользовательский сценарий доказывает готовность, и какой стабильный интерфейс остаётся следующему срезу.
+
+**Dependency graph:** Foundation → Slice 1 → Slice 2 → Slice 3 → Slice 4 → Slice 5 → Slice 6. Порядок намеренно не оптимизирует “техническую чистоту”; он оптимизирует ранний end-to-end фидбек. Поэтому Embedder/Indexer идёт только в Slice 5: до generate-prompt векторный поиск не нужен, а Library, workspace, VL и chat должны стать живыми раньше.
+
+**Общие правила для всех срезов:**
+- После каждого среза оба приложения запускаются, `/health` работает, существующие пользовательские сценарии не ломаются.
+- Каждый срез включает backend + frontend + tests/docs в том объёме, который нужен для его acceptance. “Только бэк” или “только фронт” допустимы только если это прямо указано как невидимая инфраструктура.
+- API и storage contracts, появившиеся в срезе, считаются стабильными для следующих срезов. Если позже нужен breaking change, он оформляется как явная миграция/адаптер, а не тихая переделка.
+- Внутри среза можно улучшать только те файлы и компоненты, которые срез реально использует. Широкий рефакторинг вне текущего пользовательского потока не входит.
+- Acceptance всегда проверяется через UI-сценарий и через persistence/reload там, где есть состояние.
 
 ### Slice 1 — Library CRUD (без эмбеддинга)
-- **Бэк:** REST endpoints `/api/library/families`, `/api/library/models`, `/api/library/loras` (GET list + filters, GET one, POST, PUT, DELETE). Репозитории уже готовы с фундамента — тут оборачиваем их в FastAPI routes с Pydantic-валидацией.
-- **Фронт:** страницы `/library/families|models|loras` — таблицы + формы редактирования (md-editor для markdown-полей). Портируем из `mvp-ui-mock/app/library.jsx`.
-- **Не входит:** эмбеддинги/`vec_loras` — добавим в Slice 5. На upsert'ах пишем только в основные таблицы.
-- **Acceptance:** можно через UI создать family → model → lora и увидеть их в списке; данные переживают перезапуск бэка.
+
+**Предусловия:** Foundation завершён; БД создана, families засеяны, репозитории `library_repo.py` умеют читать/писать основные таблицы; фронтовые роуты `/library/families`, `/library/models`, `/library/loras` существуют как placeholder.
+
+**Scope:**
+- **Бэк:** REST endpoints `/api/library/families`, `/api/library/models`, `/api/library/loras`: list с фильтрами, get one, create, update, delete. Оборачиваем foundation-репозитории в FastAPI routes и Pydantic-схемы, добавляем нормальные 404/409/422.
+- **Фронт:** страницы `/library/families|models|loras`: read-first таблицы, search/filter, формы create/edit, markdown-поля через `@uiw/react-md-editor`. Основной визуальный источник — `mvp-ui-mock/app/library.jsx`.
+- **Storage:** только основные таблицы `families`, `models`, `loras`, `lora_family_compat`. `vec_loras` и `lora_vec_map` пока не трогаем.
+- **Tests/docs:** API CRUD tests + минимальные UI/query tests на список и submit формы.
+
+**Boundary:** нет embeddings, indexer hooks, similarity search, usage counts по сессиям, import/export библиотеки, batch operations.
+
+**Acceptance:** через UI можно создать family → model → lora, открыть созданные записи в списках, отредактировать markdown-поле LoRA, удалить запись и увидеть изменение после перезапуска бэка/фронта.
+
+**Handoff:** следующие срезы могут считать Library API стабильным источником families/models/loras; SessionSettingsDrawer в Slice 2 использует этот API для выбора model и pinned LoRAs.
 
 ### Slice 2 — Projects & Sessions CRUD + source upload
-- **Бэк:** `/api/projects` (GET/POST), `/api/sessions/...` (GET/POST/PATCH/DELETE), `/api/sessions/{s}/source` (POST upload → `data/images/<session_id>/source.<ext>`). Транзакционное удаление сессии (БД каскадно + файлы).
-- **Фронт:** Sidebar с проектами/сессиями, workspace с пустыми панелями, SessionSettingsDrawer (model, use_negative, pinned LoRAs — мульти-селектор с уже существующими LoRA из Slice 1). Источник грузится drag-and-drop или через кнопку.
-- **Не входит:** VL endpoints в drawer, vl_summary, chat, generate-prompt.
-- **Acceptance:** создать проект → сессию → загрузить исходник → увидеть превью; переключаться между сессиями; удалить сессию → папка `data/images/<session_id>/` уходит вместе.
+
+**Предусловия:** Slice 1 завершён; есть рабочая библиотека LoRA/model/family и API для чтения моделей/LoRA; workspace placeholder из Foundation доступен.
+
+**Scope:**
+- **Бэк:** `/api/projects` (list/create/update/delete), `/api/projects/{id}/sessions`, `/api/sessions/{id}` (get/patch/delete), `/api/sessions/{id}/source` (POST upload → `data/images/<session_id>/source.<ext>`), endpoint для отдачи source preview. `session_repo.delete(...)` удаляет сначала папку `data/images/<session_id>/`, потом БД-запись, чтобы не оставлять orphan files.
+- **Фронт:** Sidebar с проектами/сессиями, создание проекта и сессии, переключение активной сессии, workspace layout с реальными пустыми панелями, `SourceImagePane` с drag-and-drop/choose file и preview, `SessionSettingsDrawer` с model, `use_negative`, pinned LoRAs.
+- **Storage:** `projects`, `sessions`, `session_pinned_loras`; запись относительного `source_image_path`; каскадное удаление связанных rows.
+- **Tests/docs:** upload/delete tests на БД + файловую систему, UI tests на создание сессии и отображение preview.
+
+**Boundary:** нет VL-вызова, `vl_summary`, chat messages, prompt generation, result image workflow, ComfyUI-интеграции.
+
+**Acceptance:** создать проект → создать сессию → выбрать model и pinned LoRAs → загрузить исходник → увидеть preview → переключиться на другую сессию и обратно → preview и настройки сохранились → удалить сессию → папка `data/images/<session_id>/` удалена.
+
+**Handoff:** следующие срезы получают стабильный session workspace: active session, source image, session settings, pinned LoRAs и путь к файлу, пригодный для VL.
 
 ### Slice 3 — VL analyze-source
-- **Бэк:** `app/services/vl_client.py` (OpenAI-compat обёртка), endpoint `/api/sessions/{s}/analyze-source`. Настраиваемые `vl_endpoint` (base_url, model, api_key) per session.
-- **Фронт:** поле VL endpoint в SessionSettingsDrawer, кнопка Analyze в SourceImagePane, отображение `vl_summary`. Состояния: idle / analyzing / done / error.
-- **Acceptance:** с настроенным LMStudio нажимаю Analyze → через N секунд вижу саммари; оно переживает перезапуск.
+
+**Предусловия:** Slice 2 завершён; у сессии может быть source image; в `sessions` есть поля `vl_endpoint` и `vl_summary`.
+
+**Scope:**
+- **Бэк:** `app/services/vl_client.py` — OpenAI-compatible client для vision endpoint; `/api/sessions/{id}/analyze-source` читает source image, вызывает VL-модель, сохраняет `vl_summary` в session и возвращает обновлённую session. Endpoint config хранится per session в `vl_endpoint`.
+- **Фронт:** поля VL endpoint в `SessionSettingsDrawer` (base_url, model, api_key), кнопка Analyze в `SourceImagePane`, показ `vl_summary` поверх/рядом с preview, состояния idle/analyzing/done/error.
+- **Storage:** update `sessions.vl_endpoint`, `sessions.vl_summary`, `updated_at`.
+- **Tests/docs:** service test с fake OpenAI-compatible response, API test без реального LMStudio, UI state tests на loading/error/done.
+
+**Boundary:** нет chat, нет prompt composition, нет result-image critique, нет автоанализа при upload, нет tool-calling.
+
+**Acceptance:** с настроенным LMStudio или fake-compatible endpoint нажимаю Analyze → вижу loading → получаю summary → summary сохраняется после reload; при ошибке endpoint UI показывает понятную ошибку и не теряет старый summary.
+
+**Handoff:** Chat и generate-prompt могут читать `vl_summary` как стабильный текстовый контекст исходника; endpoint settings уже имеют UI и storage.
 
 ### Slice 4 — Chat SSE
-- **Бэк:** `app/services/llm_client.py`, endpoint `/api/sessions/{s}/chat` (SSE). Per-session `prompt_endpoint`. Persist в `messages`.
-- **Фронт:** ChatPane со стримингом (поток чанков → progressive render), история загружается при открытии сессии. Кнопка Generate prompt присутствует, но disabled (появится в Slice 6).
-- **Не входит:** tool-calling, generate-prompt триггер через модель.
-- **Acceptance:** можно вести диалог, сообщения стримятся, сохраняются в БД, история видна после reload.
+
+**Предусловия:** Slice 3 завершён; сессия содержит source image и может содержать `vl_summary`; в `sessions` есть `prompt_endpoint`; таблица `messages` существует.
+
+**Scope:**
+- **Бэк:** `app/services/llm_client.py` — OpenAI-compatible text client; `/api/sessions/{id}/chat` стримит SSE, сохраняет user/assistant messages в `messages`, включает в контекст `vl_summary`, последние N сообщений и session settings. `GET /api/sessions/{id}/messages` возвращает историю.
+- **Фронт:** `ChatPane` со streaming render, optimistic user message, disabled/send states, загрузка истории при открытии сессии. Кнопка Generate prompt видна, но disabled с явным состоянием “available in Slice 6”.
+- **Storage:** append-only `messages` с role/content/created_at; session `updated_at` обновляется при новом сообщении.
+- **Tests/docs:** SSE contract test, fake LLM stream test, UI test progressive render/history reload.
+
+**Boundary:** chat **не вызывает** generate-prompt; нет tool-calling, retriever, LoRA picking, prompt save, structured final prompt schema.
+
+**Acceptance:** можно отправить сообщение, видеть assistant response чанками, закрыть/обновить страницу и увидеть историю; если LLM endpoint падает, user message не теряется, assistant error state не записывается как успешный ответ.
+
+**Handoff:** Slice 6 получает стабильную историю сообщений и prompt endpoint settings; generate-prompt сможет использовать последние N сообщений без изменения chat API.
 
 ### Slice 5 — Embedder + Indexer
-- **Бэк:** `app/services/embedder.py` (sentence-transformers + bge-m3, lazy-load модели на первом использовании). `app/services/indexer.py` — hook на upsert/delete в library_repo, пересчитывает эмбеддинг и пишет в `vec_loras` + `lora_vec_map` в одной транзакции. CLI `reindex-all` — полная переиндексация.
-- **Фронт:** (ничего — невидимая инфраструктура). Возможно, toast в LoraForm «indexing...» / «indexed».
-- **Acceptance:** после создания/редактирования LoRA в `vec_loras` есть соответствующая строка; `reindex-all` пересчитывает все LoRA; после DELETE строка уходит.
+
+**Предусловия:** Slice 4 завершён; Library CRUD стабилен; `vec_loras` и `lora_vec_map` созданы Foundation-миграцией, но ещё не используются.
+
+**Scope:**
+- **Бэк:** `app/services/embedder.py` — lazy-load sentence-transformers + bge-m3; `app/services/indexer.py` — build embedding text из LoRA fields, upsert/delete vector rows, держит `loras` + `vec_loras` + `lora_vec_map` консистентными в одной операции. Library write endpoints вызывают indexer после create/update/delete. CLI `reindex-all` пересчитывает всю библиотеку.
+- **Фронт:** минимальный статус в LoRA form/list: indexing/indexed/error, если это не раздувает API; иначе фронт только показывает обычный успех save.
+- **Storage:** запись/удаление строк `vec_loras`, `lora_vec_map`; при ошибке indexer основная LoRA-запись не должна молча выглядеть “индексированной”.
+- **Tests/docs:** unit tests на embedding text builder, indexer transaction tests, CLI smoke test с fake embedder, README note про первый запуск модели.
+
+**Boundary:** нет retriever endpoint, нет generate-prompt UI, нет user-facing semantic search, нет альтернативной embedding-модели как runtime flag.
+
+**Acceptance:** после create/update LoRA появляется/обновляется vector row; после delete vector row уходит; `reindex-all` пересчитывает все LoRA; при fake embedder тесты не требуют скачивания bge-m3.
+
+**Handoff:** Slice 6 получает готовый vector index и внутренний API для top-K retrieval; Library CRUD теперь гарантирует актуальность индекса.
 
 ### Slice 6 — Generate-prompt (двухступенчатый) — MVP done
-- **Бэк:** `app/services/retriever.py` (top-K per intent через sqlite-vec), `app/services/prompt_builder.py` (сборка системного промпта из §4.5 спеки), endpoint `/api/sessions/{s}/generate-prompt`. Persist в `prompts` включая `intents_json` и `retrieved_loras_json`. Возврат inline + поддержка `GET /api/sessions/{s}/prompts` для истории.
-- **Фронт:** PromptPane (positive / negative / LoRAs rows с слайдерами + бейджами pinned/retrieved/picked), Copy-кнопки (positive, negative, LoRA-string), debug-pane (intents → retrieved), pin/unpin LoRA inline, предупреждение для unknown LoRA. Кнопка Generate в ChatPane активна.
-- **Acceptance:** полный флоу — upload → analyze → chat → generate → скопировать промпт → вставить в ComfyUI. Прошлые генерации доступны через историю.
 
-После Slice 6 MVP (§9 спеки) закрыт. Post-MVP работы (VL-критика результата, tool-calling agent, импорт LoRA из .md) — отдельные проекты с собственными spec/plan.
+**Предусловия:** Slice 5 завершён; есть Library, sessions, source upload, VL summary, chat history, indexed LoRAs.
+
+**Scope:**
+- **Бэк:** `app/services/retriever.py` — top-K per intent через sqlite-vec; `app/services/prompt_builder.py` — сборка system prompt из §4.5 спеки; `/api/sessions/{id}/generate-prompt` выполняет двухступенчатый flow: intent extraction → retrieval + pinned LoRAs → prompt composition. Результат сохраняется в `prompts` с `positive`, `negative`, `loras_json`, `intents_json`, `retrieved_loras_json`; `GET /api/sessions/{id}/prompts` отдаёт историю.
+- **Фронт:** `PromptPane`: positive/negative, LoRA rows со слайдерами и бейджами pinned/retrieved/picked/unknown, copy buttons для positive/negative/LoRA-string/all, debug pane intents → retrieved, regenerate, prompt history. Кнопка Generate в ChatPane активна.
+- **Storage:** append prompts, сохранять unknown LoRA verbatim, не фильтровать модельный output сверх JSON/schema validation.
+- **Tests/docs:** backend tests на two-step orchestration с fake LLM/retriever, prompt schema validation tests, UI tests на copy/debug/history, ручной smoke script полного MVP flow.
+
+**Boundary:** нет ComfyUI API-интеграции, нет VL-критики результата, нет model tool-calling, нет импорта LoRA из `.md`, нет авто-регенерации после каждого chat message.
+
+**Acceptance:** полный флоу работает руками: upload → analyze → chat → generate → увидеть structured prompt → скопировать positive/negative/LoRA-string → вставить в ComfyUI. Прошлые генерации доступны через историю после reload; unknown LoRA отображаются как warning, но не удаляются из результата.
+
+**Handoff:** Slice 6 закрывает MVP (§9 спеки). Всё, что выходит за этот flow (VL-критика результата, tool-calling agent, импорт LoRA из .md, ComfyUI automation), оформляется как Post-MVP проект с отдельными spec/plan.
 
 ---
 
