@@ -3,40 +3,67 @@ import { render, screen } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AppShell } from "./AppShell";
+import styles from "./AppShell.module.css";
 
-function renderWithShell() {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(
-    <QueryClientProvider client={client}>
-      <MemoryRouter initialEntries={["/"]}>
-        <Routes>
-          <Route element={<AppShell />}>
-            <Route path="/" element={<div>child</div>} />
-          </Route>
-        </Routes>
-      </MemoryRouter>
-    </QueryClientProvider>,
+function mockFetch() {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((url: string) => {
+      if (String(url).endsWith("/api/projects")) {
+        return Promise.resolve(new Response(JSON.stringify([]), { status: 200 }));
+      }
+      if (String(url).includes("/api/library/")) {
+        return Promise.resolve(new Response(JSON.stringify([]), { status: 200 }));
+      }
+      return Promise.resolve(new Response(JSON.stringify({ status: "ok" }), { status: 200 }));
+    }),
   );
 }
 
 describe("AppShell", () => {
   beforeEach(() => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn((url: string) => {
-        if (String(url).endsWith("/api/projects")) {
-          return Promise.resolve(new Response(JSON.stringify([]), { status: 200 }));
-        }
-        return Promise.resolve(new Response(JSON.stringify({ status: "ok" }), { status: 200 }));
-      }),
-    );
+    mockFetch();
   });
 
-  it("renders the brand, project sidebar, library links, and the child outlet", () => {
-    renderWithShell();
+  it("renders the brand, project sidebar, topbar mode pills, placeholders, and the child outlet on workspace", () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter initialEntries={["/"]}>
+          <Routes>
+            <Route element={<AppShell />}>
+              <Route path="/" element={<div>child</div>} />
+            </Route>
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
     expect(screen.getByText("sd-chisel")).toBeInTheDocument();
     expect(screen.getByText("Projects")).toBeInTheDocument();
-    expect(screen.getByText(/Library — Families/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /^Workspace$/i })).toHaveClass(styles.navPillActive);
+    expect(screen.getByRole("link", { name: /^Library$/i })).not.toHaveClass(styles.navPillActive);
+    expect(screen.getByText("localhost:1234")).toBeInTheDocument();
+    expect(screen.getByText(/VL · qwen2-vl-7b/)).toBeInTheDocument();
     expect(screen.getByText("child")).toBeInTheDocument();
+  });
+
+  it("marks Library as active on library routes", () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter initialEntries={["/library/loras"]}>
+          <Routes>
+            <Route element={<AppShell />}>
+              <Route path="/library/loras" element={<div>lib-child</div>} />
+            </Route>
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    expect(screen.getByRole("link", { name: /^Library$/i })).toHaveClass(styles.navPillActive);
+    expect(screen.getByRole("link", { name: /^Workspace$/i })).not.toHaveClass(styles.navPillActive);
+    expect(screen.getByText("lib-child")).toBeInTheDocument();
   });
 });

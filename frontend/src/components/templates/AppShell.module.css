@@ -1,84 +1,136 @@
 .shell {
   display: grid;
-  grid-template-columns: 220px 1fr;
-  grid-template-rows: 48px 1fr;
+  grid-template-columns: 240px 1fr;
+  grid-template-rows: 44px 1fr;
   grid-template-areas:
     "topbar topbar"
     "sidebar main";
   height: 100vh;
+  min-height: 0;
 }
 
 .topbar {
   grid-area: topbar;
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 16px;
   padding: 0 16px;
   border-bottom: 1px solid var(--border);
-  background: var(--surface);
+  background: var(--bg-raised, var(--surface));
+  min-height: 44px;
+  box-sizing: border-box;
+}
+
+.topbarLeft {
+  display: flex;
+  align-items: center;
+  gap: 16px;
 }
 
 .brand {
-  font-weight: 600;
-  letter-spacing: 0.02em;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--text);
 }
 
-.healthDot {
+.brandGlyph {
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--accent);
+  color: var(--accent-text);
+  border-radius: var(--r-xs, 4px);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.brandName {
+  font-family: var(--font-ui, inherit);
+}
+
+.topbarNav {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 12px;
+}
+
+.navPill {
+  display: inline-flex;
+  align-items: center;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-family: var(--font-ui, inherit);
+  font-size: 12.5px;
+  padding: 4px 10px;
+  border-radius: var(--r-xs, 4px);
+  color: var(--text-muted);
+  text-decoration: none;
+}
+
+.navPill:hover {
+  background: var(--surface, var(--surface-alt));
+  color: var(--text);
+}
+
+.navPillActive {
+  color: var(--text);
+  background: var(--surface-alt, var(--surface));
+}
+
+.topbarSpacer {
+  flex: 1;
+}
+
+.topbarRight {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-size: var(--text-xs);
-  color: var(--text-muted, var(--text));
 }
 
-.healthDot::before {
-  content: "";
-  width: 8px;
-  height: 8px;
+.topbarEndpoint {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 11px;
+  color: var(--text-subtle);
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-xs, 4px);
+  background: var(--bg);
+}
+
+.endpointDot {
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
-  background: var(--text-muted);
-}
-
-.healthDot[data-status="ok"]::before {
   background: var(--success);
-}
-
-.healthDot[data-status="down"]::before {
-  background: var(--danger);
+  flex-shrink: 0;
+  box-shadow: 0 0 6px color-mix(in oklab, var(--success) 60%, transparent);
 }
 
 .sidebar {
   grid-area: sidebar;
-  border-right: 1px solid var(--border);
-  background: var(--surface);
-  overflow-y: auto;
-  padding: 12px;
-}
-
-.sidebarNav {
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
-  gap: 4px;
-}
-
-.sidebarLink {
-  padding: 6px 10px;
-  border-radius: 4px;
-  text-decoration: none;
-  color: var(--text);
-  font-size: var(--text-sm);
-}
-
-.sidebarLink:hover {
-  background: var(--surface-alt);
-}
-
-.sidebarLink.active {
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
-  color: var(--accent);
+  padding: 0;
 }
 
 .main {
   grid-area: main;
+  min-height: 0;
   overflow: auto;
+  background: var(--bg);
 }

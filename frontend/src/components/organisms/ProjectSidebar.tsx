@@ -1,7 +1,6 @@
-import { useState } from "react";
-import { NavLink, useNavigate, useParams } from "react-router-dom";
+import { useMemo, useState } from "react";
+import { useNavigate, useParams } from "react-router-dom";
 import { useMutation } from "@tanstack/react-query";
-import { Button } from "@/components/atoms/Button";
 import { Icon } from "@/components/atoms/Icon";
 import {
   sessionsApi,
@@ -18,6 +17,11 @@ export function ProjectSidebar() {
   const projects = useProjects();
   const invalidate = useSessionInvalidation();
 
+  const targetProjectId = useMemo(() => {
+    if (projectId) return projectId;
+    return projects.data?.[0]?.id;
+  }, [projectId, projects.data]);
+
   const createProject = useMutation({
     mutationFn: (name: string) => sessionsApi.createProject({ name }),
     onSuccess: (p: Project) => {
@@ -26,10 +30,23 @@ export function ProjectSidebar() {
     },
   });
 
+  const createSession = useMutation({
+    mutationFn: (pid: string) =>
+      sessionsApi.createSession(pid, {
+        name: `untitled · ${new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`,
+        model_name: null,
+        use_negative: true,
+      }),
+    onSuccess: (s) => {
+      invalidate.projects();
+      navigate(`/projects/${s.project_id}/sessions/${s.id}`);
+    },
+  });
+
   return (
     <aside className={styles.sidebar}>
       <div className={styles.head}>
-        <span>Projects</span>
+        <span className={styles.headTitle}>Projects</span>
         <button
           type="button"
           className={styles.iconBtn}
@@ -54,27 +71,24 @@ export function ProjectSidebar() {
         {projects.data?.length === 0 && (
           <div className={styles.empty}>No projects yet. Create one to get started.</div>
         )}
-        <div className={styles.sectionDivider} />
-        <nav className={styles.libraryNav}>
-          <NavLink
-            to="/library/families"
-            className={({ isActive }) => (isActive ? styles.navLinkActive : styles.navLink)}
-          >
-            Library — Families
-          </NavLink>
-          <NavLink
-            to="/library/models"
-            className={({ isActive }) => (isActive ? styles.navLinkActive : styles.navLink)}
-          >
-            Library — Models
-          </NavLink>
-          <NavLink
-            to="/library/loras"
-            className={({ isActive }) => (isActive ? styles.navLinkActive : styles.navLink)}
-          >
-            Library — LoRAs
-          </NavLink>
-        </nav>
+        <button
+          type="button"
+          className={styles.sidebarNew}
+          disabled={!targetProjectId || createSession.isPending}
+          title={targetProjectId ? "New session in current or first project" : "Create a project first"}
+          onClick={() => {
+            if (targetProjectId) createSession.mutate(targetProjectId);
+          }}
+        >
+          <Icon name="Plus" size={12} />
+          New session
+        </button>
+      </div>
+      <div className={styles.foot}>
+        <span>Quarry · v0.3</span>
+        <button type="button" className={styles.footBtn} title="Settings" aria-label="Settings">
+          <Icon name="Settings" size={12} />
+        </button>
       </div>
     </aside>
   );
@@ -92,20 +106,6 @@ function ProjectRow({
   const [open, setOpen] = useState(() => project.id === activeProjectId);
   const sessions = useSessionsByProject(open ? project.id : undefined);
   const navigate = useNavigate();
-  const invalidate = useSessionInvalidation();
-
-  const createSession = useMutation({
-    mutationFn: () =>
-      sessionsApi.createSession(project.id, {
-        name: `untitled · ${new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`,
-        model_name: null,
-        use_negative: true,
-      }),
-    onSuccess: (s) => {
-      invalidate.projects();
-      navigate(`/projects/${project.id}/sessions/${s.id}`);
-    },
-  });
 
   return (
     <div className={styles.projGroup}>
@@ -129,21 +129,20 @@ function ProjectRow({
               <button
                 key={s.id}
                 type="button"
-                className={`${styles.sessionRow} ${isActive ? styles.active : ""}`}
+                className={[
+                  styles.sessionRow,
+                  isActive ? styles.sessionRowActive : "",
+                  s.source_image_path ? styles.sessionRowHasResult : "",
+                ]
+                  .filter(Boolean)
+                  .join(" ")}
                 onClick={() => navigate(`/projects/${project.id}/sessions/${s.id}`)}
               >
-                {s.name ?? "untitled"}
+                <span className={styles.sesDot} aria-hidden />
+                <span className={styles.sesName}>{s.name ?? "untitled"}</span>
               </button>
             );
           })}
-          <Button
-            variant="secondary"
-            size="sm"
-            icon={<Icon name="Plus" size={10} />}
-            onClick={() => createSession.mutate()}
-          >
-            New session
-          </Button>
         </div>
       )}
     </div>

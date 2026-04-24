@@ -2,21 +2,61 @@
   display: flex;
   flex-direction: column;
   height: 100%;
+  min-height: 0;
+  background: var(--bg-sunken, var(--surface));
+  border-right: 1px solid var(--border);
 }
 
 .head {
+  padding: 12px 14px 8px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 12px;
-  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.headTitle {
+  font-size: 10.5px;
   font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-subtle);
 }
 
 .scroll {
   flex: 1;
+  min-height: 0;
   overflow: auto;
-  padding: 8px;
+  padding: 0 6px 10px;
+}
+
+.foot {
+  padding: 10px 12px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 10.5px;
+  color: var(--text-subtle);
+  flex-shrink: 0;
+}
+
+.footBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 4px;
+  border: none;
+  border-radius: var(--r-xs, 4px);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.footBtn:hover {
+  color: var(--text);
+  background: var(--surface, var(--surface-alt));
 }
 
 .projGroup {
@@ -28,22 +68,25 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 6px 8px;
+  padding: 5px 8px;
   background: transparent;
   border: 0;
-  color: var(--text);
+  color: var(--text-muted);
   cursor: pointer;
-  border-radius: 4px;
+  border-radius: var(--r-xs, 4px);
   text-align: left;
+  font-size: 12.5px;
 }
 
 .projRow:hover {
-  background: var(--surface-alt);
+  background: var(--surface, var(--surface-alt));
+  color: var(--text);
 }
 
 .chev {
   transition: transform 0.12s;
   display: inline-flex;
+  color: var(--text-subtle);
 }
 
 .projRow[data-open="true"] .chev {
@@ -52,19 +95,22 @@
 
 .projName {
   flex: 1;
-  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--text);
+  font-size: 12.5px;
 }
 
 .projCount {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 10.5px;
   color: var(--text-subtle);
-  font-size: var(--text-xs);
 }
 
 .sessionList {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  padding: 2px 0 6px 20px;
+  padding: 2px 0 4px 22px;
+  gap: 0;
 }
 
 .sessionRow {
@@ -72,60 +118,78 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 6px 8px;
+  padding: 4px 8px;
   background: transparent;
-  border: 0;
-  color: var(--text);
+  border: none;
+  border-left: 2px solid transparent;
+  color: var(--text-muted);
   cursor: pointer;
-  border-radius: 4px;
+  border-radius: var(--r-xs, 4px);
   text-align: left;
-  font-size: var(--text-sm);
+  font-size: 12px;
+  min-width: 0;
 }
 
 .sessionRow:hover {
-  background: var(--surface-alt);
-}
-
-.sessionRow.active {
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
-  color: var(--accent);
-}
-
-.sectionDivider {
-  height: 1px;
-  background: var(--border);
-  margin: 12px 0;
-}
-
-.libraryNav {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.navLink,
-.navLinkActive {
-  display: block;
-  padding: 6px 8px;
-  font-size: var(--text-sm);
-  border-radius: 4px;
+  background: var(--surface, var(--surface-alt));
   color: var(--text);
-  text-decoration: none;
 }
 
-.navLink:hover {
-  background: var(--surface-alt);
+.sessionRowActive {
+  background: var(--bg-raised, #fff);
+  color: var(--text);
+  border-left-color: var(--accent);
 }
 
-.navLinkActive {
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
+.sesDot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--border-strong, var(--border));
+  flex-shrink: 0;
+}
+
+.sessionRowHasResult .sesDot {
+  background: var(--accent);
+}
+
+.sesName {
+  flex: 1;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.sidebarNew {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: calc(100% - 12px);
+  margin: 6px;
+  box-sizing: border-box;
+  padding: 6px 10px;
+  background: transparent;
+  border: 1px dashed var(--border-strong, var(--border));
+  border-radius: var(--r-sm, 6px);
+  color: var(--text-muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.sidebarNew:hover:not(:disabled) {
   color: var(--accent);
+  border-color: var(--accent);
+}
+
+.sidebarNew:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .empty {
   padding: 12px;
   color: var(--text-subtle);
-  font-size: var(--text-xs);
+  font-size: var(--text-xs, 11px);
   font-style: italic;
 }
 
@@ -142,5 +206,5 @@
 }
 
 .iconBtn:hover {
-  background: var(--surface-alt);
+  background: var(--surface, var(--surface-alt));
 }

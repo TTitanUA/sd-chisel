@@ -48,18 +48,20 @@ export default function WorkspaceRoute() {
           <b>{s.name ?? "untitled"}</b>
         </div>
         <div className={styles.spacer} />
-        {s.model_name && <Badge>{s.model_name}</Badge>}
-        {s.use_negative && <Badge>neg · on</Badge>}
-        {s.pinned_loras.length > 0 && (
-          <Badge variant="accent">{s.pinned_loras.length} pinned</Badge>
-        )}
-        <Button
-          size="sm"
-          icon={<Icon name="Settings" size={12} />}
-          onClick={() => setDrawerOpen(true)}
-        >
-          Session settings
-        </Button>
+        <div className={styles.actions}>
+          {s.model_name && <Badge>{s.model_name}</Badge>}
+          {s.use_negative && <Badge>neg · on</Badge>}
+          {s.pinned_loras.length > 0 && (
+            <Badge variant="accent">{s.pinned_loras.length} pinned</Badge>
+          )}
+          <Button
+            size="sm"
+            icon={<Icon name="Settings" size={12} />}
+            onClick={() => setDrawerOpen(true)}
+          >
+            Session settings
+          </Button>
+        </div>
       </header>
       <div className={styles.grid}>
         <SourceImagePane session={s} />

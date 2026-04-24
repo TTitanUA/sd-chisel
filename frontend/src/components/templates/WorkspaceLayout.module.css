@@ -9,24 +9,41 @@
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 8px 16px;
+  height: 40px;
+  box-sizing: border-box;
+  padding: 0 16px;
   border-bottom: 1px solid var(--border);
-  background: var(--surface);
+  background: var(--bg);
+  flex-shrink: 0;
 }
 
 .crumbs {
   display: flex;
-  gap: 8px;
-  font-size: var(--text-sm);
-  align-items: baseline;
+  gap: 6px;
+  font-size: 12px;
+  align-items: center;
+  color: var(--text-subtle);
+  font-family: var(--font-ui, inherit);
+}
+
+.crumbs b {
+  color: var(--text);
+  font-weight: 600;
 }
 
 .sep {
-  color: var(--text-subtle);
+  color: var(--border-strong, var(--border));
 }
 
 .spacer {
   flex: 1;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
 }
 
 .grid {
