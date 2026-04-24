@@ -1,7 +1,6 @@
 """CLI: apply migrations against ./data/app.db.
 
-Invoke:  python -m app.cli.init_db
-         sd-init-db               (via project script entry point)
+Invoke:  uv run db-init
 """
 from __future__ import annotations
 
