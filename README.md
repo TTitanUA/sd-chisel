@@ -10,7 +10,7 @@ See:
 
 - Python 3.11+
 - Node.js 20+ with pnpm (`npm i -g pnpm`)
-- `uv` recommended (`pip install uv`); plain pip works too
+- `uv` for backend environment and commands
 - LMStudio (or any OpenAI-compatible endpoint) running locally — required in Slice 3+, not for foundation
 
 ## First-time setup
@@ -18,9 +18,8 @@ See:
 ```bash
 # Backend
 cd backend
-uv venv
-uv pip install -e ".[dev]"
-python -m app.cli.init_db          # applies migrations, seeds 10 families
+uv sync --extra dev
+uv run db-init                     # applies migrations, seeds 10 families
 
 # Frontend
 cd ../frontend
@@ -33,7 +32,7 @@ Two terminals:
 
 ```bash
 # Terminal 1 — backend
-cd backend && .venv/Scripts/python -m uvicorn app.main:app --reload --port 8000
+cd backend && uv run dev
 
 # Terminal 2 — frontend
 cd frontend && pnpm dev
@@ -41,11 +40,23 @@ cd frontend && pnpm dev
 
 Open http://localhost:5173/.
 
+## Backend commands
+
+Run these from `backend/`:
+
+```bash
+uv sync --extra dev                # install/update backend dependencies
+uv run db-init                     # apply migrations and seed families
+uv run dev                         # run API on http://localhost:8000
+uv run pytest                      # run backend tests
+uv run ruff check                  # lint backend code
+```
+
 ## Tests
 
 ```bash
 # Backend
-cd backend && .venv/Scripts/python -m pytest
+cd backend && uv run pytest
 
 # Frontend
 cd frontend && pnpm test
