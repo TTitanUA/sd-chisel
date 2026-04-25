@@ -1,4 +1,5 @@
 import * as Dialog from "@radix-ui/react-dialog";
+import { Link } from "react-router-dom";
 import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { Button } from "@/components/atoms/Button";
@@ -11,6 +12,7 @@ import {
   type PinnedLora,
   type Session,
 } from "@/api/sessions";
+import { useLmModelsByRole } from "@/api/settings";
 import styles from "./SessionSettingsDrawer.module.css";
 
 export function SessionSettingsDrawer({
@@ -24,12 +26,16 @@ export function SessionSettingsDrawer({
 }) {
   const models = useModels();
   const loras = useLoras();
+  const vlChoices = useLmModelsByRole("vl");
+  const promptChoices = useLmModelsByRole("prompt");
   const invalidate = useSessionInvalidation();
 
   const [name, setName] = useState(session.name ?? "");
   const [modelName, setModelName] = useState(session.model_name ?? "");
   const [useNegative, setUseNegative] = useState(session.use_negative);
   const [pinned, setPinned] = useState<PinnedLora[]>(session.pinned_loras);
+  const [vlModel, setVlModel] = useState(session.vl_model_name ?? "");
+  const [promptModel, setPromptModel] = useState(session.prompt_model_name ?? "");
   const [loraSearch, setLoraSearch] = useState("");
 
   const save = useMutation({
@@ -39,6 +45,8 @@ export function SessionSettingsDrawer({
         model_name: modelName || null,
         use_negative: useNegative,
         pinned_loras: pinned,
+        vl_model_name: vlModel || null,
+        prompt_model_name: promptModel || null,
       }),
     onSuccess: () => {
       invalidate.session(session.id);
@@ -58,14 +66,17 @@ export function SessionSettingsDrawer({
     `${l.name} ${l.display_name}`.toLowerCase().includes(loraSearch.toLowerCase()),
   );
 
+  const noLmModels =
+    !vlChoices.isLoading
+    && !promptChoices.isLoading
+    && (vlChoices.data?.length ?? 0) === 0
+    && (promptChoices.data?.length ?? 0) === 0;
+
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>
         <Dialog.Overlay className={styles.overlay} />
-        <Dialog.Content
-          className={styles.panel}
-          aria-describedby={undefined}
-        >
+        <Dialog.Content className={styles.panel} aria-describedby={undefined}>
           <div className={styles.head}>
             <Dialog.Title className={styles.title}>Session settings</Dialog.Title>
             <Dialog.Close asChild>
@@ -81,7 +92,7 @@ export function SessionSettingsDrawer({
               onChange={(e) => setName(e.currentTarget.value)}
             />
             <div className={styles.labelBlock}>
-              <span>Base model</span>
+              <span>Base model (diffusion)</span>
               <select
                 className={styles.select}
                 value={modelName}
@@ -103,6 +114,51 @@ export function SessionSettingsDrawer({
               />
               Use negative prompt
             </label>
+
+            <div className={styles.labelBlock}>
+              <span>VL model (image analysis)</span>
+              <select
+                aria-label="VL model"
+                className={styles.select}
+                value={vlModel}
+                onChange={(e) => setVlModel(e.currentTarget.value)}
+                disabled={(vlChoices.data?.length ?? 0) === 0}
+              >
+                <option value="">(not set)</option>
+                {(vlChoices.data ?? []).map((m) => (
+                  <option key={m.name} value={m.name}>{m.name}</option>
+                ))}
+              </select>
+            </div>
+
+            <div className={styles.labelBlock}>
+              <span>Prompt model (text LLM)</span>
+              <select
+                aria-label="Prompt model"
+                className={styles.select}
+                value={promptModel}
+                onChange={(e) => setPromptModel(e.currentTarget.value)}
+                disabled={(promptChoices.data?.length ?? 0) === 0}
+              >
+                <option value="">(not set)</option>
+                {(promptChoices.data ?? []).map((m) => (
+                  <option key={m.name} value={m.name}>{m.name}</option>
+                ))}
+              </select>
+            </div>
+
+            {noLmModels && (
+              <div style={{
+                fontSize: 12, color: "var(--text-subtle)",
+                border: "1px dashed var(--border)", borderRadius: 6, padding: 10,
+              }}>
+                No enabled LMStudio models yet.{" "}
+                <Link to="/settings/lmstudio" onClick={() => onOpenChange(false)}>
+                  Configure LMStudio →
+                </Link>
+              </div>
+            )}
+
             <div>
               <div style={{ marginBottom: 6 }}>Pinned LoRAs ({pinned.length})</div>
               <TextInput
