@@ -21,6 +21,8 @@ export type Session = {
   source_image_path: string | null;
   source_image_url: string | null;
   vl_summary: string | null;
+  vl_model_name: string | null;
+  prompt_model_name: string | null;
   created_at: number;
   updated_at: number;
 };
@@ -36,6 +38,8 @@ export type SessionUpdate = {
   model_name: string | null;
   use_negative: boolean;
   pinned_loras: PinnedLora[];
+  vl_model_name: string | null;
+  prompt_model_name: string | null;
 };
 
 export const sessionKeys = {
@@ -75,6 +79,8 @@ export const sessionsApi = {
   },
   clearSource: (id: string) =>
     apiFetch<Session>(`/api/sessions/${id}/source`, { method: "DELETE" }),
+  analyzeSource: (id: string) =>
+    apiFetch<Session>(`/api/sessions/${id}/analyze-source`, { method: "POST" }),
 };
 
 export function useProjects() {
