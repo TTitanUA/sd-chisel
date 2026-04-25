@@ -34,10 +34,14 @@ function renderDrawer() {
   );
 }
 
+type LorasResult = ReturnType<typeof libraryApi.useLoras>;
+type ModelsResult = ReturnType<typeof libraryApi.useModels>;
+type LmModelsByRoleResult = ReturnType<typeof settingsApi.useLmModelsByRole>;
+
 describe("SessionSettingsDrawer model pickers", () => {
   beforeEach(() => {
-    vi.spyOn(libraryApi, "useLoras").mockReturnValue({ data: [] } as any);
-    vi.spyOn(libraryApi, "useModels").mockReturnValue({ data: [] } as any);
+    vi.spyOn(libraryApi, "useLoras").mockReturnValue({ data: [] } as unknown as LorasResult);
+    vi.spyOn(libraryApi, "useModels").mockReturnValue({ data: [] } as unknown as ModelsResult);
   });
   afterEach(() => vi.restoreAllMocks());
 
@@ -48,7 +52,7 @@ describe("SessionSettingsDrawer model pickers", () => {
           ? [{ name: "qwen-vl", role: "vl", enabled: true, last_seen: 0 },
              { name: "any-model", role: "both", enabled: true, last_seen: 0 }]
           : [{ name: "any-model", role: "both", enabled: true, last_seen: 0 }],
-      } as any),
+      } as unknown as LmModelsByRoleResult),
     );
     renderDrawer();
     const vlSelect = screen.getByLabelText(/vl model/i) as HTMLSelectElement;
@@ -59,7 +63,7 @@ describe("SessionSettingsDrawer model pickers", () => {
   });
 
   it("shows 'Configure LMStudio' link when no models cached", () => {
-    vi.spyOn(settingsApi, "useLmModelsByRole").mockReturnValue({ data: [] } as any);
+    vi.spyOn(settingsApi, "useLmModelsByRole").mockReturnValue({ data: [] } as unknown as LmModelsByRoleResult);
     renderDrawer();
     expect(screen.getByRole("link", { name: /configure lmstudio/i })).toBeInTheDocument();
   });
