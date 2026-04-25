@@ -89,3 +89,38 @@
   color: var(--danger);
   font-size: var(--text-xs);
 }
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+  align-items: stretch;
+}
+
+.summary {
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  padding: 10px 12px;
+  background: var(--bg-subtle, var(--bg-raised));
+  font-size: var(--text-xs);
+  line-height: 1.5;
+}
+
+.summary[data-state="pending"] {
+  font-style: italic;
+  color: var(--text-muted);
+}
+
+.summaryHead {
+  font-weight: 600;
+  margin-bottom: 4px;
+  color: var(--text-subtle);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 10px;
+}
+
+.summaryBody {
+  white-space: pre-wrap;
+}
