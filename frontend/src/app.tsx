@@ -5,10 +5,12 @@ import { useProjects } from "./api/sessions";
 import { AppShell } from "./components/templates/AppShell";
 import { WorkspaceLayout } from "./components/templates/WorkspaceLayout";
 import { LibraryLayout } from "./components/templates/LibraryLayout";
+import { SettingsLayout } from "./components/templates/SettingsLayout";
 import WorkspaceRoute, { ProjectLanding } from "./routes/workspace";
 import FamiliesRoute from "./routes/library/families";
 import ModelsRoute from "./routes/library/models";
 import LorasRoute from "./routes/library/loras";
+import LmStudioRoute from "./routes/settings/lmstudio";
 
 function RootRedirect() {
   const projects = useProjects();
@@ -69,6 +71,18 @@ export function App() {
                 <LibraryLayout>
                   <LorasRoute />
                 </LibraryLayout>
+              }
+            />
+            <Route
+              path="/settings"
+              element={<Navigate to="/settings/lmstudio" replace />}
+            />
+            <Route
+              path="/settings/lmstudio"
+              element={
+                <SettingsLayout>
+                  <LmStudioRoute />
+                </SettingsLayout>
               }
             />
             <Route path="*" element={<div style={{ padding: 24 }}>404</div>} />

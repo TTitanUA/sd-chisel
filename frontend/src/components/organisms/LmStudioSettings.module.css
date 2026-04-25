@@ -1,0 +1,76 @@
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  max-width: 720px;
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.h {
+  font-size: var(--text-md);
+  font-weight: 600;
+}
+
+.sub {
+  color: var(--text-subtle);
+  font-size: var(--text-xs);
+}
+
+.row {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+}
+
+.banner {
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  padding: 12px 14px;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  background: var(--bg-raised);
+}
+
+.banner[data-tone="error"] {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.modelTable {
+  display: grid;
+  grid-template-columns: 1fr 130px 90px 110px;
+  gap: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  overflow: hidden;
+}
+
+.modelTable > div {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  font-size: var(--text-sm);
+  display: flex;
+  align-items: center;
+}
+
+.modelTable > div:nth-last-child(-n+4) {
+  border-bottom: 0;
+}
+
+.headCell {
+  background: var(--bg-raised);
+  color: var(--text-subtle);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.modelRoleSelect {
+  width: 100%;
+  font-size: var(--text-sm);
+}
