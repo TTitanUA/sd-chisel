@@ -145,3 +145,49 @@ def test_delete_session_cascades_messages(conn):
 
     assert session_repo.get_session(conn, s["id"]) is None
     assert list(conn.execute("SELECT * FROM messages WHERE session_id=?", (s["id"],))) == []
+
+
+def test_update_session_persists_model_picks(conn):
+    pid = session_repo.create_project(conn, name="P")["id"]
+    sid = session_repo.create_session(conn, project_id=pid)["id"]
+
+    session_repo.update_session(
+        conn,
+        sid,
+        name=None,
+        model_name=None,
+        use_negative=True,
+        vl_model_name="qwen2-vl-7b-instruct",
+        prompt_model_name="mistral-nemo-12b",
+    )
+
+    fetched = session_repo.get_session_with_pinned(conn, sid)
+    assert fetched["vl_model_name"] == "qwen2-vl-7b-instruct"
+    assert fetched["prompt_model_name"] == "mistral-nemo-12b"
+
+
+def test_update_session_can_clear_model_picks(conn):
+    pid = session_repo.create_project(conn, name="P")["id"]
+    sid = session_repo.create_session(conn, project_id=pid)["id"]
+    session_repo.update_session(
+        conn, sid, name=None, model_name=None, use_negative=True,
+        vl_model_name="m", prompt_model_name="m",
+    )
+    session_repo.update_session(
+        conn, sid, name=None, model_name=None, use_negative=True,
+        vl_model_name=None, prompt_model_name=None,
+    )
+    after = session_repo.get_session_with_pinned(conn, sid)
+    assert after["vl_model_name"] is None
+    assert after["prompt_model_name"] is None
+
+
+def test_set_vl_summary_persists_and_bumps_updated_at(conn):
+    pid = session_repo.create_project(conn, name="P")["id"]
+    created = session_repo.create_session(conn, project_id=pid)
+    sid = created["id"]
+
+    session_repo.set_vl_summary(conn, sid, "moody portrait")
+    after = session_repo.get_session_with_pinned(conn, sid)
+    assert after["vl_summary"] == "moody portrait"
+    assert after["updated_at"] >= created["updated_at"]

@@ -144,12 +144,18 @@ def update_session(
     name: str | None,
     model_name: str | None,
     use_negative: bool,
+    vl_model_name: str | None = None,
+    prompt_model_name: str | None = None,
 ) -> dict[str, Any] | None:
     now = _now()
     cur = conn.execute(
-        "UPDATE sessions SET name = ?, model_name = ?, use_negative = ?, updated_at = ? "
+        "UPDATE sessions SET name = ?, model_name = ?, use_negative = ?, "
+        "vl_model_name = ?, prompt_model_name = ?, updated_at = ? "
         "WHERE id = ?",
-        (name, model_name, 1 if use_negative else 0, now, session_id),
+        (
+            name, model_name, 1 if use_negative else 0,
+            vl_model_name, prompt_model_name, now, session_id,
+        ),
     )
     if cur.rowcount == 0:
         return None
@@ -165,6 +171,13 @@ def update_session(
 def delete_session(conn: sqlite3.Connection, session_id: str) -> bool:
     cur = conn.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
     return cur.rowcount > 0
+
+
+def set_vl_summary(conn: sqlite3.Connection, session_id: str, summary: str) -> None:
+    conn.execute(
+        "UPDATE sessions SET vl_summary = ?, updated_at = ? WHERE id = ?",
+        (summary, _now(), session_id),
+    )
 
 
 # --- pinned loras -----------------------------------------------------------
