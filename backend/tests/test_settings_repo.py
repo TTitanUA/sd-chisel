@@ -39,6 +39,27 @@ def test_set_lmstudio_strips_trailing_slash_in_base_url(conn):
     assert settings_repo.get_lmstudio(conn)["lmstudio_base_url"] == "http://h/v1"
 
 
+def test_set_lmstudio_appends_v1_when_path_is_empty(conn):
+    settings_repo.set_lmstudio(conn, base_url="http://localhost:1234", api_key=None)
+    assert settings_repo.get_lmstudio(conn)["lmstudio_base_url"] == "http://localhost:1234/v1"
+
+
+def test_set_lmstudio_appends_v1_when_path_is_root_slash(conn):
+    settings_repo.set_lmstudio(conn, base_url="http://localhost:1234/", api_key=None)
+    assert settings_repo.get_lmstudio(conn)["lmstudio_base_url"] == "http://localhost:1234/v1"
+
+
+def test_set_lmstudio_keeps_custom_path_intact(conn):
+    """Reverse-proxy prefixes like /proxy/openai/v1 must not be mangled."""
+    settings_repo.set_lmstudio(
+        conn, base_url="https://proxy.example.com/proxy/openai/v1", api_key=None,
+    )
+    assert (
+        settings_repo.get_lmstudio(conn)["lmstudio_base_url"]
+        == "https://proxy.example.com/proxy/openai/v1"
+    )
+
+
 def test_set_lmstudio_can_clear_to_null(conn):
     settings_repo.set_lmstudio(conn, base_url="http://h/v1", api_key="k")
     settings_repo.set_lmstudio(conn, base_url=None, api_key=None)

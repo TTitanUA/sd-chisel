@@ -5,6 +5,7 @@ import sqlite3
 import time
 from collections.abc import Iterable
 from typing import Any, Literal
+from urllib.parse import urlparse
 
 ROLE = Literal["vl", "prompt", "both"]
 _VALID_ROLES = {"vl", "prompt", "both"}
@@ -15,10 +16,23 @@ def _now() -> int:
 
 
 def _normalize_base_url(value: str | None) -> str | None:
+    """Strip trailing slash, then auto-append `/v1` when no path is given.
+
+    LMStudio (and the OpenAI spec generally) expose the model API under `/v1`.
+    Users routinely paste `http://localhost:1234` from the LMStudio UI, which
+    silently fails with a shape error on refresh. Appending `/v1` only when
+    the path is empty avoids surprising users who legitimately use a
+    reverse-proxied prefix like `/proxy/openai/v1`.
+    """
     if value is None:
         return None
     stripped = value.strip().rstrip("/")
-    return stripped or None
+    if not stripped:
+        return None
+    parsed = urlparse(stripped)
+    if parsed.scheme and parsed.netloc and parsed.path in ("", "/"):
+        return f"{stripped}/v1"
+    return stripped
 
 
 # --- app_settings ---------------------------------------------------------
