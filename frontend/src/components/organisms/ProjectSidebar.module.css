@@ -52,6 +52,7 @@
   background: transparent;
   color: var(--text-muted);
   cursor: pointer;
+  text-decoration: none;
 }
 
 .footBtn:hover {

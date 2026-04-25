@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { useMutation } from "@tanstack/react-query";
 import { Icon } from "@/components/atoms/Icon";
 import {
@@ -86,9 +86,14 @@ export function ProjectSidebar() {
       </div>
       <div className={styles.foot}>
         <span>Quarry · v0.3</span>
-        <button type="button" className={styles.footBtn} title="Settings" aria-label="Settings">
+        <Link
+          to="/settings/lmstudio"
+          className={styles.footBtn}
+          title="Settings"
+          aria-label="Settings"
+        >
           <Icon name="Settings" size={12} />
-        </button>
+        </Link>
       </div>
     </aside>
   );

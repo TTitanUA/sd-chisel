@@ -107,15 +107,24 @@
   border: 1px solid var(--border);
   border-radius: var(--r-xs, 4px);
   background: var(--bg);
+  text-decoration: none;
+  cursor: pointer;
 }
 
 .endpointDot {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: var(--success);
+  background: var(--text-subtle);
   flex-shrink: 0;
-  box-shadow: 0 0 6px color-mix(in oklab, var(--success) 60%, transparent);
+}
+
+.endpointDotOn {
+  background: var(--ok, #4caf50);
+  box-shadow: 0 0 6px color-mix(in oklab, var(--ok, #4caf50) 60%, transparent);
+}
+.endpointDotOff {
+  background: var(--danger, #ef5350);
 }
 
 .sidebar {

@@ -1,14 +1,18 @@
 import { Link, Outlet, useLocation } from "react-router-dom";
 import { ProjectSidebar } from "@/components/organisms/ProjectSidebar";
+import { useLmStudioConfig } from "@/api/settings";
 import styles from "./AppShell.module.css";
-
-// TODO: wire endpoint text to live session / backend once vl_endpoint and prompt_endpoint are exposed
-const PLACEHOLDER_LMSTUDIO_HOST = "localhost:1234";
-const PLACEHOLDER_VL_MODEL = "qwen2-vl-7b";
 
 export function AppShell() {
   const { pathname } = useLocation();
   const inLibrary = pathname.startsWith("/library");
+  const inSettings = pathname.startsWith("/settings");
+  const cfg = useLmStudioConfig();
+
+  const host = cfg.data?.base_url
+    ? cfg.data.base_url.replace(/^https?:\/\//, "").replace(/\/v1\/?$/, "")
+    : "(no endpoint)";
+  const dot = cfg.data?.configured ? styles.endpointDotOn : styles.endpointDotOff;
 
   return (
     <div className={styles.shell}>
@@ -21,7 +25,7 @@ export function AppShell() {
           <nav className={styles.topbarNav} aria-label="App mode">
             <Link
               to="/"
-              className={`${styles.navPill} ${!inLibrary ? styles.navPillActive : ""}`}
+              className={`${styles.navPill} ${!inLibrary && !inSettings ? styles.navPillActive : ""}`}
             >
               Workspace
             </Link>
@@ -31,17 +35,28 @@ export function AppShell() {
             >
               Library
             </Link>
+            <Link
+              to="/settings/lmstudio"
+              className={`${styles.navPill} ${inSettings ? styles.navPillActive : ""}`}
+            >
+              Settings
+            </Link>
           </nav>
         </div>
         <div className={styles.topbarSpacer} />
         <div className={styles.topbarRight}>
-          <span className={styles.topbarEndpoint} title="LMStudio endpoint (placeholder)">
-            <span className={styles.endpointDot} />
-            {PLACEHOLDER_LMSTUDIO_HOST}
-          </span>
-          <span className={styles.topbarEndpoint} title="Models in use (placeholder)">
-            VL · {PLACEHOLDER_VL_MODEL}
-          </span>
+          <Link
+            to="/settings/lmstudio"
+            className={styles.topbarEndpoint}
+            title={
+              cfg.data?.configured
+                ? `LMStudio · ${cfg.data.base_url}`
+                : "LMStudio endpoint not configured — click to set up"
+            }
+          >
+            <span className={`${styles.endpointDot} ${dot}`} />
+            {host}
+          </Link>
         </div>
       </header>
       <div className={styles.sidebar}>

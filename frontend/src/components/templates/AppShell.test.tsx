@@ -9,6 +9,14 @@ function mockFetch() {
   vi.stubGlobal(
     "fetch",
     vi.fn((url: string) => {
+      if (String(url).includes("/api/settings/lmstudio")) {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({ base_url: null, api_key: null, configured: false, updated_at: 0 }),
+            { status: 200 },
+          ),
+        );
+      }
       if (String(url).endsWith("/api/projects")) {
         return Promise.resolve(new Response(JSON.stringify([]), { status: 200 }));
       }
@@ -25,7 +33,7 @@ describe("AppShell", () => {
     mockFetch();
   });
 
-  it("renders the brand, project sidebar, topbar mode pills, placeholders, and the child outlet on workspace", () => {
+  it("renders the brand, project sidebar, topbar mode pills, endpoint chip, and the child outlet on workspace", async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     render(
       <QueryClientProvider client={client}>
@@ -43,8 +51,7 @@ describe("AppShell", () => {
     expect(screen.getByText("Projects")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /^Workspace$/i })).toHaveClass(styles.navPillActive);
     expect(screen.getByRole("link", { name: /^Library$/i })).not.toHaveClass(styles.navPillActive);
-    expect(screen.getByText("localhost:1234")).toBeInTheDocument();
-    expect(screen.getByText(/VL · qwen2-vl-7b/)).toBeInTheDocument();
+    expect(await screen.findByText("(no endpoint)")).toBeInTheDocument();
     expect(screen.getByText("child")).toBeInTheDocument();
   });
 
@@ -64,6 +71,7 @@ describe("AppShell", () => {
 
     expect(screen.getByRole("link", { name: /^Library$/i })).toHaveClass(styles.navPillActive);
     expect(screen.getByRole("link", { name: /^Workspace$/i })).not.toHaveClass(styles.navPillActive);
+    expect(screen.getAllByRole("link", { name: /^Settings$/i }).length).toBeGreaterThan(0);
     expect(screen.getByText("lib-child")).toBeInTheDocument();
   });
 });
