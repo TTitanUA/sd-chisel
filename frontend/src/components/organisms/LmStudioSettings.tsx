@@ -23,7 +23,6 @@ export function LmStudioSettings() {
 
   const [baseUrl, setBaseUrl] = useState("");
   const [apiKey, setApiKey] = useState("");
-  const [showKey, setShowKey] = useState(false);
 
   useEffect(() => {
     if (cfg.data) {
@@ -68,20 +67,12 @@ export function LmStudioSettings() {
           value={baseUrl}
           onChange={(e) => setBaseUrl(e.currentTarget.value)}
         />
-        <div className={styles.row} style={{ alignItems: "flex-end" }}>
-          <div style={{ flex: 1 }}>
-            <TextInput
-              label="API key (optional)"
-              placeholder="leave empty for local LMStudio"
-              type={showKey ? "text" : "password"}
-              value={apiKey}
-              onChange={(e) => setApiKey(e.currentTarget.value)}
-            />
-          </div>
-          <Button size="sm" onClick={() => setShowKey((v) => !v)}>
-            {showKey ? "Hide" : "Show"}
-          </Button>
-        </div>
+        <TextInput
+          label="API key (optional)"
+          placeholder="leave empty for local LMStudio"
+          value={apiKey}
+          onChange={(e) => setApiKey(e.currentTarget.value)}
+        />
         <div>
           <Button
             variant="primary"
