@@ -43,6 +43,8 @@ class SessionOut(StrictModel):
     source_image_path: str | None
     source_image_url: str | None
     vl_summary: str | None
+    vl_model_name: str | None
+    prompt_model_name: str | None
     created_at: int
     updated_at: int
 
@@ -58,3 +60,5 @@ class SessionUpdate(StrictModel):
     model_name: str | None = None
     use_negative: bool
     pinned_loras: list[PinnedLoraIn] = Field(default_factory=list)
+    vl_model_name: str | None = None
+    prompt_model_name: str | None = None
