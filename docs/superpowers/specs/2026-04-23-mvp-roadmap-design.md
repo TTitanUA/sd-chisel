@@ -38,6 +38,21 @@
 
 Уточнение, не противоречащее спеке: используем простые версионированные `.sql` файлы + тонкий runner (не Alembic). Spec-side — это деталь реализации внутри `app/storage/db.py`, formal spec change не требуется.
 
+### 2.3. LMStudio endpoint — глобальный, не per-session (правка от 2026-04-25)
+
+Спека §3 описывает `sessions.vl_endpoint` / `sessions.prompt_endpoint` как JSON-колонки per session. На практике пользователь работает с одним LMStudio-инстансом, и хранение endpoint в каждой сессии бессмысленно дублирует данные и заставляет настраивать один и тот же URL в каждом drawer’е.
+
+**Меняем:**
+
+- Дропаем колонки `sessions.vl_endpoint` и `sessions.prompt_endpoint`.
+- Добавляем синглтон-таблицу `app_settings(id=1, lmstudio_base_url, lmstudio_api_key, updated_at)`.
+- Добавляем кеш-таблицу `lm_models(name PK, role IN ('vl','prompt','both'), enabled, last_seen)` — список моделей, доступных в LMStudio, с user-toggleable `enabled` и `role`.
+- В сессии остаются только два указателя — `sessions.vl_model_name` и `sessions.prompt_model_name` (TEXT, no FK; `lm_models` — кеш, FK был бы хрупким).
+
+**Почему отдельные `lm_models`, а не переиспользуем `models`:** в библиотеке `models` — это диффузные чекпоинты (Juggernaut, Pony и т.д.), сущность другого слоя. LMStudio-модели — это LLM/VL чат-completion модели; смешивать их в одной таблице путает.
+
+**UI-следствия:** новый route group `/settings/lmstudio` со страницей конфига endpoint + кнопка *Refresh from LMStudio* + список моделей с тоглами. Drawer сессии теряет endpoint-инпуты, остаются два дропдауна (VL model / Prompt model) поверх enabled-моделей. Topbar показывает реальный host + connection dot вместо плейсхолдера.
+
 ---
 
 ## 3. Foundation phase — content
@@ -192,21 +207,54 @@ frontend/
 
 **Handoff:** следующие срезы получают стабильный session workspace: active session, source image, session settings, pinned LoRAs и путь к файлу, пригодный для VL.
 
-### Slice 3 — VL analyze-source
+### Slice 3 — Settings + LMStudio + VL analyze-source
 
-**Предусловия:** Slice 2 завершён; у сессии может быть source image; в `sessions` есть поля `vl_endpoint` и `vl_summary`.
+**Предусловия:** Slice 2 завершён; у сессии может быть source image; миграции 001/002 применены.
 
-**Scope:**
-- **Бэк:** `app/services/vl_client.py` — OpenAI-compatible client для vision endpoint; `/api/sessions/{id}/analyze-source` читает source image, вызывает VL-модель, сохраняет `vl_summary` в session и возвращает обновлённую session. Endpoint config хранится per session в `vl_endpoint`.
-- **Фронт:** поля VL endpoint в `SessionSettingsDrawer` (base_url, model, api_key), кнопка Analyze в `SourceImagePane`, показ `vl_summary` поверх/рядом с preview, состояния idle/analyzing/done/error.
-- **Storage:** update `sessions.vl_endpoint`, `sessions.vl_summary`, `updated_at`.
-- **Tests/docs:** service test с fake OpenAI-compatible response, API test без реального LMStudio, UI state tests на loading/error/done.
+**Scope (см. §2.3 для архитектурного контекста):**
 
-**Boundary:** нет chat, нет prompt composition, нет result-image critique, нет автоанализа при upload, нет tool-calling.
+- **Backend storage (миграция 003):**
+  - `ALTER TABLE sessions DROP COLUMN vl_endpoint`, `DROP COLUMN prompt_endpoint`.
+  - `ALTER TABLE sessions ADD COLUMN vl_model_name TEXT`, `ADD COLUMN prompt_model_name TEXT`.
+  - `CREATE TABLE app_settings(id PK CHECK(id=1), lmstudio_base_url, lmstudio_api_key, updated_at)`; стартовая строка с NULL-ами.
+  - `CREATE TABLE lm_models(name PK, role CHECK(role IN ('vl','prompt','both')), enabled, last_seen)`.
+- **Backend services:**
+  - `app/services/lm_client.py` — OpenAI-compatible клиент: `list_models(endpoint)` (`GET /v1/models`) + `analyze_image(endpoint, model, image_bytes, content_type)` (`POST /v1/chat/completions` с vision payload). Принимает endpoint-конфиг как параметр (никаких глобальных импортов).
+- **Backend API:**
+  - `GET/PUT /api/settings/lmstudio` — base_url + api_key (api_key опционален).
+  - `POST /api/settings/lmstudio/refresh` — пробит LMStudio через `list_models`, апсертит в `lm_models` (новые приходят с `enabled=1`, `role='both'`), не трогает существующие тогглы кроме `last_seen`. Возвращает обновлённый список или 502/504.
+  - `GET /api/settings/lmstudio/models` — отдаёт кешированный `lm_models`.
+  - `PATCH /api/settings/lmstudio/models/{name}` — меняет `enabled` и/или `role`.
+  - `POST /api/sessions/{id}/analyze-source` — читает global config + `session.vl_model_name`, валидирует что модель есть в `lm_models` и enabled, вызывает `analyze_image`, сохраняет `vl_summary`. 409 если нет global config, нет source image, или нет/disabled `vl_model_name`.
+  - `PATCH /api/sessions/{id}` принимает `vl_model_name` и `prompt_model_name`.
+- **Frontend:**
+  - Новая route group `/settings/*` с `SettingsLayout` (sidebar tabs; пока единственная вкладка — LMStudio).
+  - Страница `/settings/lmstudio`: форма endpoint (base_url, api_key как password-инпут с подсказкой «может быть пустым для LMStudio»), кнопка *Refresh from LMStudio*. Секция моделей: пока config пустой или последний refresh упал — баннер «не подключено · нажмите Refresh» с явной ошибкой; иначе таблица с тоглами enabled и селектом role.
+  - Сайдбар: gear-icon в футере → `Link` на `/settings/lmstudio`.
+  - Topbar (`AppShell`): живой host + connection dot из `app_settings` + `useLmHealth()` (отдельный лёгкий ping-хук, отдельный от refresh — не дёргает /v1/models на каждый рендер).
+  - Drawer сессии: убираем endpoint-инпуты; добавляем два `<select>` — VL model и Prompt model — над enabled `lm_models`, фильтрованных по role. Показ disabled-state с CTA «настроить в Settings», если список пуст.
+  - `SourceImagePane`: меняем мета-строку на `VL · {session.vl_model_name ?? '(not set)'}`, кнопка Analyze дизейблится с понятным title пока (a) нет global config, (b) нет source image, (c) нет или disabled `vl_model_name`. Состояния idle/analyzing/done/error прежние.
+- **Tests/docs:**
+  - Repo tests: app_settings round-trip, lm_models upsert merge-without-clobber, sessions vl_model_name persists.
+  - Service tests на `lm_client` с `httpx.MockTransport`: list_models, analyze_image, error-paths (timeout / non-2xx / shape).
+  - API tests: settings CRUD, refresh-endpoint c monkeypatched lm_client, analyze-source гоняется через настоящий PATCH-цикл (set lmstudio → refresh → enable model → set vl_model_name на сессии → analyze).
+  - UI tests: страница LMStudio (no-config баннер, refresh, тогглы), drawer (model dropdowns), SourceImagePane (disabled-state причины).
 
-**Acceptance:** с настроенным LMStudio или fake-compatible endpoint нажимаю Analyze → вижу loading → получаю summary → summary сохраняется после reload; при ошибке endpoint UI показывает понятную ошибку и не теряет старый summary.
+**Boundary:** chat, prompt composition, result-image, ComfyUI integration, инлайн-пикеры моделей в Chat/VL панелях (только в drawer), полноценные scheduled health-checks в фоне (только on-demand refresh + light ping).
 
-**Handoff:** Chat и generate-prompt могут читать `vl_summary` как стабильный текстовый контекст исходника; endpoint settings уже имеют UI и storage.
+**Acceptance:**
+
+1. Открыл `/settings/lmstudio`, ввёл `base_url`, нажал Refresh → увидел список моделей; перезагрузил страницу → endpoint и тогглы сохранились.
+2. Если LMStudio выключен — Refresh даёт явную ошибку, баннер «не подключено» остаётся, старый кеш `lm_models` не пропадает.
+3. В drawer’е сессии — выбрал VL модель из enabled списка, сохранил → в шапке source-pane виден чип `VL · <model>`.
+4. Нажал Analyze → loading → получил summary → перезагрузил страницу → summary остался.
+5. Если на сессии не выбрана vl_model — Analyze disabled с понятным title; ошибка LMStudio не теряет предыдущий `vl_summary`.
+6. Потоггалл модель в `enabled=false` и/или сменил role → drawer/dropdown сразу обновился (через invalidate query).
+
+**Handoff:** Slice 4 (chat) и Slice 6 (generate-prompt) получают:
+- Готовый global LMStudio config (читай через `settings_repo`).
+- Список enabled `prompt`/`both` моделей и поле `session.prompt_model_name` для выбора per-session.
+- `vl_summary` как стабильный текстовый контекст исходника.
 
 ### Slice 4 — Chat SSE
 
