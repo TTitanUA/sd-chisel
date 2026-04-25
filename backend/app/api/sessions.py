@@ -5,6 +5,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile, status
 
+from app import config as app_config
 from app.api.deps import get_conn
 from app.models.session import (
     ProjectCreate,
@@ -14,7 +15,8 @@ from app.models.session import (
     SessionOut,
     SessionUpdate,
 )
-from app.storage import images, session_repo
+from app.services import lm_client
+from app.storage import images, session_repo, settings_repo
 
 Conn = Annotated[sqlite3.Connection, Depends(get_conn)]
 
@@ -36,7 +38,6 @@ def _session_url(path: str | None) -> str | None:
 
 
 def _session_to_api_dict(row: dict) -> dict:
-    """Narrow DB row to SessionOut (exclude vl_endpoint, prompt_endpoint, etc.)."""
     return {
         "id": row["id"],
         "project_id": row["project_id"],
@@ -47,6 +48,8 @@ def _session_to_api_dict(row: dict) -> dict:
         "source_image_path": row.get("source_image_path"),
         "source_image_url": _session_url(row.get("source_image_path")),
         "vl_summary": row.get("vl_summary"),
+        "vl_model_name": row.get("vl_model_name"),
+        "prompt_model_name": row.get("prompt_model_name"),
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
     }
@@ -145,6 +148,8 @@ def update_session(session_id: str, body: SessionUpdate, conn: Conn):
         name=body.name,
         model_name=body.model_name,
         use_negative=body.use_negative,
+        vl_model_name=body.vl_model_name,
+        prompt_model_name=body.prompt_model_name,
     )
     if row is None:
         raise _not_found("session", session_id)
@@ -213,4 +218,79 @@ def clear_source(session_id: str, conn: Conn):
     for previous in target_dir.glob("source.*"):
         previous.unlink()
     session_repo.clear_source_image(conn, session_id)
+    return _session_payload(conn, session_id)
+
+
+_EXT_TO_CT: dict[str, str] = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".webp": "image/webp",
+}
+
+
+def _content_type_from_ext(ext: str) -> str:
+    if ext not in _EXT_TO_CT:
+        raise HTTPException(
+            status_code=409,
+            detail=f"stored image has unsupported extension: {ext!r}",
+        )
+    return _EXT_TO_CT[ext]
+
+
+def _validated_vl_model(conn: sqlite3.Connection, name: str | None) -> str:
+    if not name:
+        raise HTTPException(
+            status_code=409,
+            detail="session has no vl_model_name selected",
+        )
+    row = settings_repo.get_lm_model(conn, name)
+    if row is None or not row["enabled"] or row["role"] not in ("vl", "both"):
+        raise HTTPException(
+            status_code=409,
+            detail=f"vl_model_name {name!r} is not enabled or wrong role",
+        )
+    return name
+
+
+@router.post("/api/sessions/{session_id}/analyze-source", response_model=SessionOut)
+def analyze_source(session_id: str, conn: Conn) -> dict:
+    row = session_repo.get_session_with_pinned(conn, session_id)
+    if row is None:
+        raise _not_found("session", session_id)
+    if not row.get("source_image_path"):
+        raise HTTPException(status_code=409, detail="session has no source image")
+
+    cfg = settings_repo.get_lmstudio(conn)
+    if not cfg["lmstudio_base_url"]:
+        raise HTTPException(
+            status_code=409, detail="LMStudio base_url is not configured",
+        )
+    model = _validated_vl_model(conn, row.get("vl_model_name"))
+
+    data_root = app_config.resolve_data_root()
+    image_path = (data_root / row["source_image_path"]).resolve()
+    base = data_root.resolve()
+    if not str(image_path).startswith(str(base)) or not image_path.is_file():
+        raise HTTPException(status_code=409, detail="source image is missing on disk")
+
+    content_type = _content_type_from_ext(image_path.suffix.lower())
+    image_bytes = image_path.read_bytes()
+
+    try:
+        summary = lm_client.analyze_image(
+            endpoint={
+                "base_url": cfg["lmstudio_base_url"],
+                "api_key": cfg["lmstudio_api_key"],
+            },
+            model=model,
+            image_bytes=image_bytes,
+            content_type=content_type,
+        )
+    except lm_client.LmError as exc:
+        if exc.kind == "timeout":
+            raise HTTPException(status_code=504, detail=str(exc)) from exc
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    session_repo.set_vl_summary(conn, session_id, summary)
     return _session_payload(conn, session_id)

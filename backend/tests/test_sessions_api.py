@@ -123,3 +123,33 @@ def test_pinned_fk_missing_lora_is_409(client):
         },
     )
     assert resp.status_code == 409
+
+
+def test_patch_session_round_trips_vl_and_prompt_model_names(client):
+    pid = client.post("/api/projects", json={"name": "P"}).json()["id"]
+    sid = client.post(
+        f"/api/projects/{pid}/sessions",
+        json={"name": "s", "model_name": None, "use_negative": True},
+    ).json()["id"]
+
+    payload = {
+        "name": "s",
+        "model_name": None,
+        "use_negative": True,
+        "pinned_loras": [],
+        "vl_model_name": "qwen2-vl-7b-instruct",
+        "prompt_model_name": "mistral-nemo-12b",
+    }
+    resp = client.patch(f"/api/sessions/{sid}", json=payload)
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["vl_model_name"] == "qwen2-vl-7b-instruct"
+    assert body["prompt_model_name"] == "mistral-nemo-12b"
+
+    # null clears
+    cleared = client.patch(
+        f"/api/sessions/{sid}",
+        json={**payload, "vl_model_name": None, "prompt_model_name": None},
+    ).json()
+    assert cleared["vl_model_name"] is None
+    assert cleared["prompt_model_name"] is None

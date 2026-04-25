@@ -7,6 +7,7 @@ from fastapi.responses import FileResponse
 from app import config as app_config
 from app.api.library import router as library_router
 from app.api.sessions import router as sessions_router
+from app.api.settings import router as settings_router
 
 app = FastAPI(title="sd-chisel", version="0.0.1")
 
@@ -21,6 +22,7 @@ app.add_middleware(
 
 app.include_router(library_router)
 app.include_router(sessions_router)
+app.include_router(settings_router)
 
 _data_root = app_config.resolve_data_root()
 (_data_root / "images").mkdir(parents=True, exist_ok=True)
