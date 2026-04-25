@@ -5,8 +5,10 @@ import styles from "./LibraryList.module.css";
 
 export type LibraryListItem = {
   id: string;
-  /** Primary line (e.g. filename) */
+  /** Primary line — human-readable display name */
   primary: string;
+  /** Optional secondary line — technical id/filename, mono */
+  secondary?: string;
   /** Right column, e.g. family code */
   rightMeta?: string;
   /** Small tag chips under primary */
@@ -82,6 +84,7 @@ export function LibraryList({
                 <span className={styles.rowPrimary}>{item.primary}</span>
                 {item.rightMeta && <span className={styles.rowRight}>{item.rightMeta}</span>}
               </div>
+              {item.secondary && <div className={styles.rowSecondary}>{item.secondary}</div>}
               {item.tags && item.tags.length > 0 && (
                 <div className={styles.rowTags}>
                   {item.tags.map((t) => (

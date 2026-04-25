@@ -5,7 +5,8 @@ import { TextInput } from "@/components/molecules/FormField";
 import { LibraryFormPage, LibraryFormSection } from "@/components/organisms/LibraryFormSection";
 import libForm from "@/components/organisms/libraryForm.module.css";
 import { MarkdownField } from "@/components/molecules/MarkdownField";
-import { TextListInput } from "@/components/molecules/TextListInput";
+import { Slider } from "@/components/molecules/Slider";
+import { TagInput } from "@/components/molecules/TagInput";
 import type { Family, Lora, LoraCreate, LoraUpdate } from "@/api/library";
 
 export function LoraForm({
@@ -27,17 +28,14 @@ export function LoraForm({
   const [tags, setTags] = useState<string[]>(lora?.tags ?? []);
   const [triggerWords, setTriggerWords] = useState<string[]>(lora?.trigger_words ?? []);
   const [familyId, setFamilyId] = useState(lora?.family_id ?? families[0]?.id ?? "");
-  const [recommendedWeight, setRecommendedWeight] = useState(
-    lora?.recommended_weight === null || lora?.recommended_weight === undefined
-      ? ""
-      : String(lora.recommended_weight),
-  );
+  const [recommendedWeight, setRecommendedWeight] = useState(lora?.recommended_weight ?? 0.75);
   const [author, setAuthor] = useState(lora?.author ?? "");
   const [version, setVersion] = useState(lora?.version ?? "");
   const [sourceUrl, setSourceUrl] = useState(lora?.source_url ?? "");
 
   const isEdit = Boolean(lora);
-  const pageTitle = isEdit && lora ? `Edit · ${lora.name}` : "New LoRA";
+  const editLabel = lora?.display_name || lora?.name || "";
+  const pageTitle = isEdit ? `Edit · ${editLabel}` : "New LoRA";
 
   const canSave =
     displayName.trim() !== "" &&
@@ -47,17 +45,17 @@ export function LoraForm({
 
   return (
     <form
+      className={libForm.formShell}
       onSubmit={(event) => {
         event.preventDefault();
         if (!canSave) return;
-        const weight = recommendedWeight.trim() === "" ? null : Number(recommendedWeight);
         const common = {
           display_name: displayName.trim(),
           description: description.trim(),
           tags,
           trigger_words: triggerWords,
           family_id: familyId,
-          recommended_weight: Number.isFinite(weight) ? weight : null,
+          recommended_weight: recommendedWeight,
           author: author.trim() || null,
           version: version.trim() || null,
           source_url: sourceUrl.trim() || null,
@@ -67,9 +65,22 @@ export function LoraForm({
     >
       <LibraryFormPage
         title={pageTitle}
+        breadcrumb={
+          <>
+            <button type="button" className={libForm.breadcrumbButton} onClick={onCancel}>
+              Library
+            </button>
+            <Icon name="ChevronRight" size={10} aria-hidden />
+            <button type="button" className={libForm.breadcrumbButton} onClick={onCancel}>
+              LoRAs
+            </button>
+            <Icon name="ChevronRight" size={10} aria-hidden />
+            <span className={libForm.breadcrumbCurrent}>{isEdit ? editLabel : "New LoRA"}</span>
+          </>
+        }
         foot={
           <>
-            <Button type="button" variant="secondary" onClick={onCancel}>
+            <Button type="button" variant="ghost" onClick={onCancel}>
               Cancel
             </Button>
             <Button type="submit" variant="primary" disabled={!canSave || isSaving} icon={<Icon name="Check" />}>
@@ -82,7 +93,13 @@ export function LoraForm({
           title="Identity"
           subtitle="Filename and display info. LLM uses description when choosing LoRAs."
         >
-          {!lora && <TextInput label="Name" value={name} onChange={(e) => setName(e.currentTarget.value)} />}
+          <TextInput
+            label="Name"
+            hint={isEdit ? "filename — locked, used as primary key" : "filename without .safetensors"}
+            value={name}
+            onChange={(e) => setName(e.currentTarget.value)}
+            disabled={isEdit}
+          />
           <TextInput
             label="Display name"
             value={displayName}
@@ -118,25 +135,25 @@ export function LoraForm({
             </div>
             {familyId === "" && <div className={libForm.fieldError}>Select a family</div>}
           </div>
-          <TextInput
-            label="Recommended weight"
-            type="number"
-            step="0.05"
-            min="-2"
-            max="2"
+          <Slider
+            label="weight"
+            min={0}
+            max={2}
+            step={0.05}
             value={recommendedWeight}
-            onChange={(e) => setRecommendedWeight(e.currentTarget.value)}
+            onChange={setRecommendedWeight}
             hint="Typical 0.5–0.9 depending on the asset."
           />
         </LibraryFormSection>
 
-        <LibraryFormSection title="Taxonomy" subtitle="Tags and trigger words for retrieval.">
-          <TextListInput label="Tags" value={tags} onChange={setTags} placeholder="detail, light, portrait" />
-          <TextListInput
+        <LibraryFormSection title="Taxonomy" subtitle="Tags and trigger words — used by retriever.">
+          <TagInput label="Tags" value={tags} onChange={setTags} placeholder="add tag + Enter..." />
+          <TagInput
             label="Trigger words"
             value={triggerWords}
             onChange={setTriggerWords}
-            placeholder="cinematic light, rim light"
+            placeholder="add trigger + Enter..."
+            variant="code"
           />
         </LibraryFormSection>
 

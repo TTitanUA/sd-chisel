@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { Button } from "@/components/atoms/Button";
 import { Icon } from "@/components/atoms/Icon";
-import { TextArea, TextInput } from "@/components/molecules/FormField";
+import { TextInput } from "@/components/molecules/FormField";
+import { MarkdownField } from "@/components/molecules/MarkdownField";
 import { LibraryFormPage, LibraryFormSection } from "@/components/organisms/LibraryFormSection";
 import libForm from "@/components/organisms/libraryForm.module.css";
 import type { Family, Model, ModelCreate, ModelUpdate } from "@/api/library";
@@ -28,12 +29,14 @@ export function ModelForm({
   const [sourceUrl, setSourceUrl] = useState(model?.source_url ?? "");
 
   const isEdit = Boolean(model);
-  const pageTitle = isEdit && model ? `Edit · ${model.name}` : "New model";
+  const editLabel = model?.display_name || model?.name || "";
+  const pageTitle = isEdit ? `Edit · ${editLabel}` : "New model";
 
   const canSave = displayName.trim() !== "" && familyId !== "" && (Boolean(model) || name.trim() !== "");
 
   return (
     <form
+      className={libForm.formShell}
       onSubmit={(event) => {
         event.preventDefault();
         if (!canSave) return;
@@ -50,9 +53,22 @@ export function ModelForm({
     >
       <LibraryFormPage
         title={pageTitle}
+        breadcrumb={
+          <>
+            <button type="button" className={libForm.breadcrumbButton} onClick={onCancel}>
+              Library
+            </button>
+            <Icon name="ChevronRight" size={10} aria-hidden />
+            <button type="button" className={libForm.breadcrumbButton} onClick={onCancel}>
+              Models
+            </button>
+            <Icon name="ChevronRight" size={10} aria-hidden />
+            <span className={libForm.breadcrumbCurrent}>{isEdit ? editLabel : "New model"}</span>
+          </>
+        }
         foot={
           <>
-            <Button type="button" variant="secondary" onClick={onCancel}>
+            <Button type="button" variant="ghost" onClick={onCancel}>
               Cancel
             </Button>
             <Button
@@ -67,7 +83,13 @@ export function ModelForm({
         }
       >
         <LibraryFormSection title="Identity" subtitle="Checkpoint filename and display info.">
-          {!model && <TextInput label="Name" value={name} onChange={(e) => setName(e.currentTarget.value)} />}
+          <TextInput
+            label="Name"
+            hint={isEdit ? "filename — locked, used as primary key" : "filename without .safetensors"}
+            value={name}
+            onChange={(e) => setName(e.currentTarget.value)}
+            disabled={isEdit}
+          />
           <TextInput
             label="Display name"
             value={displayName}
@@ -106,12 +128,10 @@ export function ModelForm({
         </LibraryFormSection>
 
         <LibraryFormSection title="Prompt delta" subtitle="Optional rules on top of the family guide.">
-          <TextArea
+          <MarkdownField
             label="Delta"
             value={description}
-            onChange={(e) => setDescription(e.currentTarget.value)}
-            placeholder="E.g. lower CFG, detail LoRA interactions…"
-            rows={5}
+            onChange={setDescription}
             hint="LLM sees this when this checkpoint is selected."
           />
         </LibraryFormSection>

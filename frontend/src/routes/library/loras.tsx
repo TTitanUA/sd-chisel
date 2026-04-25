@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { Badge } from "@/components/atoms/Badge";
 import {
   libraryApi,
@@ -18,14 +19,25 @@ import { formatUpdated } from "@/lib/formatUpdated";
 import { ModelFilterControls } from "./ModelFilterControls";
 import listStyles from "@/components/organisms/LibraryCrud.module.css";
 
+const BASE = "/library/loras";
+
 export default function LorasRoute() {
+  const params = useParams<{ "*"?: string }>();
+  const location = useLocation();
+  const navigate = useNavigate();
+
   const [search, setSearch] = useState("");
   const [familyIdFilter, setFamilyIdFilter] = useState<string | null>(null);
-  const [selectedName, setSelectedName] = useState<string | null>(null);
-  const [mode, setMode] = useState<CrudMode>("detail");
   const invalidate = useLibraryInvalidation();
   const families = useFamilies();
   const loras = useLoras({ q: search });
+
+  const splat = params["*"] ?? "";
+  const segments = splat.split("/").filter(Boolean);
+  const isCreate = segments[0] === "new";
+  const urlName = !isCreate && segments[0] ? decodeURIComponent(segments[0]) : null;
+  const isEdit = !isCreate && !!urlName && segments[1] === "edit";
+  const mode: CrudMode = isCreate ? "create" : isEdit ? "edit" : "detail";
 
   const filteredLoras = useMemo(() => {
     let list = loras.data ?? [];
@@ -37,8 +49,9 @@ export default function LorasRoute() {
 
   const selected = useMemo(() => {
     const rows = loras.data ?? [];
-    return rows.find((l) => l.name === selectedName) ?? rows[0] ?? null;
-  }, [loras.data, selectedName]);
+    if (urlName) return rows.find((l) => l.name === urlName) ?? null;
+    return rows[0] ?? null;
+  }, [loras.data, urlName]);
 
   const create = useMutation({ mutationFn: libraryApi.createLora, onSuccess: invalidate });
   const update = useMutation({
@@ -47,24 +60,42 @@ export default function LorasRoute() {
   });
   const remove = useMutation({ mutationFn: libraryApi.deleteLora, onSuccess: invalidate });
 
+  function goDetail(name: string) {
+    navigate(`${BASE}/${encodeURIComponent(name)}`);
+  }
+  function goList() {
+    navigate(BASE);
+  }
+  function goEdit(name: string) {
+    navigate(`${BASE}/${encodeURIComponent(name)}/edit`);
+  }
+  function goCreate() {
+    navigate(`${BASE}/new`);
+  }
+  function cancelForm() {
+    if (urlName) goDetail(urlName);
+    else goList();
+  }
+
   function submit(body: LoraCreate | LoraUpdate) {
     if (mode === "create") {
       create.mutate(body as LoraCreate, {
-        onSuccess: (lora: Lora) => {
-          setSelectedName(lora.name);
-          setMode("detail");
-        },
+        onSuccess: (lora: Lora) => goDetail(lora.name),
       });
       return;
     }
     if (selected) {
-      update.mutate({ name: selected.name, body: body as LoraUpdate }, { onSuccess: () => setMode("detail") });
+      update.mutate(
+        { name: selected.name, body: body as LoraUpdate },
+        { onSuccess: () => goDetail(selected.name) },
+      );
     }
   }
 
   const rows = filteredLoras.map((lora) => ({
     id: lora.name,
-    primary: lora.name,
+    primary: lora.display_name || lora.name,
+    secondary: lora.display_name ? lora.name : undefined,
     rightMeta: lora.family_id.toUpperCase(),
     tags: lora.tags.slice(0, 2),
   }));
@@ -72,10 +103,44 @@ export default function LorasRoute() {
   const error = create.error ?? update.error ?? remove.error ?? loras.error ?? families.error;
   const total = loras.data?.length ?? 0;
 
-  const detailTitle =
-    mode === "create" ? "New LoRA" : mode === "edit" && selected ? `Edit · ${selected.name}` : selected?.name ?? "—";
-  const detailTitleVariant: "mono" | "default" =
-    mode === "detail" && selected ? "mono" : mode === "edit" && selected ? "mono" : "default";
+  void location.pathname;
+
+  if (mode === "create") {
+    return (
+      <>
+        {error && (
+          <div role="alert" className={listStyles.error}>
+            {String(error)}
+          </div>
+        )}
+        <LoraForm
+          families={familyRows}
+          onCancel={cancelForm}
+          onSubmit={submit}
+          isSaving={create.isPending}
+        />
+      </>
+    );
+  }
+
+  if (mode === "edit" && selected) {
+    return (
+      <>
+        {error && (
+          <div role="alert" className={listStyles.error}>
+            {String(error)}
+          </div>
+        )}
+        <LoraForm
+          lora={selected}
+          families={familyRows}
+          onCancel={cancelForm}
+          onSubmit={submit}
+          isSaving={update.isPending}
+        />
+      </>
+    );
+  }
 
   return (
     <LibraryCrud
@@ -87,19 +152,15 @@ export default function LorasRoute() {
       onSearch={setSearch}
       items={rows}
       selectedId={selected?.name ?? null}
-      onSelect={(id) => {
-        setSelectedName(id);
-        setMode("detail");
-      }}
-      onNew={() => setMode("create")}
-      mode={mode}
+      onSelect={goDetail}
+      onNew={goCreate}
       detailEyebrow="LoRA"
-      detailTitle={detailTitle}
-      detailTitleVariant={detailTitleVariant}
-      onEdit={selected && mode === "detail" ? () => setMode("edit") : undefined}
+      detailTitle={selected?.display_name || selected?.name || "—"}
+      detailSubtitle={selected?.display_name ? selected.name : undefined}
+      onEdit={selected ? () => goEdit(selected.name) : undefined}
       onDelete={
-        selected && mode === "detail"
-          ? () => remove.mutate(selected.name, { onSuccess: () => setSelectedName(null) })
+        selected
+          ? () => remove.mutate(selected.name, { onSuccess: () => goList() })
           : undefined
       }
       filters={
@@ -109,7 +170,7 @@ export default function LorasRoute() {
           onChange={setFamilyIdFilter}
         />
       }
-      emptySelection={mode === "detail" && !selected}
+      emptySelection={!selected}
       emptySelectionMessage="Select a LoRA to see details"
     >
       {error && (
@@ -117,24 +178,7 @@ export default function LorasRoute() {
           {String(error)}
         </div>
       )}
-      {mode === "create" && (
-        <LoraForm
-          families={familyRows}
-          onCancel={() => setMode("detail")}
-          onSubmit={submit}
-          isSaving={create.isPending}
-        />
-      )}
-      {mode === "edit" && selected && (
-        <LoraForm
-          lora={selected}
-          families={familyRows}
-          onCancel={() => setMode("detail")}
-          onSubmit={submit}
-          isSaving={update.isPending}
-        />
-      )}
-      {mode === "detail" && selected && (
+      {selected && (
         <>
           <LibraryDetailMeta
             cells={[

@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 import {
   libraryApi,
   useFamilies,
@@ -15,19 +16,31 @@ import detailStyles from "@/components/molecules/LibraryV2Detail.module.css";
 import { formatUpdated } from "@/lib/formatUpdated";
 import listStyles from "@/components/organisms/LibraryCrud.module.css";
 
+const BASE = "/library/families";
+
 export default function FamiliesRoute() {
+  const params = useParams<{ "*"?: string }>();
+  const location = useLocation();
+  const navigate = useNavigate();
+
   const [search, setSearch] = useState("");
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [mode, setMode] = useState<CrudMode>("detail");
   const invalidate = useLibraryInvalidation();
   const families = useFamilies(search);
+
+  const splat = params["*"] ?? "";
+  const segments = splat.split("/").filter(Boolean);
+  const isCreate = segments[0] === "new";
+  const urlId = !isCreate && segments[0] ? decodeURIComponent(segments[0]) : null;
+  const isEdit = !isCreate && !!urlId && segments[1] === "edit";
+  const mode: CrudMode = isCreate ? "create" : isEdit ? "edit" : "detail";
 
   const list = useMemo(() => families.data ?? [], [families.data]);
   const total = list.length;
 
   const selected = useMemo(() => {
-    return list.find((family) => family.id === selectedId) ?? list[0] ?? null;
-  }, [list, selectedId]);
+    if (urlId) return list.find((family) => family.id === urlId) ?? null;
+    return list[0] ?? null;
+  }, [list, urlId]);
 
   const create = useMutation({ mutationFn: libraryApi.createFamily, onSuccess: invalidate });
   const update = useMutation({
@@ -42,34 +55,71 @@ export default function FamiliesRoute() {
     tags: [family.id],
   }));
 
+  function goDetail(id: string) {
+    navigate(`${BASE}/${encodeURIComponent(id)}`);
+  }
+  function goList() {
+    navigate(BASE);
+  }
+  function goEdit(id: string) {
+    navigate(`${BASE}/${encodeURIComponent(id)}/edit`);
+  }
+  function goCreate() {
+    navigate(`${BASE}/new`);
+  }
+  function cancelForm() {
+    if (urlId) goDetail(urlId);
+    else goList();
+  }
+
   function submit(body: FamilyCreate | FamilyUpdate) {
     if (mode === "create") {
       create.mutate(body as FamilyCreate, {
-        onSuccess: (family: Family) => {
-          setSelectedId(family.id);
-          setMode("detail");
-        },
+        onSuccess: (family: Family) => goDetail(family.id),
       });
       return;
     }
     if (selected) {
       update.mutate(
         { id: selected.id, body: body as FamilyUpdate },
-        { onSuccess: () => setMode("detail") },
+        { onSuccess: () => goDetail(selected.id) },
       );
     }
   }
 
   const error = create.error ?? update.error ?? remove.error ?? families.error;
+  void location.pathname;
 
-  const detailTitle =
-    mode === "create"
-      ? "New family"
-      : mode === "edit" && selected
-        ? `Edit · ${selected.display_name}`
-        : selected?.display_name ?? "—";
-  const detailTitleVariant: "mono" | "default" =
-    mode === "detail" && selected ? "default" : mode === "edit" && selected ? "default" : "default";
+  if (mode === "create") {
+    return (
+      <>
+        {error && (
+          <div role="alert" className={listStyles.error}>
+            {String(error)}
+          </div>
+        )}
+        <FamilyForm onCancel={cancelForm} onSubmit={submit} isSaving={create.isPending} />
+      </>
+    );
+  }
+
+  if (mode === "edit" && selected) {
+    return (
+      <>
+        {error && (
+          <div role="alert" className={listStyles.error}>
+            {String(error)}
+          </div>
+        )}
+        <FamilyForm
+          family={selected}
+          onCancel={cancelForm}
+          onSubmit={submit}
+          isSaving={update.isPending}
+        />
+      </>
+    );
+  }
 
   return (
     <LibraryCrud
@@ -81,22 +131,17 @@ export default function FamiliesRoute() {
       onSearch={setSearch}
       items={rows}
       selectedId={selected?.id ?? null}
-      onSelect={(id) => {
-        setSelectedId(id);
-        setMode("detail");
-      }}
-      onNew={() => setMode("create")}
-      mode={mode}
+      onSelect={goDetail}
+      onNew={goCreate}
       detailEyebrow="Family"
-      detailTitle={detailTitle}
-      detailTitleVariant={detailTitleVariant}
-      onEdit={selected && mode === "detail" ? () => setMode("edit") : undefined}
+      detailTitle={selected?.display_name ?? "—"}
+      onEdit={selected ? () => goEdit(selected.id) : undefined}
       onDelete={
-        selected && mode === "detail"
-          ? () => remove.mutate(selected.id, { onSuccess: () => setSelectedId(null) })
+        selected
+          ? () => remove.mutate(selected.id, { onSuccess: () => goList() })
           : undefined
       }
-      emptySelection={mode === "detail" && !selected}
+      emptySelection={!selected}
       emptySelectionMessage="Select a family to see details"
     >
       {error && (
@@ -104,18 +149,7 @@ export default function FamiliesRoute() {
           {String(error)}
         </div>
       )}
-      {mode === "create" && (
-        <FamilyForm onCancel={() => setMode("detail")} onSubmit={submit} isSaving={create.isPending} />
-      )}
-      {mode === "edit" && selected && (
-        <FamilyForm
-          family={selected}
-          onCancel={() => setMode("detail")}
-          onSubmit={submit}
-          isSaving={update.isPending}
-        />
-      )}
-      {mode === "detail" && selected && (
+      {selected && (
         <>
           <LibraryDetailMeta
             cells={[

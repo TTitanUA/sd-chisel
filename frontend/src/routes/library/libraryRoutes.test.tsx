@@ -2,13 +2,24 @@ import type { ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
 import FamiliesRoute from "./families";
 import ModelsRoute from "./models";
 import LorasRoute from "./loras";
 
-function renderRoute(ui: ReactNode) {
+function renderRoute(ui: ReactNode, path = "/library/families") {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>);
+  return render(
+    <QueryClientProvider client={client}>
+      <MemoryRouter initialEntries={[path]}>
+        <Routes>
+          <Route path="/library/families/*" element={ui} />
+          <Route path="/library/models/*" element={ui} />
+          <Route path="/library/loras/*" element={ui} />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
 }
 
 function json(data: unknown) {
@@ -48,7 +59,7 @@ describe("library routes", () => {
       ]);
     }));
 
-    renderRoute(<ModelsRoute />);
+    renderRoute(<ModelsRoute />, "/library/models");
     await waitFor(() => {
       expect(screen.getAllByText("juggernaut").length).toBeGreaterThan(0);
     });
@@ -78,7 +89,7 @@ describe("library routes", () => {
       ]);
     }));
 
-    renderRoute(<LorasRoute />);
+    renderRoute(<LorasRoute />, "/library/loras");
     await waitFor(() => {
       expect(screen.getAllByText("cinematic_light").length).toBeGreaterThan(0);
     });
@@ -125,7 +136,7 @@ describe("library routes", () => {
       ]);
     }));
 
-    renderRoute(<LorasRoute />);
+    renderRoute(<LorasRoute />, "/library/loras");
     const list = await screen.findByRole("complementary", { name: "LoRA list" });
     await waitFor(() => {
       expect(within(list).getAllByText("lora_sdxl").length).toBeGreaterThan(0);

@@ -65,6 +65,13 @@
   font-family: var(--font-mono);
 }
 
+.subtitleMono {
+  margin-top: 4px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-subtle);
+}
+
 .actions {
   display: flex;
   gap: 8px;

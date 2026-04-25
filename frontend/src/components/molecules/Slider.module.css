@@ -1,0 +1,6 @@
+.hint {
+  display: block;
+  margin-top: 6px;
+  color: var(--text-subtle);
+  font-size: var(--text-xs);
+}

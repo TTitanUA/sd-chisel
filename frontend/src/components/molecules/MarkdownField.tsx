@@ -1,5 +1,18 @@
-import MDEditor from "@uiw/react-md-editor";
+import MDEditor, { commands } from "@uiw/react-md-editor";
 import { FormField } from "./FormField";
+import styles from "./MarkdownField.module.css";
+
+const TOOLBAR = [
+  commands.bold,
+  commands.italic,
+  commands.divider,
+  commands.link,
+  commands.code,
+  commands.quote,
+  commands.divider,
+  commands.unorderedListCommand,
+  commands.orderedListCommand,
+];
 
 export function MarkdownField({
   label,
@@ -14,8 +27,16 @@ export function MarkdownField({
 }) {
   return (
     <FormField label={label} hint={hint}>
-      <div data-color-mode="dark">
-        <MDEditor height={220} value={value} onChange={(next) => onChange(next ?? "")} />
+      <div className={styles.editor} data-color-mode="light">
+        <MDEditor
+          height={200}
+          preview="edit"
+          visibleDragbar={false}
+          value={value}
+          onChange={(next) => onChange(next ?? "")}
+          commands={TOOLBAR}
+          extraCommands={[]}
+        />
       </div>
     </FormField>
   );

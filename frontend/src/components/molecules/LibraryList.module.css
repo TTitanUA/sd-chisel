@@ -121,13 +121,23 @@
 }
 
 .rowPrimary {
-  font-family: var(--font-mono);
-  font-size: 12.5px;
+  font-family: var(--font-ui);
+  font-size: 13px;
+  font-weight: 500;
   color: var(--text);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   min-width: 0;
+}
+
+.rowSecondary {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-subtle);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .rowRight {

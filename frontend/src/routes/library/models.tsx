@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { Badge } from "@/components/atoms/Badge";
 import {
   libraryApi,
@@ -17,14 +18,25 @@ import { ModelForm } from "@/components/organisms/ModelForm";
 import { ModelFilterControls } from "./ModelFilterControls";
 import listStyles from "@/components/organisms/LibraryCrud.module.css";
 
+const BASE = "/library/models";
+
 export default function ModelsRoute() {
+  const params = useParams<{ "*"?: string }>();
+  const location = useLocation();
+  const navigate = useNavigate();
+
   const [search, setSearch] = useState("");
   const [familyIdFilter, setFamilyIdFilter] = useState<string | null>(null);
-  const [selectedName, setSelectedName] = useState<string | null>(null);
-  const [mode, setMode] = useState<CrudMode>("detail");
   const invalidate = useLibraryInvalidation();
   const families = useFamilies();
   const models = useModels({ q: search });
+
+  const splat = params["*"] ?? "";
+  const segments = splat.split("/").filter(Boolean);
+  const isCreate = segments[0] === "new";
+  const urlName = !isCreate && segments[0] ? decodeURIComponent(segments[0]) : null;
+  const isEdit = !isCreate && !!urlName && segments[1] === "edit";
+  const mode: CrudMode = isCreate ? "create" : isEdit ? "edit" : "detail";
 
   const filteredModels = useMemo(() => {
     let list = models.data ?? [];
@@ -36,8 +48,9 @@ export default function ModelsRoute() {
 
   const selected = useMemo(() => {
     const rows = models.data ?? [];
-    return rows.find((model) => model.name === selectedName) ?? rows[0] ?? null;
-  }, [models.data, selectedName]);
+    if (urlName) return rows.find((model) => model.name === urlName) ?? null;
+    return rows[0] ?? null;
+  }, [models.data, urlName]);
 
   const create = useMutation({ mutationFn: libraryApi.createModel, onSuccess: invalidate });
   const update = useMutation({
@@ -46,24 +59,42 @@ export default function ModelsRoute() {
   });
   const remove = useMutation({ mutationFn: libraryApi.deleteModel, onSuccess: invalidate });
 
+  function goDetail(name: string) {
+    navigate(`${BASE}/${encodeURIComponent(name)}`);
+  }
+  function goList() {
+    navigate(BASE);
+  }
+  function goEdit(name: string) {
+    navigate(`${BASE}/${encodeURIComponent(name)}/edit`);
+  }
+  function goCreate() {
+    navigate(`${BASE}/new`);
+  }
+  function cancelForm() {
+    if (urlName) goDetail(urlName);
+    else goList();
+  }
+
   function submit(body: ModelCreate | ModelUpdate) {
     if (mode === "create") {
       create.mutate(body as ModelCreate, {
-        onSuccess: (model: Model) => {
-          setSelectedName(model.name);
-          setMode("detail");
-        },
+        onSuccess: (model: Model) => goDetail(model.name),
       });
       return;
     }
     if (selected) {
-      update.mutate({ name: selected.name, body: body as ModelUpdate }, { onSuccess: () => setMode("detail") });
+      update.mutate(
+        { name: selected.name, body: body as ModelUpdate },
+        { onSuccess: () => goDetail(selected.name) },
+      );
     }
   }
 
   const rows = filteredModels.map((model) => ({
     id: model.name,
-    primary: model.name,
+    primary: model.display_name || model.name,
+    secondary: model.display_name ? model.name : undefined,
     rightMeta: model.family_id.toUpperCase(),
     tags: [model.author, model.version].filter(Boolean) as string[],
   }));
@@ -71,14 +102,45 @@ export default function ModelsRoute() {
   const error = create.error ?? update.error ?? remove.error ?? models.error ?? families.error;
   const total = models.data?.length ?? 0;
 
-  const detailTitle =
-    mode === "create"
-      ? "New model"
-      : mode === "edit" && selected
-        ? `Edit · ${selected.name}`
-        : selected?.name ?? "—";
-  const detailTitleVariant: "mono" | "default" =
-    mode === "detail" && selected ? "mono" : mode === "edit" && selected ? "mono" : "default";
+  // Avoid unused-warning when location is referenced only for re-renders
+  void location.pathname;
+
+  if (mode === "create") {
+    return (
+      <>
+        {error && (
+          <div role="alert" className={listStyles.error}>
+            {String(error)}
+          </div>
+        )}
+        <ModelForm
+          families={familyRows}
+          onCancel={cancelForm}
+          onSubmit={submit}
+          isSaving={create.isPending}
+        />
+      </>
+    );
+  }
+
+  if (mode === "edit" && selected) {
+    return (
+      <>
+        {error && (
+          <div role="alert" className={listStyles.error}>
+            {String(error)}
+          </div>
+        )}
+        <ModelForm
+          model={selected}
+          families={familyRows}
+          onCancel={cancelForm}
+          onSubmit={submit}
+          isSaving={update.isPending}
+        />
+      </>
+    );
+  }
 
   return (
     <LibraryCrud
@@ -90,19 +152,15 @@ export default function ModelsRoute() {
       onSearch={setSearch}
       items={rows}
       selectedId={selected?.name ?? null}
-      onSelect={(id) => {
-        setSelectedName(id);
-        setMode("detail");
-      }}
-      onNew={() => setMode("create")}
-      mode={mode}
+      onSelect={goDetail}
+      onNew={goCreate}
       detailEyebrow="Checkpoint"
-      detailTitle={detailTitle}
-      detailTitleVariant={detailTitleVariant}
-      onEdit={selected && mode === "detail" ? () => setMode("edit") : undefined}
+      detailTitle={selected?.display_name || selected?.name || "—"}
+      detailSubtitle={selected?.display_name ? selected.name : undefined}
+      onEdit={selected ? () => goEdit(selected.name) : undefined}
       onDelete={
-        selected && mode === "detail"
-          ? () => remove.mutate(selected.name, { onSuccess: () => setSelectedName(null) })
+        selected
+          ? () => remove.mutate(selected.name, { onSuccess: () => goList() })
           : undefined
       }
       filters={
@@ -112,7 +170,7 @@ export default function ModelsRoute() {
           onChange={setFamilyIdFilter}
         />
       }
-      emptySelection={mode === "detail" && !selected}
+      emptySelection={!selected}
       emptySelectionMessage="Select a model to see details"
     >
       {error && (
@@ -120,24 +178,7 @@ export default function ModelsRoute() {
           {String(error)}
         </div>
       )}
-      {mode === "create" && (
-        <ModelForm
-          families={familyRows}
-          onCancel={() => setMode("detail")}
-          onSubmit={submit}
-          isSaving={create.isPending}
-        />
-      )}
-      {mode === "edit" && selected && (
-        <ModelForm
-          model={selected}
-          families={familyRows}
-          onCancel={() => setMode("detail")}
-          onSubmit={submit}
-          isSaving={update.isPending}
-        />
-      )}
-      {mode === "detail" && selected && (
+      {selected && (
         <>
           <LibraryDetailMeta
             cells={[
@@ -152,10 +193,6 @@ export default function ModelsRoute() {
               {
                 label: "Version",
                 value: <span>{selected.version ?? "—"}</span>,
-              },
-              {
-                label: "Display name",
-                value: <span>{selected.display_name || "—"}</span>,
               },
             ]}
           />

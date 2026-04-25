@@ -14,10 +14,21 @@
   min-height: 34px;
   border: 1px solid var(--border);
   border-radius: 6px;
-  background: var(--surface);
+  background: var(--bg-raised);
   color: var(--text);
   font: inherit;
   padding: 7px 10px;
+  outline: none;
+  transition: border-color .12s, box-shadow .12s;
+}
+
+.control:hover {
+  border-color: var(--border-strong);
+}
+
+.control:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--accent) 18%, transparent);
 }
 
 .textarea {

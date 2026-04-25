@@ -48,7 +48,7 @@ export function App() {
               }
             />
             <Route
-              path="/library/families"
+              path="/library/families/*"
               element={
                 <LibraryLayout>
                   <FamiliesRoute />
@@ -56,7 +56,7 @@ export function App() {
               }
             />
             <Route
-              path="/library/models"
+              path="/library/models/*"
               element={
                 <LibraryLayout>
                   <ModelsRoute />
@@ -64,7 +64,7 @@ export function App() {
               }
             />
             <Route
-              path="/library/loras"
+              path="/library/loras/*"
               element={
                 <LibraryLayout>
                   <LorasRoute />

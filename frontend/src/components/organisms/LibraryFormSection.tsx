@@ -23,16 +23,19 @@ export function LibraryFormSection({
 
 export function LibraryFormPage({
   title,
+  breadcrumb,
   children,
   foot,
 }: {
   title: string;
+  breadcrumb?: ReactNode;
   children: ReactNode;
   foot: ReactNode;
 }) {
   return (
     <div className={styles.page}>
       <div className={styles.head}>
+        {breadcrumb && <div className={styles.breadcrumb}>{breadcrumb}</div>}
         <h1 className={styles.title}>{title}</h1>
       </div>
       <div className={styles.body}>{children}</div>

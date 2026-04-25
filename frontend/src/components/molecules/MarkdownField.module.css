@@ -1,0 +1,54 @@
+.editor :global(.w-md-editor) {
+  overflow: hidden;
+  color: var(--text);
+  background: var(--bg-raised);
+  border: var(--stroke-thin) solid var(--border);
+  border-radius: var(--r-sm, 6px);
+  box-shadow: none;
+}
+
+.editor :global(.w-md-editor-toolbar) {
+  min-height: auto;
+  padding: 6px 8px;
+  background: var(--surface);
+  border-bottom: var(--stroke-hair, 1px) solid var(--border);
+}
+
+.editor :global(.w-md-editor-toolbar li > button) {
+  width: auto;
+  height: auto;
+  padding: 3px 6px;
+  color: var(--text-muted);
+  border-radius: var(--r-xs, 3px);
+}
+
+.editor :global(.w-md-editor-toolbar li > button:hover) {
+  color: var(--text);
+  background: var(--bg-raised);
+}
+
+.editor :global(.w-md-editor-toolbar-divider) {
+  height: 14px;
+  background: var(--border);
+}
+
+.editor :global(.w-md-editor-content),
+.editor :global(.w-md-editor-area),
+.editor :global(.w-md-editor-text),
+.editor :global(.w-md-editor-text-pre),
+.editor :global(.w-md-editor-text-input) {
+  background: var(--bg-raised);
+}
+
+.editor :global(.w-md-editor-text-pre > code),
+.editor :global(.w-md-editor-text-input) {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text);
+}
+
+.editor :global(.w-md-editor-text-input) {
+  padding: 12px 14px;
+  -webkit-text-fill-color: var(--text);
+}

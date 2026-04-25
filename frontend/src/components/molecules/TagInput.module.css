@@ -1,0 +1,67 @@
+.field {
+  display: grid;
+  gap: 8px;
+}
+
+.label {
+  color: var(--text-subtle);
+  font-size: var(--text-2xs, 11px);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.box {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 8px 10px;
+  background: var(--bg-raised);
+  border: var(--stroke-thin) solid var(--border);
+  border-radius: var(--r-sm, 6px);
+}
+
+.input {
+  flex: 1;
+  min-width: 100px;
+  padding: 2px 0;
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: 13px;
+  background: transparent;
+  border: 0;
+  outline: 0;
+}
+
+.codeChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding-right: 4px;
+}
+
+.remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 13px;
+  height: 13px;
+  padding: 0;
+  color: var(--text-subtle);
+  background: transparent;
+  border: 0;
+  border-radius: var(--r-xs);
+  cursor: pointer;
+}
+
+.remove:hover {
+  color: var(--text);
+  background: var(--surface-alt);
+}
+
+.hint {
+  color: var(--text-subtle);
+  font-size: var(--text-xs);
+}

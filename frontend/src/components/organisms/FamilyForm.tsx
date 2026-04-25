@@ -3,6 +3,7 @@ import { Button } from "@/components/atoms/Button";
 import { Icon } from "@/components/atoms/Icon";
 import { TextInput } from "@/components/molecules/FormField";
 import { LibraryFormPage, LibraryFormSection } from "@/components/organisms/LibraryFormSection";
+import libForm from "@/components/organisms/libraryForm.module.css";
 import { MarkdownField } from "@/components/molecules/MarkdownField";
 import type { Family, FamilyCreate, FamilyUpdate } from "@/api/library";
 
@@ -28,6 +29,7 @@ export function FamilyForm({
 
   return (
     <form
+      className={libForm.formShell}
       onSubmit={(event) => {
         event.preventDefault();
         if (!canSave) return;
@@ -37,9 +39,22 @@ export function FamilyForm({
     >
       <LibraryFormPage
         title={pageTitle}
+        breadcrumb={
+          <>
+            <button type="button" className={libForm.breadcrumbButton} onClick={onCancel}>
+              Library
+            </button>
+            <Icon name="ChevronRight" size={10} aria-hidden />
+            <button type="button" className={libForm.breadcrumbButton} onClick={onCancel}>
+              Families
+            </button>
+            <Icon name="ChevronRight" size={10} aria-hidden />
+            <span className={libForm.breadcrumbCurrent}>{isEdit ? family?.display_name : "New family"}</span>
+          </>
+        }
         foot={
           <>
-            <Button type="button" variant="secondary" onClick={onCancel}>
+            <Button type="button" variant="ghost" onClick={onCancel}>
               Cancel
             </Button>
             <Button
@@ -54,14 +69,14 @@ export function FamilyForm({
         }
       >
         <LibraryFormSection title="Identity" subtitle="ID in code and the display name in the UI.">
-          {!family && (
-            <TextInput
-              label="ID (slug, lowercase)"
-              value={id}
-              placeholder="sdxl"
-              onChange={(e) => setId(e.currentTarget.value)}
-            />
-          )}
+          <TextInput
+            label="ID"
+            hint="slug, lowercase"
+            value={id}
+            placeholder="sdxl"
+            onChange={(e) => setId(e.currentTarget.value)}
+            disabled={isEdit}
+          />
           <TextInput
             label="Display name"
             value={displayName}
