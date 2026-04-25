@@ -115,3 +115,36 @@ def test_split_statements_preserves_semicolons_in_string_literals(tmp_path, fres
     assert len(stmts) == 3
     assert stmts[1] == "INSERT INTO t(id, v) VALUES (1, 'a;b')"
     assert stmts[2] == "INSERT INTO t(id, v) VALUES (2, 'it''s;fine')"
+
+
+def test_migration_003_drops_endpoint_columns_and_adds_settings_tables(tmp_path):
+    import sqlite3
+    from pathlib import Path
+
+    from app.storage import db as db_mod
+    from app.storage.migrations import apply_pending
+
+    conn = db_mod.connect(tmp_path / "m.db")
+    apply_pending(conn, Path(__file__).parent.parent / "migrations")
+
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(sessions)")}
+    assert "vl_endpoint" not in cols
+    assert "prompt_endpoint" not in cols
+    assert "vl_model_name" in cols
+    assert "prompt_model_name" in cols
+
+    # singleton row exists
+    settings = list(conn.execute("SELECT id FROM app_settings"))
+    assert len(settings) == 1 and settings[0]["id"] == 1
+
+    # lm_models exists with role check
+    conn.execute(
+        "INSERT INTO lm_models(name, role, enabled, last_seen) VALUES (?, 'both', 1, 0)",
+        ("ok",),
+    )
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute(
+            "INSERT INTO lm_models(name, role, enabled, last_seen) "
+            "VALUES (?, 'bogus', 1, 0)",
+            ("bad",),
+        )
