@@ -50,9 +50,19 @@ uv sync --extra dev                # install/update backend dependencies
 uv run db-init                     # apply migrations and seed families
 uv run dev-seed                    # seed models/loras from mvp-ui-mock (insert-only, idempotent)
 uv run dev                         # run API on http://localhost:8000
+uv run reindex-all                 # rebuild vec_loras for every LoRA (cold-start / model change)
 uv run pytest                      # run backend tests
 uv run ruff check                  # lint backend code
 ```
+
+### First LoRA write triggers a model download
+
+The indexer uses `BAAI/bge-m3` (≈2 GB) via `sentence-transformers`. The model is downloaded the **first time** any of these happen:
+
+- `POST` / `PUT` / `DELETE` on `/api/library/loras`
+- `uv run reindex-all`
+
+The download lands in the standard HuggingFace cache (`~/.cache/huggingface/`). Subsequent calls are warm. Tests inject a fake embedder via `backend/tests/conftest.py` and never hit the network.
 
 ## Tests
 
