@@ -286,3 +286,85 @@ def test_chat_persists_assistant_with_yield_dep_lifecycle(tmp_path, monkeypatch)
         ]
     finally:
         app.dependency_overrides.clear()
+
+
+def test_chat_404_when_session_missing(client):
+    assert client.post("/api/sessions/missing/chat", json={"content": "x"}).status_code == 404
+
+
+def test_chat_409_when_no_lmstudio_config(client):
+    sid = _make_session(client)
+    resp = client.post(f"/api/sessions/{sid}/chat", json={"content": "x"})
+    assert resp.status_code == 409
+    assert "lmstudio" in resp.json()["detail"].lower() or "base_url" in resp.json()["detail"].lower()
+
+
+def test_chat_409_when_no_prompt_model_on_session(client, monkeypatch):
+    sid = _bootstrap_chat_session(client, monkeypatch, prompt_model=None)
+    resp = client.post(f"/api/sessions/{sid}/chat", json={"content": "x"})
+    assert resp.status_code == 409
+    assert "prompt_model" in resp.json()["detail"]
+
+
+def test_chat_409_when_prompt_model_disabled(client, monkeypatch):
+    sid = _bootstrap_chat_session(client, monkeypatch)
+    client.patch(
+        "/api/settings/lmstudio/models/mistral", json={"enabled": False},
+    )
+    resp = client.post(f"/api/sessions/{sid}/chat", json={"content": "x"})
+    assert resp.status_code == 409
+
+
+def test_chat_409_when_prompt_model_role_is_vl_only(client, monkeypatch):
+    sid = _bootstrap_chat_session(client, monkeypatch)
+    client.patch(
+        "/api/settings/lmstudio/models/mistral", json={"role": "vl"},
+    )
+    resp = client.post(f"/api/sessions/{sid}/chat", json={"content": "x"})
+    assert resp.status_code == 409
+
+
+def test_chat_422_on_blank_content(client, monkeypatch):
+    sid = _bootstrap_chat_session(client, monkeypatch)
+    assert client.post(f"/api/sessions/{sid}/chat", json={"content": "   "}).status_code == 422
+
+
+def test_chat_emits_error_event_and_keeps_user_message_on_upstream_failure(client, monkeypatch):
+    sid = _bootstrap_chat_session(client, monkeypatch)
+
+    def fail(**_):
+        raise lm_client.LmError("upstream", "boom")
+        yield  # pragma: no cover  (make this a generator)
+
+    monkeypatch.setattr(lm_client, "chat_stream", fail)
+
+    with client.stream("POST", f"/api/sessions/{sid}/chat", json={"content": "hey"}) as resp:
+        assert resp.status_code == 200  # SSE always opens 200
+        body = b"".join(resp.iter_bytes())
+
+    events = _parse_sse(body)
+    assert any(e["type"] == "error" for e in events)
+    assert all(e["type"] != "done" for e in events)
+
+    # User message remains; assistant was NOT saved
+    msgs = client.get(f"/api/sessions/{sid}/messages").json()["messages"]
+    assert [m["role"] for m in msgs] == ["user"]
+    assert msgs[0]["content"] == "hey"
+
+
+def test_chat_does_not_persist_assistant_when_stream_yields_nothing(client, monkeypatch):
+    sid = _bootstrap_chat_session(client, monkeypatch)
+
+    def empty(**_):
+        if False:
+            yield ""  # pragma: no cover
+
+    monkeypatch.setattr(lm_client, "chat_stream", empty)
+
+    with client.stream("POST", f"/api/sessions/{sid}/chat", json={"content": "hey"}) as resp:
+        body = b"".join(resp.iter_bytes())
+
+    events = _parse_sse(body)
+    assert any(e["type"] == "error" for e in events)
+    msgs = client.get(f"/api/sessions/{sid}/messages").json()["messages"]
+    assert [m["role"] for m in msgs] == ["user"]
