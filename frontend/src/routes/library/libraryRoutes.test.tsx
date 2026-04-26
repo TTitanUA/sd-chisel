@@ -162,4 +162,32 @@ describe("library routes", () => {
     expect(within(list).getByText("lora_sd1")).toBeInTheDocument();
     expect(within(list).queryByText("lora_sdxl")).not.toBeInTheDocument();
   });
+
+  it("renders an Indexed badge in the LoRA detail meta", async () => {
+    vi.stubGlobal("fetch", vi.fn((url: string) => {
+      if (url.includes("/families")) {
+        return json([{ id: "sdxl", display_name: "SDXL", prompt_guide: "", created_at: 0, updated_at: 0 }]);
+      }
+      return json([
+        {
+          name: "cinematic_light",
+          display_name: "Cinematic Light",
+          description: "Rim light",
+          tags: [],
+          trigger_words: [],
+          family_id: "sdxl",
+          recommended_weight: 0.8,
+          author: null,
+          version: null,
+          source_url: null,
+          created_at: 0,
+          updated_at: 0,
+          is_indexed: true,
+        },
+      ]);
+    }));
+
+    renderRoute(<LorasRoute />, "/library/loras");
+    expect(await screen.findByText(/indexed/i)).toBeInTheDocument();
+  });
 });

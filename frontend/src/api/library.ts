@@ -40,9 +40,10 @@ export type Lora = {
   source_url: string | null;
   created_at: number;
   updated_at: number;
+  is_indexed: boolean;
 };
 
-export type LoraCreate = Omit<Lora, "created_at" | "updated_at">;
+export type LoraCreate = Omit<Lora, "created_at" | "updated_at" | "is_indexed">;
 export type LoraUpdate = Omit<LoraCreate, "name">;
 
 export const libraryKeys = {

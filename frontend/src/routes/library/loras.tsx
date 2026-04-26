@@ -201,6 +201,14 @@ export default function LorasRoute() {
                 value: <span>{selected.author ?? "—"}</span>,
               },
               {
+                label: "Index",
+                value: (
+                  <Badge variant={selected.is_indexed ? "accent" : "neutral"}>
+                    {selected.is_indexed ? "Indexed" : "Not indexed"}
+                  </Badge>
+                ),
+              },
+              {
                 label: "Updated",
                 value: <span>{formatUpdated(selected.updated_at)}</span>,
               },
