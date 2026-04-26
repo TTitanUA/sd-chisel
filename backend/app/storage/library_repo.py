@@ -281,3 +281,29 @@ def delete_lora(conn: sqlite3.Connection, name: str) -> bool:
 def list_all_lora_names(conn: sqlite3.Connection) -> list[str]:
     """Return every LoRA primary key, sorted. Used by `reindex-all` CLI."""
     return [r[0] for r in conn.execute("SELECT name FROM loras ORDER BY name")]
+
+
+def list_distinct_tags(conn: sqlite3.Connection) -> list[str]:
+    """Return every distinct tag string across all LoRAs, sorted ascending."""
+    rows = conn.execute(
+        "SELECT DISTINCT json_each.value AS tag "
+        "FROM loras, json_each(loras.tags) "
+        "ORDER BY tag",
+    ).fetchall()
+    return [r["tag"] for r in rows]
+
+
+def get_loras_by_names(
+    conn: sqlite3.Connection, names: list[str],
+) -> list[dict[str, Any]]:
+    """Return the hydrated LoRA rows whose ``name`` is in ``names``,
+    preserving the input order. Unknown names are silently dropped."""
+    if not names:
+        return []
+    placeholders = ",".join("?" for _ in names)
+    rows = conn.execute(
+        f"SELECT * FROM loras WHERE name IN ({placeholders})",
+        names,
+    ).fetchall()
+    by_name = {r["name"]: _hydrate_lora(conn, r) for r in rows}
+    return [by_name[n] for n in names if n in by_name]
