@@ -180,3 +180,42 @@ def chat_stream(
         raise LmError("timeout", str(exc)) from exc
     except httpx.HTTPError as exc:
         raise LmError("upstream", str(exc)) from exc
+
+
+def chat_complete(
+    *,
+    endpoint: dict[str, Any],
+    model: str,
+    messages: list[dict[str, Any]],
+    response_format: dict[str, Any] | None = None,
+    transport: httpx.BaseTransport | None = None,
+) -> str:
+    """Non-streaming OpenAI-compat chat. Returns the assistant content as a string.
+
+    `response_format` is forwarded as-is when provided (e.g. ``{"type":
+    "json_object"}``). LMStudio supports json_object on most prompt-tuned
+    models; json_schema support is patchy, so callers should validate the
+    parsed JSON themselves.
+    """
+    if not model.strip():
+        raise LmError("config", "model is required")
+    if not messages:
+        raise LmError("config", "messages must not be empty")
+    base_url, headers = _resolve(endpoint)
+    payload: dict[str, Any] = {"model": model, "messages": messages, "stream": False}
+    if response_format is not None:
+        payload["response_format"] = response_format
+    resp = _request(
+        "POST", f"{base_url}/chat/completions",
+        headers=headers, json=payload, transport=transport, timeout=CHAT_TIMEOUT,
+    )
+    if resp.status_code >= 400:
+        raise LmError("upstream", f"{resp.status_code}: {resp.text[:200]}")
+    try:
+        body = resp.json()
+        content = body["choices"][0]["message"]["content"]
+    except (ValueError, KeyError, IndexError, TypeError) as exc:
+        raise LmError("shape", f"unexpected response body: {exc}") from exc
+    if not isinstance(content, str) or not content.strip():
+        raise LmError("shape", "empty content from chat endpoint")
+    return content.strip()
