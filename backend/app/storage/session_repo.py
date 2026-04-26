@@ -273,3 +273,51 @@ def list_messages(conn: sqlite3.Connection, *, session_id: str) -> list[dict[str
         "SELECT * FROM messages WHERE session_id = ? ORDER BY created_at, id",
         (session_id,),
     )]
+
+
+# --- prompts (append-only history) -----------------------------------------
+
+
+def append_prompt(
+    conn: sqlite3.Connection,
+    *,
+    session_id: str,
+    positive: str,
+    negative: str | None,
+    loras: list[dict[str, Any]],
+    intents: list[dict[str, Any]] | None,
+    retrieved: list[dict[str, Any]] | None,
+) -> dict[str, Any]:
+    import json as _json
+
+    now = _now()
+    cur = conn.execute(
+        "INSERT INTO prompts(session_id, positive, negative, loras_json, "
+        "intents_json, retrieved_loras_json, created_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (
+            session_id,
+            positive,
+            negative,
+            _json.dumps(loras, ensure_ascii=False),
+            _json.dumps(intents, ensure_ascii=False) if intents is not None else None,
+            _json.dumps(retrieved, ensure_ascii=False) if retrieved is not None else None,
+            now,
+        ),
+    )
+    return _row(conn.execute(
+        "SELECT * FROM prompts WHERE id = ?", (cur.lastrowid,),
+    ).fetchone())  # type: ignore[return-value]
+
+
+def list_prompts(
+    conn: sqlite3.Connection, *, session_id: str,
+) -> list[dict[str, Any]]:
+    return [
+        dict(r)
+        for r in conn.execute(
+            "SELECT * FROM prompts WHERE session_id = ? "
+            "ORDER BY created_at DESC, id DESC",
+            (session_id,),
+        )
+    ]
