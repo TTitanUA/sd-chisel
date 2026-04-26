@@ -14,6 +14,8 @@ const FAKE_SESSION = {
   source_image_path: null,
   source_image_url: null,
   vl_summary: null,
+  vl_model_name: null,
+  prompt_model_name: null,
   created_at: 1,
   updated_at: 1,
 };
@@ -28,6 +30,9 @@ describe("workspace route", () => {
       const s = String(url);
       if (s.endsWith("/api/projects")) {
         return json([{ id: "p1", name: "Test", session_count: 1, created_at: 1, updated_at: 1 }]);
+      }
+      if (s.includes("/api/sessions/") && s.endsWith("/messages")) {
+        return json({ messages: [] });
       }
       if (s.includes("/api/sessions/") && s.includes(FAKE_SESSION.id)) {
         return json(FAKE_SESSION);
@@ -53,7 +58,8 @@ describe("workspace route", () => {
 
     await waitFor(() => expect(screen.getByText("test session")).toBeInTheDocument());
     expect(screen.getByText(/Drop source image/)).toBeInTheDocument();
-    expect(screen.getByText(/Chat pane/)).toBeInTheDocument();
+    expect(screen.getByPlaceholderText(/message/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /generate prompt/i })).toBeInTheDocument();
     expect(screen.getByText(/Prompt pane/)).toBeInTheDocument();
   });
 });

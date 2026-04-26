@@ -4,6 +4,7 @@ import { useProjects, useSession, useSessionsByProject } from "@/api/sessions";
 import { Badge } from "@/components/atoms/Badge";
 import { Button } from "@/components/atoms/Button";
 import { Icon } from "@/components/atoms/Icon";
+import { ChatPane } from "@/components/molecules/ChatPane";
 import { SourceImagePane } from "@/components/molecules/SourceImagePane";
 import { SessionSettingsDrawer } from "@/components/organisms/SessionSettingsDrawer";
 import styles from "@/components/templates/WorkspaceLayout.module.css";
@@ -65,7 +66,7 @@ export default function WorkspaceRoute() {
       </header>
       <div className={styles.grid}>
         <SourceImagePane session={s} />
-        <div className={styles.placeholder}>Chat pane · coming in Slice 4</div>
+        <ChatPane session={s} />
         <div className={styles.placeholder}>Prompt pane · coming in Slice 6</div>
       </div>
       <SessionSettingsDrawer
