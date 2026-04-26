@@ -216,6 +216,8 @@ def chat_complete(
         content = body["choices"][0]["message"]["content"]
     except (ValueError, KeyError, IndexError, TypeError) as exc:
         raise LmError("shape", f"unexpected response body: {exc}") from exc
+    if content is None:
+        raise LmError("shape", "content is null — model may have returned a tool call")
     if not isinstance(content, str) or not content.strip():
         raise LmError("shape", "empty content from chat endpoint")
     return content.strip()
