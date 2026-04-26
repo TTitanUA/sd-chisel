@@ -56,3 +56,8 @@ def embed(text: str) -> list[float]:
             f"unexpected embedding dim: got {len(vec)}, want {EMBEDDING_DIM}",
         )
     return vec
+
+
+# Preserved reference to the real implementation so unit tests can restore it
+# after the autouse fake-embedder fixture in conftest.py replaces `embed`.
+_real_embed = embed
