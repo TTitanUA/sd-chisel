@@ -1,4 +1,5 @@
 from pathlib import Path
+import json
 
 import pytest
 from pydantic import ValidationError
@@ -7,6 +8,7 @@ from fastapi.testclient import TestClient
 from app.api.deps import get_conn
 from app.main import app
 from app.models.chat import ChatRequest, MessageOut
+from app.services import lm_client
 from app.storage import db as db_mod
 from app.storage import session_repo
 from app.storage.migrations import apply_pending
@@ -79,9 +81,6 @@ def test_messages_returned_in_chronological_order(client, conn):
     assert body["messages"][1]["role"] == "assistant"
 
 
-from app.services import lm_client
-
-
 def _bootstrap_chat_session(client, monkeypatch, *, prompt_model: str | None = "mistral") -> str:
     """Configure LMStudio + a prompt-role model + a session that points at it."""
     client.put("/api/settings/lmstudio", json={"base_url": "http://h/v1", "api_key": None})
@@ -107,13 +106,12 @@ def _bootstrap_chat_session(client, monkeypatch, *, prompt_model: str | None = "
 
 
 def _parse_sse(body: bytes) -> list[dict]:
-    import json as _json
     events: list[dict] = []
     for chunk in body.split(b"\n\n"):
         chunk = chunk.strip()
         if not chunk.startswith(b"data:"):
             continue
-        events.append(_json.loads(chunk[len(b"data:"):].strip()))
+        events.append(json.loads(chunk[len(b"data:"):].strip()))
     return events
 
 
@@ -217,3 +215,74 @@ def test_chat_truncates_history_to_30(client, conn, monkeypatch):
     assert len(history) == 31
     assert history[0]["content"] == "m10"
     assert history[-1]["content"] == "now"
+
+
+def test_chat_persists_assistant_with_yield_dep_lifecycle(tmp_path, monkeypatch):
+    """Reproduce production get_conn lifecycle: yield conn / finally close.
+    Catches a regression where the streaming generator runs after the dep
+    teardown closed conn."""
+    from app.api.deps import get_conn as real_get_conn  # noqa: F401  (sanity import)
+
+    db_file = tmp_path / "lifecycle.db"
+
+    def yield_conn():
+        c = db_mod.connect(db_file)
+        apply_pending(c, Path(__file__).parent.parent / "migrations")
+        try:
+            yield c
+        finally:
+            c.close()
+
+    app.dependency_overrides[real_get_conn] = yield_conn
+    try:
+        local_client = TestClient(app)
+
+        # Bootstrap: lmstudio config, model, session with prompt_model
+        local_client.put("/api/settings/lmstudio", json={"base_url": "http://h/v1", "api_key": None})
+        monkeypatch.setattr(lm_client, "list_models", lambda **_: ["mistral"])
+        local_client.post("/api/settings/lmstudio/refresh")
+        local_client.patch(
+            "/api/settings/lmstudio/models/mistral",
+            json={"role": "prompt", "enabled": True},
+        )
+        pid = local_client.post("/api/projects", json={"name": "P"}).json()["id"]
+        sid = local_client.post(
+            f"/api/projects/{pid}/sessions",
+            json={"name": "s", "model_name": None, "use_negative": True},
+        ).json()["id"]
+        local_client.patch(
+            f"/api/sessions/{sid}",
+            json={
+                "name": "s", "model_name": None, "use_negative": True,
+                "pinned_loras": [],
+                "vl_model_name": None,
+                "prompt_model_name": "mistral",
+            },
+        )
+
+        def fake_stream(**_):
+            yield "Hello"
+
+        monkeypatch.setattr(lm_client, "chat_stream", fake_stream)
+
+        with local_client.stream(
+            "POST", f"/api/sessions/{sid}/chat",
+            json={"content": "hi"},
+        ) as resp:
+            assert resp.status_code == 200
+            body = b"".join(resp.iter_bytes())
+
+        events = _parse_sse(body)
+        done = [e for e in events if e["type"] == "done"]
+        errors = [e for e in events if e["type"] == "error"]
+        assert errors == [], f"unexpected error events: {errors}"
+        assert len(done) == 1, f"expected one done event, got {len(done)} (events={events})"
+
+        # Confirm assistant row was persisted (this is what would fail if conn is closed)
+        msgs = local_client.get(f"/api/sessions/{sid}/messages").json()["messages"]
+        assert [(m["role"], m["content"]) for m in msgs] == [
+            ("user", "hi"),
+            ("assistant", "Hello"),
+        ]
+    finally:
+        app.dependency_overrides.clear()
