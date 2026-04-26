@@ -6,6 +6,10 @@ See:
 - [Technical spec](docs/spec/technical_specifications.md)
 - [Roadmap](docs/superpowers/specs/2026-04-23-mvp-roadmap-design.md)
 
+## Status
+
+- Slice 6 (generate-prompt) shipped — full MVP loop is complete: source → analyze → chat → generate → copy structured prompt into ComfyUI. See [roadmap §4 Slice 6](docs/superpowers/specs/2026-04-23-mvp-roadmap-design.md).
+
 ## Prerequisites
 
 - Python 3.11+
