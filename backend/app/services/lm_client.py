@@ -8,12 +8,15 @@ needs only two methods, and slice 4 (chat) will make its own decision on SSE.
 from __future__ import annotations
 
 import base64
+import json
+from collections.abc import Iterator
 from typing import Any, Literal
 
 import httpx
 
 DEFAULT_TIMEOUT = httpx.Timeout(60.0, connect=5.0)
 LIST_TIMEOUT = httpx.Timeout(15.0, connect=5.0)
+CHAT_TIMEOUT = httpx.Timeout(120.0, connect=5.0, read=120.0)
 
 VL_SYSTEM_PROMPT = (
     "You describe images in terms useful for image-to-image generation. "
@@ -123,3 +126,55 @@ def analyze_image(
     if not isinstance(content, str) or not content.strip():
         raise LmError("shape", "empty content from VL endpoint")
     return content.strip()
+
+
+def chat_stream(
+    *,
+    endpoint: dict[str, Any],
+    model: str,
+    messages: list[dict[str, Any]],
+    transport: httpx.BaseTransport | None = None,
+) -> Iterator[str]:
+    """Yield assistant content chunks from an OpenAI-compatible streaming chat.
+
+    Connects to ``{base_url}/chat/completions`` with ``stream=true``, parses
+    Server-Sent Events line by line, and yields the ``choices[0].delta.content``
+    string of each chunk that has one. The terminal ``data: [DONE]`` line ends
+    iteration. Lines that aren't JSON or that have no content delta are
+    skipped silently — LMStudio occasionally emits role-only or
+    finish_reason-only chunks at the boundaries.
+    """
+    if not model.strip():
+        raise LmError("config", "model is required")
+    base_url, headers = _resolve(endpoint)
+    payload = {"model": model, "messages": messages, "stream": True}
+    try:
+        with httpx.Client(transport=transport, timeout=CHAT_TIMEOUT) as client:
+            with client.stream(
+                "POST", f"{base_url}/chat/completions",
+                headers=headers, json=payload,
+            ) as resp:
+                if resp.status_code >= 400:
+                    body = resp.read().decode("utf-8", errors="replace")
+                    raise LmError("upstream", f"{resp.status_code}: {body[:200]}")
+                for line in resp.iter_lines():
+                    if not line or not line.startswith("data:"):
+                        continue
+                    data = line[len("data:"):].strip()
+                    if data == "[DONE]":
+                        return
+                    try:
+                        chunk = json.loads(data)
+                    except ValueError:
+                        continue
+                    try:
+                        delta = chunk["choices"][0].get("delta") or {}
+                    except (KeyError, IndexError, TypeError):
+                        continue
+                    content = delta.get("content")
+                    if isinstance(content, str) and content:
+                        yield content
+    except httpx.TimeoutException as exc:
+        raise LmError("timeout", str(exc)) from exc
+    except httpx.HTTPError as exc:
+        raise LmError("upstream", str(exc)) from exc
