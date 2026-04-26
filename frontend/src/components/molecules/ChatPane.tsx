@@ -8,6 +8,7 @@ import {
   type ChatMessage,
 } from "@/api/chat";
 import type { Session } from "@/api/sessions";
+import { useGeneratePrompt } from "@/api/prompts";
 import styles from "./ChatPane.module.css";
 
 const isMac = typeof navigator !== "undefined" && /Mac|iPhone|iPod|iPad/i.test(navigator.platform);
@@ -15,6 +16,7 @@ const SEND_HINT = isMac ? "⌘↵ to send" : "Ctrl↵ to send";
 
 export function ChatPane({ session }: { session: Session }) {
   const messages = useMessages(session.id);
+  const generate = useGeneratePrompt(session.id);
   const invalidate = useChatInvalidation();
   const [draft, setDraft] = useState("");
   const [pending, setPending] = useState(false);
@@ -128,10 +130,15 @@ export function ChatPane({ session }: { session: Session }) {
             <Button
               size="sm"
               icon={<Icon name="Sparkles" size={12} />}
-              disabled
-              title="Generate prompt — available in Slice 6"
+              onClick={() => generate.mutate()}
+              disabled={generate.isPending || !session.vl_summary}
+              title={
+                !session.vl_summary
+                  ? "Run Analyze on the source image first"
+                  : "Generate prompt"
+              }
             >
-              Generate prompt
+              {generate.isPending ? "Generating…" : "Generate prompt"}
             </Button>
             <Button
               size="sm"
