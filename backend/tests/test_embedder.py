@@ -23,6 +23,7 @@ def test_build_embedding_text_handles_empty_lists():
     assert text == "x |  | "
 
 
+@pytest.mark.real_embedder
 def test_embed_calls_loaded_model_and_returns_list_of_floats(monkeypatch):
     captured: dict[str, object] = {}
 
@@ -32,8 +33,6 @@ def test_embed_calls_loaded_model_and_returns_list_of_floats(monkeypatch):
             captured["normalize"] = normalize_embeddings
             return [0.1] * 1024
 
-    # Restore the real embed so this test exercises the actual implementation.
-    monkeypatch.setattr(embedder, "embed", embedder._real_embed)
     monkeypatch.setattr(embedder, "_get_model", lambda: FakeModel())
     out = embedder.embed("hello")
     assert isinstance(out, list)
@@ -43,13 +42,12 @@ def test_embed_calls_loaded_model_and_returns_list_of_floats(monkeypatch):
     assert captured["normalize"] is True
 
 
+@pytest.mark.real_embedder
 def test_embed_raises_on_wrong_dimension(monkeypatch):
     class FakeModel:
         def encode(self, text, normalize_embeddings=False):
             return [0.0] * 768
 
-    # Restore the real embed so this test exercises dimension-validation logic.
-    monkeypatch.setattr(embedder, "embed", embedder._real_embed)
     monkeypatch.setattr(embedder, "_get_model", lambda: FakeModel())
     with pytest.raises(embedder.EmbedderError):
         embedder.embed("hello")

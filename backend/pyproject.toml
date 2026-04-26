@@ -36,3 +36,6 @@ packages = ["app"]
 testpaths = ["tests"]
 addopts = "-ra -q"
 pythonpath = ["."]
+markers = [
+  "real_embedder: opt out of the autouse fake embedder; use the real embedder.embed body",
+]
