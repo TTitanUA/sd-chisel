@@ -4,7 +4,12 @@ import pytest
 from pydantic import ValidationError
 from fastapi.testclient import TestClient
 
+from app.api.deps import get_conn
+from app.main import app
 from app.models.chat import ChatRequest, MessageOut
+from app.storage import db as db_mod
+from app.storage import session_repo
+from app.storage.migrations import apply_pending
 
 
 def test_chat_request_strips_and_rejects_empty():
@@ -25,12 +30,6 @@ def test_message_out_round_trip():
     assert m.model_dump() == {
         "id": 1, "session_id": "s", "role": "user", "content": "hi", "created_at": 10,
     }
-
-
-from app.api.deps import get_conn
-from app.main import app
-from app.storage import db as db_mod
-from app.storage.migrations import apply_pending
 
 
 @pytest.fixture
@@ -70,7 +69,6 @@ def test_messages_404_when_session_missing(client):
 
 
 def test_messages_returned_in_chronological_order(client, conn):
-    from app.storage import session_repo
     sid = _make_session(client)
     session_repo.append_message(conn, session_id=sid, role="user", content="first")
     session_repo.append_message(conn, session_id=sid, role="assistant", content="second")
