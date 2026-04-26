@@ -65,7 +65,7 @@ describe("ChatPane", () => {
     }));
 
     render(withClient(<ChatPane session={SESSION} />));
-    await waitFor(() => expect(screen.getByPlaceholderText(/message/i)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole("textbox")).toBeInTheDocument());
     const gen = screen.getByRole("button", { name: /generate prompt/i });
     expect(gen).toBeDisabled();
     expect(gen).toHaveAttribute("title", expect.stringMatching(/slice 6/i));
@@ -98,7 +98,7 @@ describe("ChatPane", () => {
     }));
 
     render(withClient(<ChatPane session={SESSION} />));
-    const input = await screen.findByPlaceholderText(/message/i);
+    const input = await screen.findByRole("textbox");
     await userEvent.type(input, "hi");
     await userEvent.click(screen.getByRole("button", { name: /^send$/i }));
 
@@ -125,7 +125,7 @@ describe("ChatPane", () => {
     }));
 
     render(withClient(<ChatPane session={SESSION} />));
-    const input = await screen.findByPlaceholderText(/message/i);
+    const input = await screen.findByRole("textbox");
     await userEvent.type(input, "hi");
     await userEvent.click(screen.getByRole("button", { name: /^send$/i }));
 

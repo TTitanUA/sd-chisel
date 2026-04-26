@@ -63,8 +63,14 @@ export function SourceImagePane({ session }: { session: Session }) {
       <div className={styles.head}>
         <span className={styles.title}>Source</span>
         {hasImage && session.vl_summary && <span className={styles.sub}>· VL-analyzed</span>}
-        {hasImage && !session.vl_summary && <span className={styles.sub}>· {session.source_image_path}</span>}
-        <span className={styles.sub} style={{ marginLeft: "auto" }}>
+        {hasImage && !session.vl_summary && (
+          <span className={styles.subTrunc}>· {session.source_image_path}</span>
+        )}
+        <div className={styles.spacer} />
+        <span
+          className={styles.subTrunc}
+          title={session.vl_model_name ?? "VL model used for this session"}
+        >
           VL · {session.vl_model_name ?? "(not set)"}
         </span>
         {hasImage && (

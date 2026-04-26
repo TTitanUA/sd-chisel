@@ -58,7 +58,7 @@ describe("workspace route", () => {
 
     await waitFor(() => expect(screen.getByText("test session")).toBeInTheDocument());
     expect(screen.getByText(/Drop source image/)).toBeInTheDocument();
-    expect(screen.getByPlaceholderText(/message/i)).toBeInTheDocument();
+    expect(screen.getByRole("textbox")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /generate prompt/i })).toBeInTheDocument();
     expect(screen.getByText(/Prompt pane/)).toBeInTheDocument();
   });
