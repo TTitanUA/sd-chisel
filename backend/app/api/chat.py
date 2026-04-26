@@ -5,11 +5,10 @@ import sqlite3
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
-from pydantic import BaseModel, ConfigDict
 from starlette.responses import StreamingResponse
 
 from app.api.deps import get_conn
-from app.models.chat import ChatRequest, MessageOut
+from app.models.chat import ChatRequest, MessageOut, MessagesResponse
 from app.services import lm_client
 from app.storage import session_repo, settings_repo
 
@@ -23,11 +22,6 @@ CHAT_SYSTEM_PROMPT = (
     "image-to-image idea. Discuss composition, lighting, style, mood, and "
     "concrete edits. Stay concise and concrete; do not write final prompt JSON."
 )
-
-
-class MessagesResponse(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    messages: list[MessageOut]
 
 
 def _not_found(session_id: str) -> HTTPException:

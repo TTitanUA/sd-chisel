@@ -27,3 +27,7 @@ class MessageOut(StrictModel):
     role: Literal["user", "assistant", "system"]
     content: str
     created_at: int
+
+
+class MessagesResponse(StrictModel):
+    messages: list[MessageOut]
