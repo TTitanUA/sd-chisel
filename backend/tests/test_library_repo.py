@@ -179,3 +179,40 @@ def test_lora_update_delete_and_filters(conn):
     assert library_repo.delete_lora(conn, "detail_boost") is True
     assert library_repo.get_lora(conn, "detail_boost") is None
     assert library_repo.delete_lora(conn, "detail_boost") is False
+
+
+def test_list_all_lora_names_returns_sorted_keys(conn):
+    library_repo.create_lora(
+        conn, name="zeta", display_name="Z", description="d",
+        tags=[], trigger_words=[], family_id="sdxl",
+    )
+    library_repo.create_lora(
+        conn, name="alpha", display_name="A", description="d",
+        tags=[], trigger_words=[], family_id="sdxl",
+    )
+    assert library_repo.list_all_lora_names(conn) == ["alpha", "zeta"]
+
+
+def test_create_lora_inside_outer_transaction_does_not_nest(conn):
+    """After Slice 5: caller may wrap create_lora in its own BEGIN/COMMIT."""
+    conn.execute("BEGIN")
+    library_repo.create_lora(
+        conn, name="wrapped", display_name="W", description="d",
+        tags=[], trigger_words=[], family_id="sdxl",
+    )
+    conn.execute("COMMIT")
+    assert library_repo.get_lora(conn, "wrapped") is not None
+
+
+def test_update_lora_inside_outer_transaction_does_not_nest(conn):
+    library_repo.create_lora(
+        conn, name="x", display_name="X", description="d",
+        tags=[], trigger_words=[], family_id="sdxl",
+    )
+    conn.execute("BEGIN")
+    library_repo.update_lora(
+        conn, "x", display_name="X2", description="d2",
+        tags=[], trigger_words=[], family_id="sdxl",
+    )
+    conn.execute("COMMIT")
+    assert library_repo.get_lora(conn, "x")["display_name"] == "X2"

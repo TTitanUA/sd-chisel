@@ -213,34 +213,25 @@ def create_lora(
     source_url: str | None = None,
 ) -> dict[str, Any]:
     now = _now()
-    try:
-        conn.execute("BEGIN")
-        conn.execute(
-            "INSERT INTO loras(name, display_name, description, tags, trigger_words, "
-            "recommended_weight, author, version, source_url, created_at, updated_at, family_id) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (
-                name,
-                display_name,
-                description,
-                json.dumps(tags),
-                json.dumps(trigger_words),
-                recommended_weight,
-                author,
-                version,
-                source_url,
-                now,
-                now,
-                family_id,
-            ),
-        )
-        conn.execute("COMMIT")
-    except Exception:
-        try:
-            conn.execute("ROLLBACK")
-        except Exception:
-            pass
-        raise
+    conn.execute(
+        "INSERT INTO loras(name, display_name, description, tags, trigger_words, "
+        "recommended_weight, author, version, source_url, created_at, updated_at, family_id) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            name,
+            display_name,
+            description,
+            json.dumps(tags),
+            json.dumps(trigger_words),
+            recommended_weight,
+            author,
+            version,
+            source_url,
+            now,
+            now,
+            family_id,
+        ),
+    )
     return get_lora(conn, name)  # type: ignore[return-value]
 
 
@@ -259,39 +250,34 @@ def update_lora(
     source_url: str | None = None,
 ) -> dict[str, Any] | None:
     now = _now()
-    try:
-        conn.execute("BEGIN")
-        cur = conn.execute(
-            "UPDATE loras SET display_name = ?, description = ?, tags = ?, trigger_words = ?, "
-            "recommended_weight = ?, author = ?, version = ?, source_url = ?, updated_at = ?, family_id = ? "
-            "WHERE name = ?",
-            (
-                display_name,
-                description,
-                json.dumps(tags),
-                json.dumps(trigger_words),
-                recommended_weight,
-                author,
-                version,
-                source_url,
-                now,
-                family_id,
-                name,
-            ),
-        )
-        if cur.rowcount == 0:
-            conn.execute("ROLLBACK")
-            return None
-        conn.execute("COMMIT")
-    except Exception:
-        try:
-            conn.execute("ROLLBACK")
-        except Exception:
-            pass
-        raise
+    cur = conn.execute(
+        "UPDATE loras SET display_name = ?, description = ?, tags = ?, trigger_words = ?, "
+        "recommended_weight = ?, author = ?, version = ?, source_url = ?, updated_at = ?, family_id = ? "
+        "WHERE name = ?",
+        (
+            display_name,
+            description,
+            json.dumps(tags),
+            json.dumps(trigger_words),
+            recommended_weight,
+            author,
+            version,
+            source_url,
+            now,
+            family_id,
+            name,
+        ),
+    )
+    if cur.rowcount == 0:
+        return None
     return get_lora(conn, name)
 
 
 def delete_lora(conn: sqlite3.Connection, name: str) -> bool:
     cur = conn.execute("DELETE FROM loras WHERE name = ?", (name,))
     return cur.rowcount > 0
+
+
+def list_all_lora_names(conn: sqlite3.Connection) -> list[str]:
+    """Return every LoRA primary key, sorted. Used by `reindex-all` CLI."""
+    return [r[0] for r in conn.execute("SELECT name FROM loras ORDER BY name")]
