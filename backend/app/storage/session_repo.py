@@ -7,6 +7,7 @@ DB operations.
 """
 from __future__ import annotations
 
+import json
 import sqlite3
 import time
 from collections.abc import Iterable
@@ -288,8 +289,6 @@ def append_prompt(
     intents: list[dict[str, Any]] | None,
     retrieved: list[dict[str, Any]] | None,
 ) -> dict[str, Any]:
-    import json as _json
-
     now = _now()
     cur = conn.execute(
         "INSERT INTO prompts(session_id, positive, negative, loras_json, "
@@ -299,9 +298,9 @@ def append_prompt(
             session_id,
             positive,
             negative,
-            _json.dumps(loras, ensure_ascii=False),
-            _json.dumps(intents, ensure_ascii=False) if intents is not None else None,
-            _json.dumps(retrieved, ensure_ascii=False) if retrieved is not None else None,
+            json.dumps(loras, ensure_ascii=False),
+            json.dumps(intents, ensure_ascii=False) if intents is not None else None,
+            json.dumps(retrieved, ensure_ascii=False) if retrieved is not None else None,
             now,
         ),
     )
