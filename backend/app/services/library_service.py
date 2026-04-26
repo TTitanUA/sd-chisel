@@ -26,6 +26,9 @@ def _rollback(conn: sqlite3.Connection) -> None:
     try:
         conn.execute("ROLLBACK")
     except sqlite3.OperationalError:
+        # No active transaction to roll back (sqlite already auto-rolled-back
+        # or the BEGIN never landed). Safe to swallow — re-raising would mask
+        # the original exception we're trying to surface.
         pass
 
 

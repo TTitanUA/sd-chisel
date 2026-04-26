@@ -92,3 +92,25 @@ def test_main_exits_one_when_any_failed(conn, monkeypatch, capsys):
     assert rc == 1
     captured = capsys.readouterr()
     assert "failed=1" in captured.out
+
+
+def test_run_reindex_continues_when_indexer_raises(conn, monkeypatch):
+    _seed(conn, "ok")
+    _seed(conn, "bad")
+
+    from app.services import library_service
+
+    real_reindex_one = library_service.reindex_one
+
+    def selective(c, name):
+        if name == "bad":
+            from app.services import indexer
+            raise indexer.IndexerError("simulated indexer failure")
+        return real_reindex_one(c, name)
+
+    monkeypatch.setattr(library_service, "reindex_one", selective)
+
+    summary = reindex_all.run(conn)
+    assert summary["indexed"] == 1
+    assert summary["failed"] == 1
+    assert any("bad" in e for e in summary["errors"])

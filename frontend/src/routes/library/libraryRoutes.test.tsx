@@ -85,6 +85,7 @@ describe("library routes", () => {
           source_url: null,
           created_at: 1,
           updated_at: 1,
+          is_indexed: true,
         },
       ]);
     }));

@@ -7,7 +7,7 @@ from __future__ import annotations
 import sqlite3
 import sys
 
-from app.services import embedder, library_service
+from app.services import embedder, indexer, library_service
 from app.storage import db as db_mod
 from app.storage import library_repo
 
@@ -24,7 +24,7 @@ def run(conn: sqlite3.Connection) -> dict:
     for name in names:
         try:
             ok = library_service.reindex_one(conn, name)
-        except embedder.EmbedderError as exc:
+        except (embedder.EmbedderError, indexer.IndexerError, sqlite3.Error) as exc:
             failed += 1
             errors.append(f"{name}: {exc}")
             print(f"failed: {name} - {exc}", file=sys.stderr)
