@@ -39,6 +39,7 @@ describe("workspace route", () => {
       }
       if (s.includes("/api/library/models")) return json([]);
       if (s.includes("/api/library/loras")) return json([]);
+      if (s.includes("/api/sessions/") && s.endsWith("/prompts")) return json({ prompts: [] });
       return json([]);
     }));
 
@@ -60,6 +61,6 @@ describe("workspace route", () => {
     expect(screen.getByText(/Drop source image/)).toBeInTheDocument();
     expect(screen.getByRole("textbox")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /generate prompt/i })).toBeInTheDocument();
-    expect(screen.getByText(/Prompt pane/)).toBeInTheDocument();
+    expect(screen.getByLabelText(/prompt pane/i)).toBeInTheDocument();
   });
 });

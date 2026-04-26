@@ -68,7 +68,7 @@ describe("ChatPane", () => {
     await waitFor(() => expect(screen.getByRole("textbox")).toBeInTheDocument());
     const gen = screen.getByRole("button", { name: /generate prompt/i });
     expect(gen).toBeDisabled();
-    expect(gen).toHaveAttribute("title", expect.stringMatching(/slice 6/i));
+    expect(gen).toHaveAttribute("title", expect.stringMatching(/analyze/i));
   });
 
   it("streams assistant deltas and refetches history on done", async () => {

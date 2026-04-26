@@ -6,6 +6,7 @@ import { Button } from "@/components/atoms/Button";
 import { Icon } from "@/components/atoms/Icon";
 import { ChatPane } from "@/components/molecules/ChatPane";
 import { SourceImagePane } from "@/components/molecules/SourceImagePane";
+import { PromptPane } from "@/components/organisms/PromptPane";
 import { SessionSettingsDrawer } from "@/components/organisms/SessionSettingsDrawer";
 import styles from "@/components/templates/WorkspaceLayout.module.css";
 
@@ -67,7 +68,7 @@ export default function WorkspaceRoute() {
       <div className={styles.grid}>
         <SourceImagePane session={s} />
         <ChatPane session={s} />
-        <div className={styles.placeholder}>Prompt pane · coming in Slice 6</div>
+        <PromptPane session={s} />
       </div>
       <SessionSettingsDrawer
         key={s.id}
