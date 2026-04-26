@@ -146,6 +146,8 @@ def chat_stream(
     """
     if not model.strip():
         raise LmError("config", "model is required")
+    if not messages:
+        raise LmError("config", "messages must not be empty")
     base_url, headers = _resolve(endpoint)
     payload = {"model": model, "messages": messages, "stream": True}
     try:

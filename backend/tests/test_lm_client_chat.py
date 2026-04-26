@@ -79,6 +79,7 @@ def test_chat_stream_raises_lm_error_on_non_2xx():
             transport=httpx.MockTransport(handler),
         ))
     assert exc.value.kind == "upstream"
+    assert "503" in exc.value.detail
 
 
 def test_chat_stream_raises_lm_error_on_timeout():
@@ -113,3 +114,23 @@ def test_chat_stream_ignores_garbage_lines():
         transport=httpx.MockTransport(handler),
     ))
     assert chunks == ["ok"]
+
+
+def test_chat_stream_raises_config_error_on_blank_model():
+    with pytest.raises(lm_client.LmError) as exc:
+        list(lm_client.chat_stream(
+            endpoint={"base_url": "http://h/v1", "api_key": None},
+            model="   ",
+            messages=[{"role": "user", "content": "x"}],
+        ))
+    assert exc.value.kind == "config"
+
+
+def test_chat_stream_raises_config_error_on_empty_messages():
+    with pytest.raises(lm_client.LmError) as exc:
+        list(lm_client.chat_stream(
+            endpoint={"base_url": "http://h/v1", "api_key": None},
+            model="m",
+            messages=[],
+        ))
+    assert exc.value.kind == "config"
