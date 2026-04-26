@@ -70,6 +70,7 @@ class LoraOut(StrictModel):
     source_url: str | None
     created_at: int
     updated_at: int
+    is_indexed: bool = False
 
 
 class LoraCreate(StrictModel):

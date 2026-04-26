@@ -17,6 +17,7 @@ from app.models.library import (
     ModelOut,
     ModelUpdate,
 )
+from app.services import embedder, library_service
 from app.storage import library_repo
 
 Conn = Annotated[sqlite3.Connection, Depends(get_conn)]
@@ -30,6 +31,10 @@ def _conflict(exc: sqlite3.IntegrityError) -> HTTPException:
 
 def _not_found(kind: str, key: str) -> HTTPException:
     return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"{kind} not found: {key}")
+
+
+def _embedder_failure(exc: embedder.EmbedderError) -> HTTPException:
+    return HTTPException(status_code=500, detail=f"embedder failed: {exc}")
 
 
 def _dump(data: ModelCreate | ModelUpdate | LoraCreate | LoraUpdate) -> dict:
@@ -129,12 +134,12 @@ def list_loras(
     tag: str | None = None,
     q: str | None = None,
 ):
-    return library_repo.list_loras(conn, family_id=family_id, tag=tag, q=q)
+    return library_service.list_loras(conn, family_id=family_id, tag=tag, q=q)
 
 
 @router.get("/loras/{name}", response_model=LoraOut)
 def get_lora(name: str, conn: Conn):
-    row = library_repo.get_lora(conn, name)
+    row = library_service.get_lora(conn, name)
     if row is None:
         raise _not_found("lora", name)
     return row
@@ -143,17 +148,21 @@ def get_lora(name: str, conn: Conn):
 @router.post("/loras", response_model=LoraOut, status_code=status.HTTP_201_CREATED)
 def create_lora(body: LoraCreate, conn: Conn):
     try:
-        return library_repo.create_lora(conn, **_dump(body))
+        return library_service.create_lora(conn, **_dump(body))
     except sqlite3.IntegrityError as exc:
         raise _conflict(exc) from exc
+    except embedder.EmbedderError as exc:
+        raise _embedder_failure(exc) from exc
 
 
 @router.put("/loras/{name}", response_model=LoraOut)
 def update_lora(name: str, body: LoraUpdate, conn: Conn):
     try:
-        row = library_repo.update_lora(conn, name, **_dump(body))
+        row = library_service.update_lora(conn, name, **_dump(body))
     except sqlite3.IntegrityError as exc:
         raise _conflict(exc) from exc
+    except embedder.EmbedderError as exc:
+        raise _embedder_failure(exc) from exc
     if row is None:
         raise _not_found("lora", name)
     return row
@@ -161,7 +170,7 @@ def update_lora(name: str, body: LoraUpdate, conn: Conn):
 
 @router.delete("/loras/{name}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_lora(name: str, conn: Conn):
-    deleted = library_repo.delete_lora(conn, name)
+    deleted = library_service.delete_lora(conn, name)
     if not deleted:
         raise _not_found("lora", name)
     return Response(status_code=status.HTTP_204_NO_CONTENT)

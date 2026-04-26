@@ -135,3 +135,90 @@ def test_lora_crud_http(client):
 
     assert client.delete("/api/library/loras/cinematic_light").status_code == 204
     assert client.get("/api/library/loras/cinematic_light").status_code == 404
+
+
+from app.services import embedder
+
+
+def _make_lora_payload(**override):
+    base = {
+        "name": "cinelight",
+        "display_name": "Cinematic Light",
+        "description": "dramatic rim light",
+        "tags": ["light"],
+        "trigger_words": ["cinematic"],
+        "family_id": "sdxl",
+        "recommended_weight": 0.8,
+        "author": None,
+        "version": None,
+        "source_url": None,
+    }
+    base.update(override)
+    return base
+
+
+def test_create_lora_returns_is_indexed_true(client):
+    resp = client.post("/api/library/loras", json=_make_lora_payload())
+    assert resp.status_code == 201
+    body = resp.json()
+    assert body["is_indexed"] is True
+
+
+def test_list_loras_includes_is_indexed_for_each_row(client):
+    client.post("/api/library/loras", json=_make_lora_payload(name="a"))
+    client.post("/api/library/loras", json=_make_lora_payload(name="b"))
+    rows = client.get("/api/library/loras").json()
+    assert {r["name"]: r["is_indexed"] for r in rows} == {"a": True, "b": True}
+
+
+def test_get_lora_includes_is_indexed(client):
+    client.post("/api/library/loras", json=_make_lora_payload(name="z"))
+    body = client.get("/api/library/loras/z").json()
+    assert body["is_indexed"] is True
+
+
+def test_update_lora_re_embeds_and_keeps_indexed(client):
+    client.post("/api/library/loras", json=_make_lora_payload())
+    resp = client.put(
+        "/api/library/loras/cinelight",
+        json={
+            "display_name": "Cinematic Light 2",
+            "description": "more drama",
+            "tags": ["light"],
+            "trigger_words": ["cinematic"],
+            "family_id": "sdxl",
+            "recommended_weight": 0.85,
+            "author": None, "version": None, "source_url": None,
+        },
+    )
+    assert resp.status_code == 200
+    assert resp.json()["is_indexed"] is True
+
+
+def test_delete_lora_removes_vector_too(client, conn):
+    client.post("/api/library/loras", json=_make_lora_payload())
+    assert client.delete("/api/library/loras/cinelight").status_code == 204
+    assert conn.execute(
+        "SELECT COUNT(*) FROM lora_vec_map WHERE lora_name = 'cinelight'",
+    ).fetchone()[0] == 0
+
+
+def test_create_lora_returns_500_when_embedder_fails(client, conn, monkeypatch):
+    def boom(_text):
+        raise embedder.EmbedderError("simulated embedder failure")
+
+    monkeypatch.setattr(embedder, "embed", boom)
+
+    resp = client.post("/api/library/loras", json=_make_lora_payload(name="oops"))
+    assert resp.status_code == 500
+    # The whole write rolled back — no orphan loras row:
+    assert conn.execute(
+        "SELECT COUNT(*) FROM loras WHERE name = 'oops'",
+    ).fetchone()[0] == 0
+
+
+def test_lora_create_rejects_is_indexed_in_body(client):
+    payload = _make_lora_payload()
+    payload["is_indexed"] = True
+    resp = client.post("/api/library/loras", json=payload)
+    assert resp.status_code == 422
