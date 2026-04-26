@@ -69,7 +69,7 @@ def _build_payload_messages(
 
 
 def _sse(payload: dict) -> bytes:
-    return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n".encode("utf-8")
+    return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n".encode()
 
 
 @router.get(
