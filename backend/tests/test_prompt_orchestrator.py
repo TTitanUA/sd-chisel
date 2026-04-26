@@ -209,3 +209,31 @@ def test_generate_persists_pinned_loras_into_candidates(conn, session_id, monkey
     )
     composition_system = captured["calls"][1][0]["content"]
     assert "pinned-x" in composition_system
+
+
+def test_generate_does_not_pass_response_format(conn, session_id, monkeypatch):
+    """LMStudio (qwen3.6 builds) reject response_format=json_object. The
+    orchestrator must NOT pass response_format — the prompt instruction +
+    _extract_json_object fallback are sufficient. Smoke-tested 2026-04-26."""
+    import json
+    monkeypatch.setattr(
+        "app.services.retriever.embedder.embed",
+        lambda text: [0.001] * 1024,
+    )
+    captured: list = []
+    def fake_complete(*, endpoint, model, messages, response_format=None, transport=None):
+        captured.append(response_format)
+        if len(captured) == 1:
+            return json.dumps({"intents": [{"kind": "k", "query": "q"}]})
+        return json.dumps({"positive": "p", "negative": "n", "loras": []})
+    monkeypatch.setattr(
+        "app.services.prompt_orchestrator.lm_client.chat_complete", fake_complete,
+    )
+    prompt_orchestrator.generate(
+        conn, session_id=session_id,
+        endpoint={"base_url": "http://x/v1", "api_key": None},
+        prompt_model="m1",
+    )
+    assert captured == [None, None], (
+        "response_format must remain unset until LMStudio json_schema support is wired"
+    )

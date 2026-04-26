@@ -123,7 +123,6 @@ def generate(
         endpoint=endpoint,
         model=prompt_model,
         messages=intent_messages,
-        response_format={"type": "json_object"},
     )
     intents_obj = _parse_json(intent_raw, IntentList)
 
@@ -159,7 +158,6 @@ def generate(
         endpoint=endpoint,
         model=prompt_model,
         messages=comp_messages,
-        response_format={"type": "json_object"},
     )
     prompt_obj = _parse_json(comp_raw, GeneratedPrompt)
     prompt_obj = _coerce_negative(prompt_obj, use_negative=session["use_negative"])
