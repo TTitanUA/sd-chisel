@@ -27,7 +27,7 @@ def run(conn: sqlite3.Connection) -> dict:
         except embedder.EmbedderError as exc:
             failed += 1
             errors.append(f"{name}: {exc}")
-            print(f"failed: {name} — {exc}", file=sys.stderr)
+            print(f"failed: {name} - {exc}", file=sys.stderr)
             continue
         if ok:
             indexed += 1
