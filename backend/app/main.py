@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
 from app import config as app_config
+from app.api.chat import router as chat_router
 from app.api.library import router as library_router
 from app.api.sessions import router as sessions_router
 from app.api.settings import router as settings_router
@@ -20,6 +21,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(chat_router)
 app.include_router(library_router)
 app.include_router(sessions_router)
 app.include_router(settings_router)
