@@ -322,12 +322,15 @@ def test_assist_sends_function_call_output_on_followup(client, conn, monkeypatch
     )
     assert resp.status_code == 200
 
-    # First pass: tools + integrations + previous_response_id from request
+    # First pass: tools (function + mcp) + previous_response_id from request
     first = captures[0]
     assert first["previous_response_id"] == "resp_prev"
     assert first["user_input"] == "go"
     assert any(t.get("name") == "update_prompt_guide" for t in first["tools"])
-    assert "mcp/playwright" in first["integrations"]
+    assert any(
+        t.get("type") == "mcp" and t.get("server_label") == "playwright"
+        for t in first["tools"]
+    )
 
     # Second pass: function_call_output + previous_response_id from first pass
     second = captures[1]

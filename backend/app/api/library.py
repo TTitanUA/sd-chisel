@@ -106,9 +106,10 @@ ASSIST_TOOLS = [
             "additionalProperties": False,
         },
     },
+    # Reference Playwright MCP from LMStudio's mcp.json. The "Allow calling
+    # servers from mcp.json" setting must be enabled in LMStudio Server Settings.
+    {"type": "mcp", "server_label": "playwright"},
 ]
-
-ASSIST_INTEGRATIONS = ["mcp/playwright"]
 
 
 def _assist_sse(payload: dict) -> bytes:
@@ -143,7 +144,6 @@ def assist(body: AssistRequest, conn: Conn) -> StreamingResponse:
             instructions=ASSIST_SYSTEM_PROMPT,
             user_input=user_input,
             tools=ASSIST_TOOLS,
-            integrations=ASSIST_INTEGRATIONS,
             previous_response_id=prev_id,
         ):
             etype = event["type"]
