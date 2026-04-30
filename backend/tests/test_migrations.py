@@ -49,7 +49,9 @@ def test_apply_pending_is_idempotent(fresh_conn, tmp_path):
     first = apply_pending(fresh_conn, migrations_dir)
     second = apply_pending(fresh_conn, migrations_dir)
     assert second == 0
-    assert applied_versions(fresh_conn) == list(range(1, first + 1))
+    versions = applied_versions(fresh_conn)
+    assert len(versions) == first
+    assert versions == sorted(versions)
 
 
 def test_foreign_keys_enforced(fresh_conn, tmp_path):
@@ -90,18 +92,6 @@ def test_apply_pending_rolls_back_on_partial_failure(fresh_conn, tmp_path):
     assert applied_versions(fresh_conn) == []
 
 
-def test_families_are_seeded(fresh_conn, tmp_path):
-    migrations_dir = Path(__file__).parent.parent / "migrations"
-    apply_pending(fresh_conn, migrations_dir)
-
-    ids = {r[0] for r in fresh_conn.execute("SELECT id FROM families")}
-    expected = {
-        "sdxl", "illustrious", "pony", "flux",
-        "sd15", "sd21", "cascade", "hunyuan", "kolors", "auraflow",
-    }
-    assert ids == expected
-
-
 def test_split_statements_preserves_semicolons_in_string_literals(tmp_path, fresh_conn):
     # A migration whose INSERT has `;` and escaped `''` inside its string values.
     from app.storage.migrations import _split_statements
@@ -117,7 +107,7 @@ def test_split_statements_preserves_semicolons_in_string_literals(tmp_path, fres
     assert stmts[2] == "INSERT INTO t(id, v) VALUES (2, 'it''s;fine')"
 
 
-def test_migration_003_drops_endpoint_columns_and_adds_settings_tables(tmp_path):
+def test_settings_schema_present_with_correct_session_columns(tmp_path):
     import sqlite3
     from pathlib import Path
 

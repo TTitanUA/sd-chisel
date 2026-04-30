@@ -23,8 +23,7 @@ See:
 # Backend
 cd backend
 uv sync --extra dev
-uv run db-init                     # applies migrations, seeds 10 families
-uv run dev-seed                    # insert mock library rows from mvp-ui-mock (optional)
+uv run db-init                     # apply migrations (DB starts empty — no seed data)
 
 # Frontend
 cd ../frontend
@@ -51,8 +50,7 @@ Run these from `backend/`:
 
 ```bash
 uv sync --extra dev                # install/update backend dependencies
-uv run db-init                     # apply migrations and seed families
-uv run dev-seed                    # seed models/loras from mvp-ui-mock (insert-only, idempotent)
+uv run db-init                     # apply migrations (DB starts empty — no seed data)
 uv run dev                         # run API on http://localhost:8000
 uv run reindex-all                 # rebuild vec_loras for every LoRA (cold-start / model change)
 uv run pytest                      # run backend tests

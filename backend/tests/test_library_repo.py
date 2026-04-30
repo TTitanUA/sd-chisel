@@ -9,17 +9,12 @@ from app.storage.migrations import apply_pending
 
 
 @pytest.fixture
-def conn(tmp_path):
+def conn(tmp_path, seed_default_families):
     c = db_mod.connect(tmp_path / "t.db")
     apply_pending(c, Path(__file__).parent.parent / "migrations")
+    seed_default_families(c)
     yield c
     c.close()
-
-
-def test_list_families_returns_seeded(conn):
-    fams = library_repo.list_families(conn)
-    ids = [f["id"] for f in fams]
-    assert "sdxl" in ids and len(ids) == 10
 
 
 def test_create_and_get_model(conn):

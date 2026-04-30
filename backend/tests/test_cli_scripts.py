@@ -8,7 +8,6 @@ def test_pyproject_exposes_short_uv_scripts():
     assert pyproject["project"]["scripts"] == {
         "db-init": "app.cli.init_db:main",
         "dev": "app.cli.dev:main",
-        "dev-seed": "app.cli.dev_seed:main",
         "reindex-all": "app.cli.reindex_all:main",
     }
 

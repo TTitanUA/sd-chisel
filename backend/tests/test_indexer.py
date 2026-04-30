@@ -11,9 +11,10 @@ from app.storage.migrations import apply_pending
 
 
 @pytest.fixture
-def conn(tmp_path):
+def conn(tmp_path, seed_default_families):
     c = db_mod.connect(tmp_path / "indexer.db")
     apply_pending(c, Path(__file__).parent.parent / "migrations")
+    seed_default_families(c)
     yield c
     c.close()
 
