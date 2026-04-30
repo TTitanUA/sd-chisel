@@ -275,6 +275,41 @@ def test_assist_streams_text_and_artifact(client, conn):
         lmstudio_client.chat_stream_with_tools = original
 
 
+def test_assist_fetches_url_content_and_injects_into_message(client, conn, monkeypatch):
+    from app.api import library as lib_mod
+    from app.storage import settings_repo
+    settings_repo.set_lmstudio(conn, url="http://localhost:1234", api_key=None)
+    settings_repo.upsert_lm_models(conn, models=[
+        {"name": "tool-model", "vision": False, "tool_use": True, "reasoning": False},
+    ])
+
+    captured: dict = {}
+
+    def fake_stream(**kwargs):
+        captured.update(kwargs)
+        return iter([
+            {"type": "tool_call", "name": "update_prompt_guide", "arguments": {"content": "# Guide"}},
+        ])
+
+    monkeypatch.setattr(lmstudio_client, "chat_stream_with_tools", fake_stream)
+    monkeypatch.setattr(lib_mod, "_fetch_urls", lambda text: [
+        ("https://example.com/docs.txt", "Example documentation content"),
+    ])
+
+    resp = client.post(
+        "/api/library/families/assist",
+        json={
+            "model": "tool-model",
+            "messages": [{"role": "user", "content": "https://example.com/docs.txt here is the docs"}],
+        },
+    )
+    assert resp.status_code == 200
+
+    last_user = [m for m in captured["messages"] if m["role"] == "user"][-1]
+    assert "Example documentation content" in last_user["content"]
+    assert "Content from https://example.com/docs.txt" in last_user["content"]
+
+
 def test_assist_rejects_model_without_tool_use(client, conn):
     from app.storage import settings_repo
     settings_repo.set_lmstudio(conn, url="http://localhost:1234", api_key=None)

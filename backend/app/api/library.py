@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 from typing import Annotated
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from starlette.responses import StreamingResponse
 
@@ -65,16 +67,37 @@ def create_family(body: FamilyCreate, conn: Conn):
         raise _conflict(exc) from exc
 
 
+_URL_RE = re.compile(r"https?://\S+")
+_FETCH_TIMEOUT = httpx.Timeout(15.0, connect=5.0)
+_MAX_CONTENT_LEN = 30_000
+
+
+def _fetch_urls(text: str) -> list[tuple[str, str]]:
+    urls = _URL_RE.findall(text)
+    results: list[tuple[str, str]] = []
+    for url in urls[:3]:
+        try:
+            resp = httpx.get(url, timeout=_FETCH_TIMEOUT, follow_redirects=True)
+            ct = resp.headers.get("content-type", "")
+            if resp.status_code < 400 and ct.startswith("text/"):
+                results.append((url, resp.text[:_MAX_CONTENT_LEN]))
+        except (httpx.HTTPError, httpx.TimeoutException):
+            continue
+    return results
+
+
 ASSIST_SYSTEM_PROMPT = (
     "You are a prompt-guide writing assistant for generative image model families. "
     "Help the user write a prompt guide — a set of rules that the LLM will follow "
     "when generating prompts for this family in both text-to-image (t2i) and "
     "image-to-image (i2i) workflows.\n\n"
-    "You have a tool `update_prompt_guide` — call it whenever you have a draft or "
-    "update of the prompt guide. The user will see the result in real-time in the editor.\n\n"
-    "When the user provides documentation links, read them using your MCP tools and "
-    "extract relevant information about the model's prompting style, supported tags, "
-    "quality tokens, and any family-specific syntax.\n\n"
+    "You have a tool `update_prompt_guide` — call it as soon as you have a draft or "
+    "update. Do not just describe what you plan to do — create the draft and call "
+    "the tool immediately. The user will see the result in real-time in the editor.\n\n"
+    "When the user provides documentation links, the content is fetched automatically "
+    "and appended to their message. Use that content to extract relevant information "
+    "about the model's prompting style, supported tags, quality tokens, and any "
+    "family-specific syntax.\n\n"
     "Keep the prompt guide concise and actionable. Focus on:\n"
     "- Tag syntax and formatting rules\n"
     "- Quality/style tokens specific to this family\n"
@@ -128,6 +151,15 @@ def assist(body: AssistRequest, conn: Conn) -> StreamingResponse:
     payload_messages: list[dict] = [{"role": "system", "content": ASSIST_SYSTEM_PROMPT}]
     for m in body.messages:
         payload_messages.append({"role": m.role, "content": m.content})
+
+    last_msg = payload_messages[-1]
+    if last_msg["role"] == "user":
+        fetched = _fetch_urls(last_msg["content"])
+        if fetched:
+            extra = "\n\n".join(
+                f"--- Content from {url} ---\n{content}" for url, content in fetched
+            )
+            last_msg["content"] += f"\n\n{extra}"
 
     def gen():
         try:
