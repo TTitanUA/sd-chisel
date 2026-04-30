@@ -217,6 +217,74 @@ def chat_stream(
         raise LmError("upstream", str(exc)) from exc
 
 
+def chat_stream_with_tools(
+    *,
+    endpoint: dict[str, Any],
+    model: str,
+    messages: list[dict[str, Any]],
+    tools: list[dict[str, Any]],
+    transport: httpx.BaseTransport | None = None,
+) -> Iterator[dict[str, Any]]:
+    if not model.strip():
+        raise LmError("config", "model is required")
+    if not messages:
+        raise LmError("config", "messages must not be empty")
+    server_root, headers = _resolve(endpoint)
+    payload = {
+        "model": model,
+        "messages": messages,
+        "tools": tools,
+        "stream": True,
+    }
+    tool_name = ""
+    tool_args_buf: list[str] = []
+    try:
+        with httpx.Client(transport=transport, timeout=CHAT_TIMEOUT) as client:
+            with client.stream(
+                "POST", f"{server_root}/v1/chat/completions",
+                headers=headers, json=payload,
+            ) as resp:
+                if resp.status_code >= 400:
+                    body = resp.read().decode("utf-8", errors="replace")
+                    raise LmError("upstream", f"{resp.status_code}: {body[:200]}")
+                for line in resp.iter_lines():
+                    if not line or not line.startswith("data:"):
+                        continue
+                    data = line[len("data:"):].strip()
+                    if data == "[DONE]":
+                        break
+                    try:
+                        chunk = json.loads(data)
+                    except ValueError:
+                        continue
+                    try:
+                        delta = chunk["choices"][0].get("delta") or {}
+                    except (KeyError, IndexError, TypeError):
+                        continue
+                    content = delta.get("content")
+                    if isinstance(content, str) and content:
+                        yield {"type": "delta", "content": content}
+                    tool_calls = delta.get("tool_calls")
+                    if tool_calls:
+                        tc = tool_calls[0]
+                        fn = tc.get("function") or {}
+                        if fn.get("name"):
+                            tool_name = fn["name"]
+                        if fn.get("arguments"):
+                            tool_args_buf.append(fn["arguments"])
+        if tool_name and tool_args_buf:
+            raw_args = "".join(tool_args_buf)
+            try:
+                parsed = json.loads(raw_args)
+            except ValueError:
+                raise LmError("shape", f"invalid tool call JSON: {raw_args[:200]}")
+            yield {"type": "tool_call", "name": tool_name, "arguments": parsed}
+    except httpx.TimeoutException as exc:
+        raise LmError("timeout", str(exc)) from exc
+    except httpx.HTTPError as exc:
+        raise LmError("upstream", str(exc)) from exc
+
+
 def chat_complete(
     *,
     endpoint: dict[str, Any],

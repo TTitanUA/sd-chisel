@@ -183,3 +183,86 @@ def test_chat_complete_sends_to_v1_chat_completions():
     )
     assert out == "hello"
     assert captured["url"] == "http://localhost:1234/v1/chat/completions"
+
+
+# --- chat_stream_with_tools ---
+
+def _sse_lines(*events: str) -> str:
+    return "".join(f"data: {e}\n\n" for e in events) + "data: [DONE]\n\n"
+
+
+def _text_delta(content: str) -> str:
+    return json.dumps({
+        "choices": [{"delta": {"content": content}, "finish_reason": None}],
+    })
+
+
+def _tool_call_delta(*, name: str | None = None, arguments: str = "") -> str:
+    tc: dict[str, Any] = {"index": 0, "function": {}}
+    if name is not None:
+        tc["id"] = "call_1"
+        tc["type"] = "function"
+        tc["function"]["name"] = name
+    if arguments:
+        tc["function"]["arguments"] = arguments
+    return json.dumps({
+        "choices": [{"delta": {"tool_calls": [tc]}, "finish_reason": None}],
+    })
+
+
+def test_chat_stream_with_tools_yields_text_deltas():
+    body = _sse_lines(_text_delta("hello "), _text_delta("world"))
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        assert "tools" in payload
+        return httpx.Response(200, text=body, headers={"content-type": "text/event-stream"})
+
+    events = list(lmstudio_client.chat_stream_with_tools(
+        endpoint=ENDPOINT,
+        model="m",
+        messages=[{"role": "user", "content": "hi"}],
+        tools=[{"type": "function", "function": {"name": "noop", "parameters": {}}}],
+        transport=_make_transport(handler),
+    ))
+    assert events == [
+        {"type": "delta", "content": "hello "},
+        {"type": "delta", "content": "world"},
+    ]
+
+
+def test_chat_stream_with_tools_yields_tool_call():
+    body = _sse_lines(
+        _text_delta("Here is the guide."),
+        _tool_call_delta(name="update_prompt_guide", arguments='{"conte'),
+        _tool_call_delta(arguments='nt": "the guide"}'),
+    )
+
+    def handler(r: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, text=body, headers={"content-type": "text/event-stream"})
+
+    events = list(lmstudio_client.chat_stream_with_tools(
+        endpoint=ENDPOINT,
+        model="m",
+        messages=[{"role": "user", "content": "hi"}],
+        tools=[],
+        transport=_make_transport(handler),
+    ))
+    assert events == [
+        {"type": "delta", "content": "Here is the guide."},
+        {"type": "tool_call", "name": "update_prompt_guide", "arguments": {"content": "the guide"}},
+    ]
+
+
+def test_chat_stream_with_tools_raises_on_upstream_error():
+    transport = _make_transport(lambda r: httpx.Response(500, text="internal"))
+
+    with pytest.raises(lmstudio_client.LmError) as exc:
+        list(lmstudio_client.chat_stream_with_tools(
+            endpoint=ENDPOINT,
+            model="m",
+            messages=[{"role": "user", "content": "hi"}],
+            tools=[],
+            transport=transport,
+        ))
+    assert exc.value.kind == "upstream"
