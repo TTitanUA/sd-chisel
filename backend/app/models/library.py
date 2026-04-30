@@ -11,6 +11,8 @@ class FamilyOut(StrictModel):
     id: str
     display_name: str
     prompt_guide: str
+    prompt_i2i: str
+    prompt_t2i: str
     created_at: int
     updated_at: int
 
@@ -19,11 +21,15 @@ class FamilyCreate(StrictModel):
     id: str = Field(min_length=1, max_length=80, pattern=r"^[a-zA-Z0-9_.-]+$")
     display_name: str = Field(min_length=1, max_length=160)
     prompt_guide: str = Field(min_length=1)
+    prompt_i2i: str = ""
+    prompt_t2i: str = ""
 
 
 class FamilyUpdate(StrictModel):
     display_name: str = Field(min_length=1, max_length=160)
     prompt_guide: str = Field(min_length=1)
+    prompt_i2i: str = ""
+    prompt_t2i: str = ""
 
 
 class ModelOut(StrictModel):
@@ -98,7 +104,14 @@ class LoraUpdate(StrictModel):
     source_url: HttpUrl | None = None
 
 
+class AssistFieldsSnapshot(StrictModel):
+    prompt_guide: str = ""
+    prompt_i2i: str = ""
+    prompt_t2i: str = ""
+
+
 class AssistRequest(StrictModel):
     model: str = Field(min_length=1)
     message: str = Field(min_length=1)
     previous_response_id: str | None = None
+    current_state: AssistFieldsSnapshot = Field(default_factory=AssistFieldsSnapshot)

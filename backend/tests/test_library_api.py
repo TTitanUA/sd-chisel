@@ -30,10 +30,28 @@ def client(conn):
 def test_family_crud_http(client):
     create = client.post(
         "/api/library/families",
-        json={"id": "api_fam", "display_name": "API Family", "prompt_guide": "Guide"},
+        json={
+            "id": "api_fam",
+            "display_name": "API Family",
+            "prompt_guide": "Base guide",
+            "prompt_i2i": "i2i specifics",
+            "prompt_t2i": "t2i specifics",
+        },
     )
-    assert create.status_code == 201
-    assert create.json()["id"] == "api_fam"
+    assert create.status_code == 201, create.json()
+    body = create.json()
+    assert body["id"] == "api_fam"
+    assert body["prompt_i2i"] == "i2i specifics"
+    assert body["prompt_t2i"] == "t2i specifics"
+
+    # i2i/t2i are optional in create
+    create2 = client.post(
+        "/api/library/families",
+        json={"id": "api_fam2", "display_name": "API Family 2", "prompt_guide": "Base"},
+    )
+    assert create2.status_code == 201, create2.json()
+    assert create2.json()["prompt_i2i"] == ""
+    assert create2.json()["prompt_t2i"] == ""
 
     duplicate = client.post(
         "/api/library/families",
@@ -43,14 +61,21 @@ def test_family_crud_http(client):
 
     listed = client.get("/api/library/families", params={"q": "api"})
     assert listed.status_code == 200
-    assert [f["id"] for f in listed.json()] == ["api_fam"]
+    assert sorted(f["id"] for f in listed.json()) == ["api_fam", "api_fam2"]
 
     update = client.put(
         "/api/library/families/api_fam",
-        json={"display_name": "API Family 2", "prompt_guide": "Guide 2"},
+        json={
+            "display_name": "API Family v2",
+            "prompt_guide": "Base v2",
+            "prompt_i2i": "",
+            "prompt_t2i": "t2i v2",
+        },
     )
-    assert update.status_code == 200
-    assert update.json()["display_name"] == "API Family 2"
+    assert update.status_code == 200, update.json()
+    assert update.json()["display_name"] == "API Family v2"
+    assert update.json()["prompt_i2i"] == ""
+    assert update.json()["prompt_t2i"] == "t2i v2"
 
     delete = client.delete("/api/library/families/api_fam")
     assert delete.status_code == 204
