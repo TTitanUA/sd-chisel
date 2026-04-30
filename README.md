@@ -32,17 +32,24 @@ pnpm install
 
 ## Day-to-day
 
-Two terminals:
+One terminal — the helper runs both servers and merges their stdout, prefixing
+each line with `[be]`/`[fe]`. Ctrl+C stops both.
 
 ```bash
-# Terminal 1 — backend
-cd backend && uv run dev
+# Unix / macOS
+./scripts/dev.sh
 
-# Terminal 2 — frontend
-cd frontend && pnpm dev
+# Windows (PowerShell)
+.\scripts\dev.ps1
+
+# Or call the runner directly on any platform
+node scripts/dev.mjs
 ```
 
 Open http://localhost:5173/.
+
+If you'd rather drive the two servers yourself, run `cd backend && uv run dev`
+and `cd frontend && pnpm dev` in separate terminals.
 
 ## Backend commands
 
