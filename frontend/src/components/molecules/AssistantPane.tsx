@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/atoms/Button";
 import { Icon } from "@/components/atoms/Icon";
-import { streamAssist, type AssistantMessage } from "@/api/assist";
+import { streamAssist } from "@/api/assist";
 import { useLmModels } from "@/api/settings";
 import styles from "./AssistantPane.module.css";
+
+type ChatEntry = { role: "user" | "assistant"; content: string };
 
 const isMac = typeof navigator !== "undefined" && /Mac|iPhone|iPod|iPad/i.test(navigator.platform);
 const SEND_HINT = isMac ? "⌘↵ to send" : "Ctrl↵ to send";
@@ -20,11 +22,13 @@ export function AssistantPane({
   );
 
   const [model, setModel] = useState("");
-  const [messages, setMessages] = useState<AssistantMessage[]>([]);
+  const [messages, setMessages] = useState<ChatEntry[]>([]);
   const [draft, setDraft] = useState("");
   const [pending, setPending] = useState(false);
   const [streaming, setStreaming] = useState("");
+  const [toolInfo, setToolInfo] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [responseId, setResponseId] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -42,17 +46,16 @@ export function AssistantPane({
     const content = draft.trim();
     if (!content || pending || !model) return;
 
-    const userMsg: AssistantMessage = { role: "user", content };
-    const updated = [...messages, userMsg];
-    setMessages(updated);
+    setMessages((prev) => [...prev, { role: "user", content }]);
     setDraft("");
     setStreaming("");
+    setToolInfo(null);
     setError(null);
     setPending(true);
 
     let assistantText = "";
     try {
-      await streamAssist(model, updated, {
+      await streamAssist(model, content, responseId, {
         onDelta: (chunk) => {
           assistantText += chunk;
           setStreaming(assistantText);
@@ -60,7 +63,13 @@ export function AssistantPane({
         onArtifact: (artifactContent) => {
           onArtifact(artifactContent);
         },
-        onDone: () => {},
+        onToolStatus: (tool, status) => {
+          if (status === "running") setToolInfo(`Using ${tool}…`);
+          else setToolInfo(null);
+        },
+        onDone: (rid) => {
+          if (rid) setResponseId(rid);
+        },
         onError: (detail) => setError(detail),
       });
     } catch (err) {
@@ -71,6 +80,7 @@ export function AssistantPane({
       }
       setPending(false);
       setStreaming("");
+      setToolInfo(null);
     }
   }
 
@@ -81,7 +91,7 @@ export function AssistantPane({
     }
   }
 
-  const showThinking = pending && streaming.length === 0;
+  const showThinking = pending && streaming.length === 0 && !toolInfo;
   const showStreaming = pending && streaming.length > 0;
 
   return (
@@ -92,7 +102,10 @@ export function AssistantPane({
         <select
           className={styles.modelSelect}
           value={model}
-          onChange={(e) => setModel(e.target.value)}
+          onChange={(e) => {
+            setModel(e.target.value);
+            setResponseId(null);
+          }}
           disabled={pending}
         >
           {toolModels.length === 0 && <option value="">No tool_use models</option>}
@@ -103,7 +116,7 @@ export function AssistantPane({
       </div>
       <div className={styles.body}>
         <div className={styles.scroll} ref={scrollRef}>
-          {messages.length === 0 && !showThinking && !showStreaming && (
+          {messages.length === 0 && !showThinking && !showStreaming && !toolInfo && (
             <div className={styles.empty}>
               Paste documentation or describe the model family to get started.
             </div>
@@ -112,6 +125,19 @@ export function AssistantPane({
             <Bubble key={i} role={m.role} content={m.content} />
           ))}
           {showStreaming && <Bubble role="assistant" content={streaming} streaming />}
+          {toolInfo && !showStreaming && (
+            <div className="ds-chat ds-chat-assistant">
+              <div className="ds-chat-avatar" aria-hidden="true">
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                  <path d="M3 11L7 3L11 11L7 8.5L3 11Z" fill="currentColor" />
+                </svg>
+              </div>
+              <div className="ds-chat-body">
+                <div className="ds-chat-meta">Assistant</div>
+                <div className={styles.msgContent}>{toolInfo}</div>
+              </div>
+            </div>
+          )}
           {showThinking && <ThinkingBubble />}
         </div>
         {error && <div className={styles.error} role="alert">{error}</div>}

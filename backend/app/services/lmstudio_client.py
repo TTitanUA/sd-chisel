@@ -285,6 +285,92 @@ def chat_stream_with_tools(
         raise LmError("upstream", str(exc)) from exc
 
 
+NATIVE_CHAT_TIMEOUT = httpx.Timeout(180.0, connect=5.0, read=180.0)
+
+
+def chat_native_stream(
+    *,
+    endpoint: dict[str, Any],
+    model: str,
+    system_prompt: str,
+    user_input: str,
+    integrations: list[Any] | None = None,
+    previous_response_id: str | None = None,
+    transport: httpx.BaseTransport | None = None,
+) -> Iterator[dict[str, Any]]:
+    if not model.strip():
+        raise LmError("config", "model is required")
+    if not user_input.strip():
+        raise LmError("config", "user_input must not be empty")
+    server_root, headers = _resolve(endpoint)
+    payload: dict[str, Any] = {
+        "model": model,
+        "input": user_input,
+        "system_prompt": system_prompt,
+        "stream": True,
+        "store": True,
+    }
+    if integrations:
+        payload["integrations"] = integrations
+    if previous_response_id:
+        payload["previous_response_id"] = previous_response_id
+    try:
+        with httpx.Client(transport=transport, timeout=NATIVE_CHAT_TIMEOUT) as client:
+            with client.stream(
+                "POST", f"{server_root}/api/v1/chat",
+                headers=headers, json=payload,
+            ) as resp:
+                if resp.status_code >= 400:
+                    body = resp.read().decode("utf-8", errors="replace")
+                    raise LmError("upstream", f"{resp.status_code}: {body[:200]}")
+                event_type = ""
+                for line in resp.iter_lines():
+                    if not line:
+                        event_type = ""
+                        continue
+                    if line.startswith("event:"):
+                        event_type = line[len("event:"):].strip()
+                        continue
+                    if not line.startswith("data:"):
+                        continue
+                    raw = line[len("data:"):].strip()
+                    try:
+                        data = json.loads(raw)
+                    except ValueError:
+                        continue
+                    if event_type == "message.delta":
+                        content = data.get("content", "")
+                        if content:
+                            yield {"type": "delta", "content": content}
+                    elif event_type == "tool_call.start":
+                        yield {
+                            "type": "tool_status",
+                            "tool": data.get("tool", ""),
+                            "status": "running",
+                        }
+                    elif event_type == "tool_call.success":
+                        yield {
+                            "type": "tool_status",
+                            "tool": data.get("tool", ""),
+                            "status": "done",
+                        }
+                    elif event_type == "tool_call.failure":
+                        yield {
+                            "type": "tool_status",
+                            "tool": data.get("tool", ""),
+                            "status": "failed",
+                        }
+                    elif event_type == "chat.end":
+                        yield {
+                            "type": "chat_end",
+                            "response_id": data.get("response_id", ""),
+                        }
+    except httpx.TimeoutException as exc:
+        raise LmError("timeout", str(exc)) from exc
+    except httpx.HTTPError as exc:
+        raise LmError("upstream", str(exc)) from exc
+
+
 def chat_complete(
     *,
     endpoint: dict[str, Any],

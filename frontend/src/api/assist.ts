@@ -1,33 +1,34 @@
 import { API_BASE, ApiError } from "./client";
 
-export type AssistantMessage = {
-  role: "user" | "assistant";
-  content: string;
-};
-
 export type AssistStreamEvent =
   | { type: "delta"; content: string }
   | { type: "artifact"; content: string }
-  | { type: "done" }
+  | { type: "tool_status"; tool: string; status: string }
+  | { type: "done"; response_id: string }
   | { type: "error"; detail: string };
 
 export type AssistStreamCallbacks = {
   onDelta: (chunk: string) => void;
   onArtifact: (content: string) => void;
-  onDone: () => void;
+  onToolStatus?: (tool: string, status: string) => void;
+  onDone: (responseId: string) => void;
   onError: (detail: string) => void;
 };
 
 export async function streamAssist(
   model: string,
-  messages: AssistantMessage[],
+  message: string,
+  previousResponseId: string | null,
   cb: AssistStreamCallbacks,
   signal?: AbortSignal,
 ): Promise<void> {
+  const body: Record<string, unknown> = { model, message };
+  if (previousResponseId) body.previous_response_id = previousResponseId;
+
   const res = await fetch(`${API_BASE}/api/library/families/assist`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
-    body: JSON.stringify({ model, messages }),
+    body: JSON.stringify(body),
     signal,
   });
   if (!res.ok) {
@@ -60,7 +61,8 @@ export async function streamAssist(
       }
       if (evt.type === "delta") cb.onDelta(evt.content);
       else if (evt.type === "artifact") cb.onArtifact(evt.content);
-      else if (evt.type === "done") cb.onDone();
+      else if (evt.type === "tool_status") cb.onToolStatus?.(evt.tool, evt.status);
+      else if (evt.type === "done") cb.onDone(evt.response_id);
       else if (evt.type === "error") cb.onError(evt.detail);
     }
   }

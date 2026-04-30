@@ -1,11 +1,9 @@
 from __future__ import annotations
 
 import json
-import re
 import sqlite3
 from typing import Annotated
 
-import httpx
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from starlette.responses import StreamingResponse
 
@@ -67,37 +65,17 @@ def create_family(body: FamilyCreate, conn: Conn):
         raise _conflict(exc) from exc
 
 
-_URL_RE = re.compile(r"https?://\S+")
-_FETCH_TIMEOUT = httpx.Timeout(15.0, connect=5.0)
-_MAX_CONTENT_LEN = 30_000
-
-
-def _fetch_urls(text: str) -> list[tuple[str, str]]:
-    urls = _URL_RE.findall(text)
-    results: list[tuple[str, str]] = []
-    for url in urls[:3]:
-        try:
-            resp = httpx.get(url, timeout=_FETCH_TIMEOUT, follow_redirects=True)
-            ct = resp.headers.get("content-type", "")
-            if resp.status_code < 400 and ct.startswith("text/"):
-                results.append((url, resp.text[:_MAX_CONTENT_LEN]))
-        except (httpx.HTTPError, httpx.TimeoutException):
-            continue
-    return results
-
-
 ASSIST_SYSTEM_PROMPT = (
     "You are a prompt-guide writing assistant for generative image model families. "
     "Help the user write a prompt guide — a set of rules that the LLM will follow "
     "when generating prompts for this family in both text-to-image (t2i) and "
     "image-to-image (i2i) workflows.\n\n"
-    "You have a tool `update_prompt_guide` — call it as soon as you have a draft or "
-    "update. Do not just describe what you plan to do — create the draft and call "
-    "the tool immediately. The user will see the result in real-time in the editor.\n\n"
-    "When the user provides documentation links, the content is fetched automatically "
-    "and appended to their message. Use that content to extract relevant information "
-    "about the model's prompting style, supported tags, quality tokens, and any "
-    "family-specific syntax.\n\n"
+    "When the user provides documentation links, use your browser tools to navigate "
+    "to the URL and read the content.\n\n"
+    "When you have a draft or update of the prompt guide, output it inside "
+    "<artifact> and </artifact> tags. The content between these tags will appear "
+    "in the editor automatically. Do not just describe what you plan to write — "
+    "produce the draft immediately.\n\n"
     "Keep the prompt guide concise and actionable. Focus on:\n"
     "- Tag syntax and formatting rules\n"
     "- Quality/style tokens specific to this family\n"
@@ -107,29 +85,70 @@ ASSIST_SYSTEM_PROMPT = (
     "- Any differences between t2i and i2i prompting for this family"
 )
 
-ASSIST_TOOLS = [
-    {
-        "type": "function",
-        "function": {
-            "name": "update_prompt_guide",
-            "description": "Update the prompt guide content in the editor. Call this whenever you have a new or revised version of the prompt guide.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "content": {
-                        "type": "string",
-                        "description": "The full prompt guide markdown content",
-                    },
-                },
-                "required": ["content"],
-            },
-        },
-    },
-]
+ARTIFACT_OPEN = "<artifact>"
+ARTIFACT_CLOSE = "</artifact>"
 
 
 def _assist_sse(payload: dict) -> bytes:
     return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n".encode()
+
+
+class _ArtifactParser:
+    """Detects <artifact>...</artifact> in a token stream.
+
+    Text outside tags → delta events.
+    Text inside tags → single artifact event on close.
+    """
+
+    def __init__(self) -> None:
+        self._buf = ""
+        self._inside = False
+        self._art_buf = ""
+
+    def feed(self, text: str) -> list[dict]:
+        events: list[dict] = []
+        self._buf += text
+        while self._buf:
+            if not self._inside:
+                idx = self._buf.find(ARTIFACT_OPEN)
+                if idx >= 0:
+                    if idx > 0:
+                        events.append({"type": "delta", "content": self._buf[:idx]})
+                    self._buf = self._buf[idx + len(ARTIFACT_OPEN):]
+                    self._inside = True
+                    continue
+                # keep potential partial tag at end
+                for i in range(min(len(ARTIFACT_OPEN) - 1, len(self._buf)), 0, -1):
+                    if self._buf.endswith(ARTIFACT_OPEN[:i]):
+                        safe = self._buf[:-i]
+                        if safe:
+                            events.append({"type": "delta", "content": safe})
+                        self._buf = self._buf[-i:]
+                        return events
+                events.append({"type": "delta", "content": self._buf})
+                self._buf = ""
+            else:
+                idx = self._buf.find(ARTIFACT_CLOSE)
+                if idx >= 0:
+                    self._art_buf += self._buf[:idx]
+                    events.append({"type": "artifact", "content": self._art_buf.strip()})
+                    self._buf = self._buf[idx + len(ARTIFACT_CLOSE):]
+                    self._inside = False
+                    self._art_buf = ""
+                    continue
+                self._art_buf += self._buf
+                self._buf = ""
+        return events
+
+    def flush(self) -> list[dict]:
+        events: list[dict] = []
+        if self._buf:
+            events.append({"type": "delta", "content": self._buf})
+        if self._art_buf:
+            events.append({"type": "delta", "content": self._art_buf})
+        self._buf = ""
+        self._art_buf = ""
+        return events
 
 
 @router.post("/families/assist")
@@ -148,36 +167,40 @@ def assist(body: AssistRequest, conn: Conn) -> StreamingResponse:
         "server_root": cfg["lmstudio_url"],
         "api_key": cfg["lmstudio_api_key"],
     }
-    payload_messages: list[dict] = [{"role": "system", "content": ASSIST_SYSTEM_PROMPT}]
-    for m in body.messages:
-        payload_messages.append({"role": m.role, "content": m.content})
-
-    last_msg = payload_messages[-1]
-    if last_msg["role"] == "user":
-        fetched = _fetch_urls(last_msg["content"])
-        if fetched:
-            extra = "\n\n".join(
-                f"--- Content from {url} ---\n{content}" for url, content in fetched
-            )
-            last_msg["content"] += f"\n\n{extra}"
 
     def gen():
+        parser = _ArtifactParser()
         try:
-            for event in lmstudio_client.chat_stream_with_tools(
+            for event in lmstudio_client.chat_native_stream(
                 endpoint=endpoint,
                 model=body.model,
-                messages=payload_messages,
-                tools=ASSIST_TOOLS,
+                system_prompt=ASSIST_SYSTEM_PROMPT,
+                user_input=body.message,
+                integrations=["mcp/playwright"],
+                previous_response_id=body.previous_response_id,
             ):
-                if event["type"] == "delta":
-                    yield _assist_sse({"type": "delta", "content": event["content"]})
-                elif event["type"] == "tool_call" and event["name"] == "update_prompt_guide":
-                    content = event["arguments"].get("content", "")
-                    yield _assist_sse({"type": "artifact", "content": content})
+                etype = event["type"]
+                if etype == "delta":
+                    for ev in parser.feed(event["content"]):
+                        yield _assist_sse(ev)
+                elif etype == "tool_status":
+                    yield _assist_sse(event)
+                elif etype == "chat_end":
+                    for ev in parser.flush():
+                        yield _assist_sse(ev)
+                    yield _assist_sse({
+                        "type": "done",
+                        "response_id": event.get("response_id", ""),
+                    })
+                    return
         except lmstudio_client.LmError as exc:
+            for ev in parser.flush():
+                yield _assist_sse(ev)
             yield _assist_sse({"type": "error", "detail": str(exc)})
             return
-        yield _assist_sse({"type": "done"})
+        for ev in parser.flush():
+            yield _assist_sse(ev)
+        yield _assist_sse({"type": "done", "response_id": ""})
 
     return StreamingResponse(
         gen(),

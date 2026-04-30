@@ -266,3 +266,83 @@ def test_chat_stream_with_tools_raises_on_upstream_error():
             transport=transport,
         ))
     assert exc.value.kind == "upstream"
+
+
+# --- chat_native_stream ---
+
+def _native_sse(*events: tuple[str, dict]) -> str:
+    lines = []
+    for etype, data in events:
+        lines.append(f"event: {etype}\ndata: {json.dumps(data)}\n")
+    return "\n".join(lines)
+
+
+def test_chat_native_stream_yields_deltas_and_tool_status():
+    body = _native_sse(
+        ("message.delta", {"content": "Reading docs..."}),
+        ("tool_call.start", {"tool": "browser_navigate", "provider_info": {}}),
+        ("tool_call.success", {"tool": "browser_navigate", "output": "ok"}),
+        ("message.delta", {"content": " Done."}),
+        ("chat.end", {"response_id": "resp_abc"}),
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        assert payload["input"] == "read this"
+        assert payload["system_prompt"] == "be helpful"
+        assert "mcp/playwright" in payload["integrations"]
+        assert payload["stream"] is True
+        return httpx.Response(200, text=body, headers={"content-type": "text/event-stream"})
+
+    events = list(lmstudio_client.chat_native_stream(
+        endpoint=ENDPOINT,
+        model="m",
+        system_prompt="be helpful",
+        user_input="read this",
+        integrations=["mcp/playwright"],
+        transport=_make_transport(handler),
+    ))
+    assert events == [
+        {"type": "delta", "content": "Reading docs..."},
+        {"type": "tool_status", "tool": "browser_navigate", "status": "running"},
+        {"type": "tool_status", "tool": "browser_navigate", "status": "done"},
+        {"type": "delta", "content": " Done."},
+        {"type": "chat_end", "response_id": "resp_abc"},
+    ]
+
+
+def test_chat_native_stream_passes_previous_response_id():
+    body = _native_sse(
+        ("message.delta", {"content": "ok"}),
+        ("chat.end", {"response_id": "resp_2"}),
+    )
+
+    captured: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.update(json.loads(request.content))
+        return httpx.Response(200, text=body, headers={"content-type": "text/event-stream"})
+
+    list(lmstudio_client.chat_native_stream(
+        endpoint=ENDPOINT,
+        model="m",
+        system_prompt="sys",
+        user_input="follow up",
+        previous_response_id="resp_1",
+        transport=_make_transport(handler),
+    ))
+    assert captured["previous_response_id"] == "resp_1"
+
+
+def test_chat_native_stream_raises_on_upstream_error():
+    transport = _make_transport(lambda r: httpx.Response(500, text="server error"))
+
+    with pytest.raises(lmstudio_client.LmError) as exc:
+        list(lmstudio_client.chat_native_stream(
+            endpoint=ENDPOINT,
+            model="m",
+            system_prompt="sys",
+            user_input="hi",
+            transport=transport,
+        ))
+    assert exc.value.kind == "upstream"

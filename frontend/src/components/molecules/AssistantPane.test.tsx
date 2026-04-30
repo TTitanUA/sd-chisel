@@ -73,7 +73,7 @@ describe("AssistantPane", () => {
         return makeStreamResponse([
           'data: {"type":"delta","content":"Here is a guide."}\n\n',
           'data: {"type":"artifact","content":"# My Guide"}\n\n',
-          'data: {"type":"done"}\n\n',
+          'data: {"type":"done","response_id":"resp_1"}\n\n',
         ]);
       }
       throw new Error(`unexpected fetch: ${url}`);

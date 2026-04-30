@@ -230,7 +230,16 @@ import json
 from app.services import lmstudio_client
 
 
-def test_assist_streams_text_and_artifact(client, conn):
+def _parse_assist_sse(text: str) -> list[dict]:
+    events = []
+    for block in text.strip().split("\n\n"):
+        for part in block.split("\n"):
+            if part.startswith("data:"):
+                events.append(json.loads(part[len("data:"):].strip()))
+    return events
+
+
+def test_assist_streams_text_and_artifact(client, conn, monkeypatch):
     from app.storage import settings_repo
     settings_repo.set_lmstudio(conn, url="http://localhost:1234", api_key=None)
     settings_repo.upsert_lm_models(conn, models=[
@@ -238,45 +247,33 @@ def test_assist_streams_text_and_artifact(client, conn):
     ])
 
     fake_events = [
-        {"type": "delta", "content": "I'll write a guide."},
-        {"type": "tool_call", "name": "update_prompt_guide", "arguments": {"content": "# Guide\nUse tags."}},
+        {"type": "delta", "content": "Here is your guide.\n\n<artifact>\n# Guide\nUse tags.\n</artifact>"},
+        {"type": "chat_end", "response_id": "resp_123"},
     ]
 
-    def fake_stream(**kwargs):
-        return iter(fake_events)
+    monkeypatch.setattr(lmstudio_client, "chat_native_stream", lambda **_: iter(fake_events))
 
-    original = lmstudio_client.chat_stream_with_tools
-    lmstudio_client.chat_stream_with_tools = fake_stream
-    try:
-        resp = client.post(
-            "/api/library/families/assist",
-            json={
-                "model": "tool-model",
-                "messages": [{"role": "user", "content": "help me write a guide"}],
-            },
-        )
-        assert resp.status_code == 200
-        assert "text/event-stream" in resp.headers["content-type"]
+    resp = client.post(
+        "/api/library/families/assist",
+        json={"model": "tool-model", "message": "help me write a guide"},
+    )
+    assert resp.status_code == 200
+    assert "text/event-stream" in resp.headers["content-type"]
 
-        events = []
-        for line in resp.text.strip().split("\n\n"):
-            for part in line.split("\n"):
-                if part.startswith("data:"):
-                    events.append(json.loads(part[len("data:"):].strip()))
+    events = _parse_assist_sse(resp.text)
+    types = [e["type"] for e in events]
+    assert "delta" in types
+    assert "artifact" in types
+    assert "done" in types
 
-        types = [e["type"] for e in events]
-        assert "delta" in types
-        assert "artifact" in types
-        assert "done" in types
+    artifact = next(e for e in events if e["type"] == "artifact")
+    assert artifact["content"] == "# Guide\nUse tags."
 
-        artifact = next(e for e in events if e["type"] == "artifact")
-        assert artifact["content"] == "# Guide\nUse tags."
-    finally:
-        lmstudio_client.chat_stream_with_tools = original
+    done = next(e for e in events if e["type"] == "done")
+    assert done["response_id"] == "resp_123"
 
 
-def test_assist_fetches_url_content_and_injects_into_message(client, conn, monkeypatch):
-    from app.api import library as lib_mod
+def test_assist_forwards_previous_response_id(client, conn, monkeypatch):
     from app.storage import settings_repo
     settings_repo.set_lmstudio(conn, url="http://localhost:1234", api_key=None)
     settings_repo.upsert_lm_models(conn, models=[
@@ -287,27 +284,48 @@ def test_assist_fetches_url_content_and_injects_into_message(client, conn, monke
 
     def fake_stream(**kwargs):
         captured.update(kwargs)
-        return iter([
-            {"type": "tool_call", "name": "update_prompt_guide", "arguments": {"content": "# Guide"}},
-        ])
+        return iter([{"type": "chat_end", "response_id": "resp_456"}])
 
-    monkeypatch.setattr(lmstudio_client, "chat_stream_with_tools", fake_stream)
-    monkeypatch.setattr(lib_mod, "_fetch_urls", lambda text: [
-        ("https://example.com/docs.txt", "Example documentation content"),
-    ])
+    monkeypatch.setattr(lmstudio_client, "chat_native_stream", fake_stream)
 
     resp = client.post(
         "/api/library/families/assist",
         json={
             "model": "tool-model",
-            "messages": [{"role": "user", "content": "https://example.com/docs.txt here is the docs"}],
+            "message": "refine it",
+            "previous_response_id": "resp_123",
         },
     )
     assert resp.status_code == 200
+    assert captured["previous_response_id"] == "resp_123"
+    assert captured["user_input"] == "refine it"
+    assert "mcp/playwright" in captured["integrations"]
 
-    last_user = [m for m in captured["messages"] if m["role"] == "user"][-1]
-    assert "Example documentation content" in last_user["content"]
-    assert "Content from https://example.com/docs.txt" in last_user["content"]
+
+def test_assist_forwards_tool_status(client, conn, monkeypatch):
+    from app.storage import settings_repo
+    settings_repo.set_lmstudio(conn, url="http://localhost:1234", api_key=None)
+    settings_repo.upsert_lm_models(conn, models=[
+        {"name": "tool-model", "vision": False, "tool_use": True, "reasoning": False},
+    ])
+
+    fake_events = [
+        {"type": "tool_status", "tool": "browser_navigate", "status": "running"},
+        {"type": "tool_status", "tool": "browser_navigate", "status": "done"},
+        {"type": "delta", "content": "Done."},
+        {"type": "chat_end", "response_id": ""},
+    ]
+
+    monkeypatch.setattr(lmstudio_client, "chat_native_stream", lambda **_: iter(fake_events))
+
+    resp = client.post(
+        "/api/library/families/assist",
+        json={"model": "tool-model", "message": "read this url"},
+    )
+    events = _parse_assist_sse(resp.text)
+    tool_events = [e for e in events if e["type"] == "tool_status"]
+    assert len(tool_events) == 2
+    assert tool_events[0]["status"] == "running"
 
 
 def test_assist_rejects_model_without_tool_use(client, conn):
@@ -319,10 +337,7 @@ def test_assist_rejects_model_without_tool_use(client, conn):
 
     resp = client.post(
         "/api/library/families/assist",
-        json={
-            "model": "no-tools",
-            "messages": [{"role": "user", "content": "help"}],
-        },
+        json={"model": "no-tools", "message": "help"},
     )
     assert resp.status_code == 409
     assert "tool use" in resp.json()["detail"]
