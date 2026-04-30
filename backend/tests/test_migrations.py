@@ -127,14 +127,14 @@ def test_settings_schema_present_with_correct_session_columns(tmp_path):
     settings = list(conn.execute("SELECT id FROM app_settings"))
     assert len(settings) == 1 and settings[0]["id"] == 1
 
-    # lm_models exists with role check
+    # lm_models exists with capability columns
+    lm_cols = {r[1] for r in conn.execute("PRAGMA table_info(lm_models)")}
+    assert "vision" in lm_cols
+    assert "tool_use" in lm_cols
+    assert "reasoning" in lm_cols
+    assert "role" not in lm_cols
     conn.execute(
-        "INSERT INTO lm_models(name, role, enabled, last_seen) VALUES (?, 'both', 1, 0)",
+        "INSERT INTO lm_models(name, enabled, last_seen, vision, tool_use, reasoning) "
+        "VALUES (?, 1, 0, 0, 0, 0)",
         ("ok",),
     )
-    with pytest.raises(sqlite3.IntegrityError):
-        conn.execute(
-            "INSERT INTO lm_models(name, role, enabled, last_seen) "
-            "VALUES (?, 'bogus', 1, 0)",
-            ("bad",),
-        )

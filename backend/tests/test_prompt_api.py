@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 from app.api.deps import get_conn
 from app.main import app
 from app.services import prompt_orchestrator
-from app.services.lm_client import LmError
+from app.services.lmstudio_client import LmError
 from app.storage import db as db_mod
 from app.storage import library_repo, session_repo, settings_repo
 from app.storage.migrations import apply_pending
@@ -34,11 +34,13 @@ def client(conn):
 
 def _bootstrap(client, conn) -> str:
     settings_repo.set_lmstudio(
-        conn, base_url="http://lm/v1", api_key=None,
+        conn, url="http://lm", api_key=None,
     )
-    settings_repo.upsert_lm_models(conn, names=["pm-1"])
-    settings_repo.update_lm_model(
-        conn, name="pm-1", role="prompt", enabled=True,
+    settings_repo.upsert_lm_models(conn, models=[
+        {"name": "pm-1", "vision": False, "tool_use": False, "reasoning": False},
+    ])
+    settings_repo.patch_lm_model(
+        conn, name="pm-1", enabled=True,
     )
     library_repo.create_model(
         conn, name="m1", display_name="m1", family_id="sdxl", description=None,
@@ -84,7 +86,7 @@ def test_generate_prompt_404_when_session_unknown(client):
 
 def test_generate_prompt_409_when_lmstudio_not_configured(client, conn):
     sid = _bootstrap(client, conn)
-    settings_repo.set_lmstudio(conn, base_url=None, api_key=None)
+    settings_repo.set_lmstudio(conn, url=None, api_key=None)
     resp = client.post(f"/api/sessions/{sid}/generate-prompt")
     assert resp.status_code == 409
     assert "base_url" in resp.json()["detail"]

@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 
 from app.api.deps import get_conn
 from app.main import app
-from app.services import lm_client
+from app.services import lmstudio_client
 from app.storage import db as db_mod
 from app.storage.migrations import apply_pending
 
@@ -47,16 +47,19 @@ def _bootstrap(client, monkeypatch, *, vl_model: str | None = "qwen2-vl-7b-instr
     """Set lmstudio config, refresh-with-fake, mark a VL model, attach source."""
     client.put(
         "/api/settings/lmstudio",
-        json={"base_url": "http://h/v1", "api_key": None},
+        json={"base_url": "http://h", "api_key": None},
     )
     monkeypatch.setattr(
-        lm_client, "list_models",
-        lambda **_: ["qwen2-vl-7b-instruct", "mistral-nemo-12b"],
+        lmstudio_client, "list_models",
+        lambda **_: [
+            lmstudio_client.LmsModel(name="qwen2-vl-7b-instruct", vision=True, tool_use=False, reasoning=False),
+            lmstudio_client.LmsModel(name="mistral-nemo-12b", vision=False, tool_use=False, reasoning=False),
+        ],
     )
     client.post("/api/settings/lmstudio/refresh")
     client.patch(
         "/api/settings/lmstudio/models/qwen2-vl-7b-instruct",
-        json={"role": "vl", "enabled": True},
+        json={"vision": True, "enabled": True},
     )
 
     pid = client.post("/api/projects", json={"name": "P"}).json()["id"]
@@ -90,7 +93,7 @@ def test_analyze_returns_summary_and_persists(client, monkeypatch):
         return "moody portrait, soft rim light"
 
     sid = _bootstrap(client, monkeypatch)
-    monkeypatch.setattr(lm_client, "analyze_image", fake_analyze)
+    monkeypatch.setattr(lmstudio_client, "analyze_image", fake_analyze)
 
     resp = client.post(f"/api/sessions/{sid}/analyze-source")
     assert resp.status_code == 200
@@ -99,7 +102,7 @@ def test_analyze_returns_summary_and_persists(client, monkeypatch):
     assert captured["model"] == "qwen2-vl-7b-instruct"
     assert captured["content_type"] == "image/png"
     assert captured["image_bytes"] == _PNG_1x1
-    assert captured["endpoint"] == {"base_url": "http://h/v1", "api_key": None}
+    assert captured["endpoint"] == {"server_root": "http://h", "api_key": None}
 
     again = client.get(f"/api/sessions/{sid}").json()
     assert again["vl_summary"] == "moody portrait, soft rim light"
@@ -154,11 +157,11 @@ def test_analyze_409_when_vl_model_disabled(client, monkeypatch):
     assert resp.status_code == 409
 
 
-def test_analyze_409_when_vl_model_role_is_prompt_only(client, monkeypatch):
+def test_analyze_409_when_vl_model_has_no_vision_capability(client, monkeypatch):
     sid = _bootstrap(client, monkeypatch)
     client.patch(
         "/api/settings/lmstudio/models/qwen2-vl-7b-instruct",
-        json={"role": "prompt"},
+        json={"vision": False},
     )
     resp = client.post(f"/api/sessions/{sid}/analyze-source")
     assert resp.status_code == 409
@@ -167,8 +170,8 @@ def test_analyze_409_when_vl_model_role_is_prompt_only(client, monkeypatch):
 def test_analyze_502_on_upstream_error(client, monkeypatch):
     sid = _bootstrap(client, monkeypatch)
 
-    def fake(**_): raise lm_client.LmError("upstream", "boom")
-    monkeypatch.setattr(lm_client, "analyze_image", fake)
+    def fake(**_): raise lmstudio_client.LmError("upstream", "boom")
+    monkeypatch.setattr(lmstudio_client, "analyze_image", fake)
 
     assert client.post(f"/api/sessions/{sid}/analyze-source").status_code == 502
 
@@ -176,19 +179,19 @@ def test_analyze_502_on_upstream_error(client, monkeypatch):
 def test_analyze_504_on_timeout(client, monkeypatch):
     sid = _bootstrap(client, monkeypatch)
 
-    def fake(**_): raise lm_client.LmError("timeout", "slow")
-    monkeypatch.setattr(lm_client, "analyze_image", fake)
+    def fake(**_): raise lmstudio_client.LmError("timeout", "slow")
+    monkeypatch.setattr(lmstudio_client, "analyze_image", fake)
 
     assert client.post(f"/api/sessions/{sid}/analyze-source").status_code == 504
 
 
 def test_analyze_failure_does_not_overwrite_existing_summary(client, monkeypatch):
     sid = _bootstrap(client, monkeypatch)
-    monkeypatch.setattr(lm_client, "analyze_image", lambda **_: "first summary")
+    monkeypatch.setattr(lmstudio_client, "analyze_image", lambda **_: "first summary")
     assert client.post(f"/api/sessions/{sid}/analyze-source").status_code == 200
 
-    def fake_fail(**_): raise lm_client.LmError("upstream", "boom")
-    monkeypatch.setattr(lm_client, "analyze_image", fake_fail)
+    def fake_fail(**_): raise lmstudio_client.LmError("upstream", "boom")
+    monkeypatch.setattr(lmstudio_client, "analyze_image", fake_fail)
 
     assert client.post(f"/api/sessions/{sid}/analyze-source").status_code == 502
     assert client.get(f"/api/sessions/{sid}").json()["vl_summary"] == "first summary"

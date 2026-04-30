@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from app.services import prompt_orchestrator
-from app.services.lm_client import LmError
+from app.services.lmstudio_client import LmError
 from app.storage import db as db_mod
 from app.storage import library_repo, session_repo
 from app.storage.migrations import apply_pending
@@ -58,7 +58,7 @@ def test_generate_returns_persisted_response(conn, session_id, monkeypatch):
         lambda text: [0.001] * 1024,
     )
     monkeypatch.setattr(
-        "app.services.prompt_orchestrator.lm_client.chat_complete",
+        "app.services.prompt_orchestrator.lmstudio_client.chat_complete",
         _fake_lm_responses(
             intent_payload=json.dumps({"intents": [
                 {"kind": "style", "query": "moody"},
@@ -96,7 +96,7 @@ def test_generate_use_negative_false_forces_null(conn, session_id, monkeypatch):
         lambda text: [0.001] * 1024,
     )
     monkeypatch.setattr(
-        "app.services.prompt_orchestrator.lm_client.chat_complete",
+        "app.services.prompt_orchestrator.lmstudio_client.chat_complete",
         _fake_lm_responses(
             intent_payload=json.dumps({"intents": [{"kind": "k", "query": "q"}]}),
             composition_payload=json.dumps({
@@ -118,7 +118,7 @@ def test_generate_use_negative_true_rejects_null_negative(conn, session_id, monk
         lambda text: [0.001] * 1024,
     )
     monkeypatch.setattr(
-        "app.services.prompt_orchestrator.lm_client.chat_complete",
+        "app.services.prompt_orchestrator.lmstudio_client.chat_complete",
         _fake_lm_responses(
             intent_payload=json.dumps({"intents": [{"kind": "k", "query": "q"}]}),
             composition_payload=json.dumps({
@@ -141,7 +141,7 @@ def test_generate_recovers_from_extra_prose_around_json(conn, session_id, monkey
         lambda text: [0.001] * 1024,
     )
     monkeypatch.setattr(
-        "app.services.prompt_orchestrator.lm_client.chat_complete",
+        "app.services.prompt_orchestrator.lmstudio_client.chat_complete",
         _fake_lm_responses(
             intent_payload=(
                 'Here are the intents:\n'
@@ -201,7 +201,7 @@ def test_generate_persists_pinned_loras_into_candidates(conn, session_id, monkey
         return json.dumps({"positive": "p", "negative": "n", "loras": []})
 
     monkeypatch.setattr(
-        "app.services.prompt_orchestrator.lm_client.chat_complete", fake_complete,
+        "app.services.prompt_orchestrator.lmstudio_client.chat_complete", fake_complete,
     )
     prompt_orchestrator.generate(
         conn, session_id=session_id,
@@ -228,7 +228,7 @@ def test_generate_does_not_pass_response_format(conn, session_id, monkeypatch):
             return json.dumps({"intents": [{"kind": "k", "query": "q"}]})
         return json.dumps({"positive": "p", "negative": "n", "loras": []})
     monkeypatch.setattr(
-        "app.services.prompt_orchestrator.lm_client.chat_complete", fake_complete,
+        "app.services.prompt_orchestrator.lmstudio_client.chat_complete", fake_complete,
     )
     prompt_orchestrator.generate(
         conn, session_id=session_id,

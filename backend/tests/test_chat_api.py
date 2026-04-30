@@ -8,7 +8,7 @@ from pydantic import ValidationError
 from app.api.deps import get_conn
 from app.main import app
 from app.models.chat import ChatRequest, MessageOut
-from app.services import lm_client
+from app.services import lmstudio_client
 from app.storage import db as db_mod
 from app.storage import session_repo
 from app.storage.migrations import apply_pending
@@ -83,12 +83,15 @@ def test_messages_returned_in_chronological_order(client, conn):
 
 def _bootstrap_chat_session(client, monkeypatch, *, prompt_model: str | None = "mistral") -> str:
     """Configure LMStudio + a prompt-role model + a session that points at it."""
-    client.put("/api/settings/lmstudio", json={"base_url": "http://h/v1", "api_key": None})
-    monkeypatch.setattr(lm_client, "list_models", lambda **_: ["mistral", "qwen-vl"])
+    client.put("/api/settings/lmstudio", json={"base_url": "http://h", "api_key": None})
+    monkeypatch.setattr(lmstudio_client, "list_models", lambda **_: [
+        lmstudio_client.LmsModel(name="mistral", vision=False, tool_use=False, reasoning=False),
+        lmstudio_client.LmsModel(name="qwen-vl", vision=True, tool_use=False, reasoning=False),
+    ])
     client.post("/api/settings/lmstudio/refresh")
     client.patch(
         "/api/settings/lmstudio/models/mistral",
-        json={"role": "prompt", "enabled": True},
+        json={"enabled": True},
     )
 
     sid = _make_session(client)
@@ -125,7 +128,7 @@ def test_chat_streams_deltas_and_persists_both_messages(client, monkeypatch):
         yield "Hel"
         yield "lo"
 
-    monkeypatch.setattr(lm_client, "chat_stream", fake_stream)
+    monkeypatch.setattr(lmstudio_client, "chat_stream", fake_stream)
 
     with client.stream(
         "POST", f"/api/sessions/{sid}/chat",
@@ -154,7 +157,7 @@ def test_chat_streams_deltas_and_persists_both_messages(client, monkeypatch):
 
     # Endpoint config + model name flowed into lm_client
     assert captured["model"] == "mistral"
-    assert captured["endpoint"] == {"base_url": "http://h/v1", "api_key": None}
+    assert captured["endpoint"] == {"server_root": "http://h", "api_key": None}
     # The most recent message in the upstream payload is the new user message
     assert captured["messages"][-1] == {"role": "user", "content": "hey"}
     # System prompt is prepended
@@ -174,7 +177,7 @@ def test_chat_includes_vl_summary_and_recent_history(client, conn, monkeypatch):
         captured.update(kwargs)
         yield "ok"
 
-    monkeypatch.setattr(lm_client, "chat_stream", fake_stream)
+    monkeypatch.setattr(lmstudio_client, "chat_stream", fake_stream)
 
     with client.stream("POST", f"/api/sessions/{sid}/chat", json={"content": "now"}) as r:
         b"".join(r.iter_bytes())
@@ -205,7 +208,7 @@ def test_chat_truncates_history_to_30(client, conn, monkeypatch):
         captured.update(kwargs)
         yield "ok"
 
-    monkeypatch.setattr(lm_client, "chat_stream", fake_stream)
+    monkeypatch.setattr(lmstudio_client, "chat_stream", fake_stream)
 
     with client.stream("POST", f"/api/sessions/{sid}/chat", json={"content": "now"}) as r:
         b"".join(r.iter_bytes())
@@ -238,12 +241,14 @@ def test_chat_persists_assistant_with_yield_dep_lifecycle(tmp_path, monkeypatch)
         local_client = TestClient(app)
 
         # Bootstrap: lmstudio config, model, session with prompt_model
-        local_client.put("/api/settings/lmstudio", json={"base_url": "http://h/v1", "api_key": None})
-        monkeypatch.setattr(lm_client, "list_models", lambda **_: ["mistral"])
+        local_client.put("/api/settings/lmstudio", json={"base_url": "http://h", "api_key": None})
+        monkeypatch.setattr(lmstudio_client, "list_models", lambda **_: [
+            lmstudio_client.LmsModel(name="mistral", vision=False, tool_use=False, reasoning=False),
+        ])
         local_client.post("/api/settings/lmstudio/refresh")
         local_client.patch(
             "/api/settings/lmstudio/models/mistral",
-            json={"role": "prompt", "enabled": True},
+            json={"enabled": True},
         )
         pid = local_client.post("/api/projects", json={"name": "P"}).json()["id"]
         sid = local_client.post(
@@ -263,7 +268,7 @@ def test_chat_persists_assistant_with_yield_dep_lifecycle(tmp_path, monkeypatch)
         def fake_stream(**_):
             yield "Hello"
 
-        monkeypatch.setattr(lm_client, "chat_stream", fake_stream)
+        monkeypatch.setattr(lmstudio_client, "chat_stream", fake_stream)
 
         with local_client.stream(
             "POST", f"/api/sessions/{sid}/chat",
@@ -315,13 +320,18 @@ def test_chat_409_when_prompt_model_disabled(client, monkeypatch):
     assert resp.status_code == 409
 
 
-def test_chat_409_when_prompt_model_role_is_vl_only(client, monkeypatch):
+def test_chat_ok_when_prompt_model_is_vision_capable(client, monkeypatch):
+    # Vision-capable models are valid prompt models — no role restriction exists.
     sid = _bootstrap_chat_session(client, monkeypatch)
-    client.patch(
-        "/api/settings/lmstudio/models/mistral", json={"role": "vl"},
-    )
-    resp = client.post(f"/api/sessions/{sid}/chat", json={"content": "x"})
-    assert resp.status_code == 409
+    client.patch("/api/settings/lmstudio/models/mistral", json={"vision": True})
+
+    def fake_stream(**_):
+        yield "ok"
+
+    monkeypatch.setattr(lmstudio_client, "chat_stream", fake_stream)
+
+    with client.stream("POST", f"/api/sessions/{sid}/chat", json={"content": "hi"}) as resp:
+        assert resp.status_code == 200
 
 
 def test_chat_422_on_blank_content(client, monkeypatch):
@@ -333,10 +343,10 @@ def test_chat_emits_error_event_and_keeps_user_message_on_upstream_failure(clien
     sid = _bootstrap_chat_session(client, monkeypatch)
 
     def fail(**_):
-        raise lm_client.LmError("upstream", "boom")
+        raise lmstudio_client.LmError("upstream", "boom")
         yield  # pragma: no cover  (make this a generator)
 
-    monkeypatch.setattr(lm_client, "chat_stream", fail)
+    monkeypatch.setattr(lmstudio_client, "chat_stream", fail)
 
     with client.stream("POST", f"/api/sessions/{sid}/chat", json={"content": "hey"}) as resp:
         assert resp.status_code == 200  # SSE always opens 200
@@ -359,7 +369,7 @@ def test_chat_does_not_persist_assistant_when_stream_yields_nothing(client, monk
         if False:
             yield ""  # pragma: no cover
 
-    monkeypatch.setattr(lm_client, "chat_stream", empty)
+    monkeypatch.setattr(lmstudio_client, "chat_stream", empty)
 
     with client.stream("POST", f"/api/sessions/{sid}/chat", json={"content": "hey"}) as resp:
         body = b"".join(resp.iter_bytes())
