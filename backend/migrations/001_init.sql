@@ -100,24 +100,23 @@ CREATE INDEX idx_prompts_session ON prompts(session_id, created_at);
 -- Global LMStudio settings. Single-row table (id=1) — easier to reason about
 -- than KV pairs.
 CREATE TABLE app_settings (
-  id                  INTEGER PRIMARY KEY CHECK (id = 1),
-  lmstudio_base_url   TEXT,
-  lmstudio_api_key    TEXT,
-  updated_at          INTEGER NOT NULL
+  id               INTEGER PRIMARY KEY CHECK (id = 1),
+  lmstudio_url     TEXT,
+  lmstudio_api_key TEXT,
+  updated_at       INTEGER NOT NULL
 );
 
-INSERT INTO app_settings(id, lmstudio_base_url, lmstudio_api_key, updated_at)
+INSERT INTO app_settings(id, lmstudio_url, lmstudio_api_key, updated_at)
   VALUES (1, NULL, NULL, CAST(strftime('%s','now') AS INTEGER));
 
 -- LMStudio model cache. Populated by `/api/settings/lmstudio/refresh`.
--- role:    which session field this model can be picked into.
---   'vl'     — only vl_model_name
---   'prompt' — only prompt_model_name
---   'both'   — either field (default — user can narrow it later)
+-- Capabilities are auto-detected from the model via LMStudio API.
 -- enabled: hides the model from session dropdowns when false.
 CREATE TABLE lm_models (
-  name        TEXT PRIMARY KEY,
-  role        TEXT NOT NULL DEFAULT 'both' CHECK (role IN ('vl','prompt','both')),
-  enabled     INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
-  last_seen   INTEGER NOT NULL
+  name      TEXT PRIMARY KEY,
+  enabled   INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0,1)),
+  last_seen INTEGER NOT NULL,
+  vision    INTEGER NOT NULL DEFAULT 0 CHECK (vision IN (0,1)),
+  tool_use  INTEGER NOT NULL DEFAULT 0 CHECK (tool_use IN (0,1)),
+  reasoning INTEGER NOT NULL DEFAULT 0 CHECK (reasoning IN (0,1))
 );
