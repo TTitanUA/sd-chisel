@@ -5,12 +5,14 @@ export type Family = {
   id: string;
   display_name: string;
   prompt_guide: string;
+  prompt_i2i: string;
+  prompt_t2i: string;
   created_at: number;
   updated_at: number;
 };
 
-export type FamilyCreate = Pick<Family, "id" | "display_name" | "prompt_guide">;
-export type FamilyUpdate = Pick<Family, "display_name" | "prompt_guide">;
+export type FamilyCreate = Pick<Family, "id" | "display_name" | "prompt_guide" | "prompt_i2i" | "prompt_t2i">;
+export type FamilyUpdate = Pick<Family, "display_name" | "prompt_guide" | "prompt_i2i" | "prompt_t2i">;
 
 export type Model = {
   name: string;

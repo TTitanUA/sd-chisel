@@ -1,15 +1,23 @@
 import { API_BASE, ApiError } from "./client";
 
+export type AssistFieldName = "prompt_guide" | "prompt_i2i" | "prompt_t2i";
+
+export type AssistFieldsSnapshot = {
+  prompt_guide: string;
+  prompt_i2i: string;
+  prompt_t2i: string;
+};
+
 export type AssistStreamEvent =
   | { type: "delta"; content: string }
-  | { type: "artifact"; content: string }
+  | { type: "artifact"; field: AssistFieldName; content: string }
   | { type: "tool_status"; tool: string; status: string }
   | { type: "done"; response_id: string }
   | { type: "error"; detail: string };
 
 export type AssistStreamCallbacks = {
   onDelta: (chunk: string) => void;
-  onArtifact: (content: string) => void;
+  onArtifact: (field: AssistFieldName, content: string) => void;
   onToolStatus?: (tool: string, status: string) => void;
   onDone: (responseId: string) => void;
   onError: (detail: string) => void;
@@ -19,10 +27,15 @@ export async function streamAssist(
   model: string,
   message: string,
   previousResponseId: string | null,
+  currentState: AssistFieldsSnapshot,
   cb: AssistStreamCallbacks,
   signal?: AbortSignal,
 ): Promise<void> {
-  const body: Record<string, unknown> = { model, message };
+  const body: Record<string, unknown> = {
+    model,
+    message,
+    current_state: currentState,
+  };
   if (previousResponseId) body.previous_response_id = previousResponseId;
 
   const res = await fetch(`${API_BASE}/api/library/families/assist`, {
@@ -60,7 +73,7 @@ export async function streamAssist(
         continue;
       }
       if (evt.type === "delta") cb.onDelta(evt.content);
-      else if (evt.type === "artifact") cb.onArtifact(evt.content);
+      else if (evt.type === "artifact") cb.onArtifact(evt.field, evt.content);
       else if (evt.type === "tool_status") cb.onToolStatus?.(evt.tool, evt.status);
       else if (evt.type === "done") cb.onDone(evt.response_id);
       else if (evt.type === "error") cb.onError(evt.detail);
