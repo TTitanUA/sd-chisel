@@ -9,7 +9,7 @@ from starlette.responses import StreamingResponse
 
 from app.api.deps import get_conn
 from app.models.chat import ChatRequest, MessageOut, MessagesResponse
-from app.services import lm_client
+from app.services import lmstudio_client
 from app.storage import session_repo, settings_repo
 
 Conn = Annotated[sqlite3.Connection, Depends(get_conn)]
@@ -37,10 +37,10 @@ def _validated_prompt_model(conn: sqlite3.Connection, name: str | None) -> str:
             status_code=409, detail="session has no prompt_model_name selected",
         )
     row = settings_repo.get_lm_model(conn, name)
-    if row is None or not row["enabled"] or row["role"] not in ("prompt", "both"):
+    if row is None or not row["enabled"]:
         raise HTTPException(
             status_code=409,
-            detail=f"prompt_model_name {name!r} is not enabled or wrong role",
+            detail=f"prompt_model_name {name!r} is not enabled",
         )
     return name
 
@@ -84,7 +84,7 @@ def chat(session_id: str, body: ChatRequest, conn: Conn) -> Response:
         raise _not_found(session_id)
 
     cfg = settings_repo.get_lmstudio(conn)
-    if not cfg["lmstudio_base_url"]:
+    if not cfg["lmstudio_url"]:
         raise HTTPException(status_code=409, detail="LMStudio base_url is not configured")
     model = _validated_prompt_model(conn, session_row.get("prompt_model_name"))
 
@@ -93,7 +93,7 @@ def chat(session_id: str, body: ChatRequest, conn: Conn) -> Response:
     # _build_payload_messages.
     payload_messages = _build_payload_messages(conn, session_row, body.content)
     endpoint = {
-        "base_url": cfg["lmstudio_base_url"],
+        "server_root": cfg["lmstudio_url"],
         "api_key": cfg["lmstudio_api_key"],
     }
 
@@ -106,12 +106,12 @@ def chat(session_id: str, body: ChatRequest, conn: Conn) -> Response:
     def gen():
         accumulated: list[str] = []
         try:
-            for chunk in lm_client.chat_stream(
+            for chunk in lmstudio_client.chat_stream(
                 endpoint=endpoint, model=model, messages=payload_messages,
             ):
                 accumulated.append(chunk)
                 yield _sse({"type": "delta", "content": chunk})
-        except lm_client.LmError as exc:
+        except lmstudio_client.LmError as exc:
             yield _sse({"type": "error", "detail": str(exc)})
             return
 

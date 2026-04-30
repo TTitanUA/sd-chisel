@@ -13,7 +13,7 @@ from typing import Any, TypeVar
 from pydantic import BaseModel, ValidationError
 
 from app.models.prompts import GeneratedPrompt, IntentList
-from app.services import lm_client, prompt_builder, retriever
+from app.services import lmstudio_client, prompt_builder, retriever
 from app.storage import library_repo, session_repo
 
 _M = TypeVar("_M", bound=BaseModel)
@@ -34,7 +34,7 @@ def _extract_json_object(text: str) -> str:
     that wrap JSON in chatty prose."""
     start = text.find("{")
     if start < 0:
-        raise lm_client.LmError("shape", "no JSON object in LLM output")
+        raise lmstudio_client.LmError("shape", "no JSON object in LLM output")
     depth = 0
     for i in range(start, len(text)):
         ch = text[i]
@@ -44,7 +44,7 @@ def _extract_json_object(text: str) -> str:
             depth -= 1
             if depth == 0:
                 return text[start : i + 1]
-    raise lm_client.LmError("shape", "unbalanced JSON object in LLM output")
+    raise lmstudio_client.LmError("shape", "unbalanced JSON object in LLM output")
 
 
 def _parse_json(text: str, model_cls: type[_M]) -> _M:
@@ -55,7 +55,7 @@ def _parse_json(text: str, model_cls: type[_M]) -> _M:
     try:
         return model_cls.model_validate(raw)
     except ValidationError as exc:
-        raise lm_client.LmError("shape", f"schema mismatch: {exc.errors()[:3]}") from exc
+        raise lmstudio_client.LmError("shape", f"schema mismatch: {exc.errors()[:3]}") from exc
 
 
 def _last_n_messages(conn: sqlite3.Connection, session_id: str, n: int) -> list[dict[str, Any]]:
@@ -68,11 +68,11 @@ def _coerce_negative(prompt: GeneratedPrompt, *, use_negative: bool) -> Generate
     if not use_negative:
         if neg is None or (isinstance(neg, str) and neg.strip() == ""):
             return prompt.model_copy(update={"negative": None})
-        raise lm_client.LmError(
+        raise lmstudio_client.LmError(
             "shape", "use_negative=false but model returned a non-empty negative",
         )
     if neg is None or not str(neg).strip():
-        raise lm_client.LmError(
+        raise lmstudio_client.LmError(
             "shape", "use_negative=true but model returned null/empty negative",
         )
     return prompt
@@ -119,7 +119,7 @@ def generate(
         chat_messages=chat_messages,
         distinct_tags=distinct_tags,
     )
-    intent_raw = lm_client.chat_complete(
+    intent_raw = lmstudio_client.chat_complete(
         endpoint=endpoint,
         model=prompt_model,
         messages=intent_messages,
@@ -154,7 +154,7 @@ def generate(
         chat_messages=chat_messages,
         use_negative=session["use_negative"],
     )
-    comp_raw = lm_client.chat_complete(
+    comp_raw = lmstudio_client.chat_complete(
         endpoint=endpoint,
         model=prompt_model,
         messages=comp_messages,

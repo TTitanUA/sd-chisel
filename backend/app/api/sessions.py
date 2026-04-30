@@ -15,7 +15,7 @@ from app.models.session import (
     SessionOut,
     SessionUpdate,
 )
-from app.services import lm_client
+from app.services import lmstudio_client
 from app.storage import images, session_repo, settings_repo
 
 Conn = Annotated[sqlite3.Connection, Depends(get_conn)]
@@ -245,10 +245,10 @@ def _validated_vl_model(conn: sqlite3.Connection, name: str | None) -> str:
             detail="session has no vl_model_name selected",
         )
     row = settings_repo.get_lm_model(conn, name)
-    if row is None or not row["enabled"] or row["role"] not in ("vl", "both"):
+    if row is None or not row["enabled"] or not row["vision"]:
         raise HTTPException(
             status_code=409,
-            detail=f"vl_model_name {name!r} is not enabled or wrong role",
+            detail=f"vl_model_name {name!r} is not enabled or does not support vision",
         )
     return name
 
@@ -262,7 +262,7 @@ def analyze_source(session_id: str, conn: Conn) -> dict:
         raise HTTPException(status_code=409, detail="session has no source image")
 
     cfg = settings_repo.get_lmstudio(conn)
-    if not cfg["lmstudio_base_url"]:
+    if not cfg["lmstudio_url"]:
         raise HTTPException(
             status_code=409, detail="LMStudio base_url is not configured",
         )
@@ -278,16 +278,16 @@ def analyze_source(session_id: str, conn: Conn) -> dict:
     image_bytes = image_path.read_bytes()
 
     try:
-        summary = lm_client.analyze_image(
+        summary = lmstudio_client.analyze_image(
             endpoint={
-                "base_url": cfg["lmstudio_base_url"],
+                "server_root": cfg["lmstudio_url"],
                 "api_key": cfg["lmstudio_api_key"],
             },
             model=model,
             image_bytes=image_bytes,
             content_type=content_type,
         )
-    except lm_client.LmError as exc:
+    except lmstudio_client.LmError as exc:
         if exc.kind == "timeout":
             raise HTTPException(status_code=504, detail=str(exc)) from exc
         raise HTTPException(status_code=502, detail=str(exc)) from exc

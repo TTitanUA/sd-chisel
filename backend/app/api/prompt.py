@@ -16,7 +16,7 @@ from app.models.prompts import (
     PromptsResponse,
     RetrievedIntent,
 )
-from app.services import lm_client, prompt_orchestrator
+from app.services import lmstudio_client, prompt_orchestrator
 from app.storage import session_repo, settings_repo
 
 Conn = Annotated[sqlite3.Connection, Depends(get_conn)]
@@ -37,10 +37,10 @@ def _validated_prompt_model(conn: sqlite3.Connection, name: str | None) -> str:
             status_code=409, detail="session has no prompt_model_name selected",
         )
     row = settings_repo.get_lm_model(conn, name)
-    if row is None or not row["enabled"] or row["role"] not in ("prompt", "both"):
+    if row is None or not row["enabled"]:
         raise HTTPException(
             status_code=409,
-            detail=f"prompt_model_name {name!r} is not enabled or wrong role",
+            detail=f"prompt_model_name {name!r} is not enabled",
         )
     return name
 
@@ -55,13 +55,13 @@ def generate_prompt(session_id: str, conn: Conn) -> GeneratePromptResponse:
         raise _not_found(session_id)
 
     cfg = settings_repo.get_lmstudio(conn)
-    if not cfg["lmstudio_base_url"]:
+    if not cfg["lmstudio_url"]:
         raise HTTPException(
             status_code=409, detail="LMStudio base_url is not configured",
         )
     model = _validated_prompt_model(conn, session.get("prompt_model_name"))
     endpoint = {
-        "base_url": cfg["lmstudio_base_url"],
+        "server_root": cfg["lmstudio_url"],
         "api_key": cfg["lmstudio_api_key"],
     }
 
@@ -74,7 +74,7 @@ def generate_prompt(session_id: str, conn: Conn) -> GeneratePromptResponse:
         )
     except prompt_orchestrator.PreconditionError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    except lm_client.LmError as exc:
+    except lmstudio_client.LmError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     return GeneratePromptResponse(
