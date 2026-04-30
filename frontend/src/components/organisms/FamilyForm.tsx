@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { Button } from "@/components/atoms/Button";
 import { Icon } from "@/components/atoms/Icon";
 import { TextInput } from "@/components/molecules/FormField";
@@ -6,6 +6,7 @@ import { LibraryFormPage, LibraryFormSection } from "@/components/organisms/Libr
 import libForm from "@/components/organisms/libraryForm.module.css";
 import { MarkdownField } from "@/components/molecules/MarkdownField";
 import { AssistantPane } from "@/components/molecules/AssistantPane";
+import type { AssistFieldName, AssistFieldsSnapshot } from "@/api/assist";
 import type { Family, FamilyCreate, FamilyUpdate } from "@/api/library";
 
 export function FamilyForm({
@@ -22,12 +23,32 @@ export function FamilyForm({
   const [id, setId] = useState(family?.id ?? "");
   const [displayName, setDisplayName] = useState(family?.display_name ?? "");
   const [promptGuide, setPromptGuide] = useState(family?.prompt_guide ?? "");
+  const [promptI2i, setPromptI2i] = useState(family?.prompt_i2i ?? "");
+  const [promptT2i, setPromptT2i] = useState(family?.prompt_t2i ?? "");
   const [showAssistant, setShowAssistant] = useState(false);
 
   const isEdit = Boolean(family);
   const pageTitle = isEdit && family ? `Edit · ${family.display_name}` : "New family";
 
-  const canSave = displayName.trim() !== "" && promptGuide.trim() !== "" && (Boolean(family) || id.trim() !== "");
+  const canSave =
+    displayName.trim() !== "" &&
+    promptGuide.trim() !== "" &&
+    (Boolean(family) || id.trim() !== "");
+
+  const handleArtifact = useCallback((field: AssistFieldName, content: string) => {
+    if (field === "prompt_guide") setPromptGuide(content);
+    else if (field === "prompt_i2i") setPromptI2i(content);
+    else if (field === "prompt_t2i") setPromptT2i(content);
+  }, []);
+
+  const getCurrentState = useCallback(
+    (): AssistFieldsSnapshot => ({
+      prompt_guide: promptGuide,
+      prompt_i2i: promptI2i,
+      prompt_t2i: promptT2i,
+    }),
+    [promptGuide, promptI2i, promptT2i],
+  );
 
   const form = (
     <form
@@ -35,7 +56,12 @@ export function FamilyForm({
       onSubmit={(event) => {
         event.preventDefault();
         if (!canSave) return;
-        const common = { display_name: displayName.trim(), prompt_guide: promptGuide.trim() };
+        const common = {
+          display_name: displayName.trim(),
+          prompt_guide: promptGuide.trim(),
+          prompt_i2i: promptI2i.trim(),
+          prompt_t2i: promptT2i.trim(),
+        };
         onSubmit(family ? common : { id: id.trim(), ...common });
       }}
     >
@@ -51,7 +77,9 @@ export function FamilyForm({
               Families
             </button>
             <Icon name="ChevronRight" size={10} aria-hidden />
-            <span className={libForm.breadcrumbCurrent}>{isEdit ? family?.display_name : "New family"}</span>
+            <span className={libForm.breadcrumbCurrent}>
+              {isEdit ? family?.display_name : "New family"}
+            </span>
           </>
         }
         foot={
@@ -98,14 +126,38 @@ export function FamilyForm({
         </LibraryFormSection>
 
         <LibraryFormSection
-          title="Prompt guide"
-          subtitle="Base rules for this family. LLM sees this in every session."
+          title="Prompt guide (base)"
+          subtitle="Shared rules for this family. The downstream LLM sees this in every session."
         >
           <MarkdownField
             label="Content"
             value={promptGuide}
             onChange={setPromptGuide}
-            hint="Syntax, quality tags, token style, and how LoRAs interact."
+            hint="Output language, tag syntax, quality tokens, LoRA conventions, negative prompt rules."
+          />
+        </LibraryFormSection>
+
+        <LibraryFormSection
+          title="Image-to-image additions"
+          subtitle="Optional. Shown only when the session is i2i."
+        >
+          <MarkdownField
+            label="Content (optional)"
+            value={promptI2i}
+            onChange={setPromptI2i}
+            hint="What to preserve from the source, transformation language, denoising guidance."
+          />
+        </LibraryFormSection>
+
+        <LibraryFormSection
+          title="Text-to-image additions"
+          subtitle="Optional. Shown only when the session is t2i."
+        >
+          <MarkdownField
+            label="Content (optional)"
+            value={promptT2i}
+            onChange={setPromptT2i}
+            hint="Scene composition, subject and background description, framing/camera."
           />
         </LibraryFormSection>
       </LibraryFormPage>
@@ -117,7 +169,7 @@ export function FamilyForm({
   return (
     <div className={libForm.formWithAssistant}>
       {form}
-      <AssistantPane onArtifact={setPromptGuide} />
+      <AssistantPane onArtifact={handleArtifact} getCurrentState={getCurrentState} />
     </div>
   );
 }
