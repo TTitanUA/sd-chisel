@@ -89,7 +89,9 @@ def list_models(
         raise LmError("upstream", f"{resp.status_code}: {resp.text[:200]}")
     try:
         body = resp.json()
-        items = body["data"]
+        items = body.get("data") or body.get("models") or []
+        if not isinstance(items, list):
+            raise ValueError(f"expected list, got {type(items)}")
     except (ValueError, KeyError, TypeError) as exc:
         raise LmError("shape", f"unexpected /api/v1/models body: {exc}") from exc
 
@@ -100,7 +102,7 @@ def list_models(
         caps = item.get("capabilities") or {}
         reasoning_obj = caps.get("reasoning") or {}
         models.append(LmsModel(
-            name=item["id"],
+            name=item.get("id") or item.get("key") or item.get("name") or "",
             vision=bool(caps.get("vision", False)),
             tool_use=bool(caps.get("trained_for_tool_use", False)),
             reasoning=bool(reasoning_obj.get("allowed_options")),
