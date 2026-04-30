@@ -67,17 +67,25 @@ def test_family_create_update_delete(conn):
         id="testfam",
         display_name="Test Family",
         prompt_guide="Use test syntax.",
+        prompt_i2i="Preserve subject pose.",
+        prompt_t2i="Compose full scene.",
     )
     assert created["id"] == "testfam"
+    assert created["prompt_i2i"] == "Preserve subject pose."
+    assert created["prompt_t2i"] == "Compose full scene."
 
     updated = library_repo.update_family(
         conn,
         "testfam",
         display_name="Test Family 2",
         prompt_guide="Updated guide.",
+        prompt_i2i="",
+        prompt_t2i="Refined t2i rules.",
     )
     assert updated is not None
     assert updated["display_name"] == "Test Family 2"
+    assert updated["prompt_i2i"] == ""
+    assert updated["prompt_t2i"] == "Refined t2i rules."
     assert updated["updated_at"] >= created["updated_at"]
 
     assert library_repo.delete_family(conn, "testfam") is True
@@ -87,8 +95,25 @@ def test_family_create_update_delete(conn):
 
 def test_list_families_filters_by_query(conn):
     library_repo.create_family(conn, id="abcxyz", display_name="Needle Family", prompt_guide="x")
-    rows = library_repo.list_families(conn, q="needle")
-    assert [r["id"] for r in rows] == ["abcxyz"]
+    library_repo.create_family(
+        conn,
+        id="i2i_fam",
+        display_name="Other",
+        prompt_guide="base",
+        prompt_i2i="haystack i2i specifics",
+        prompt_t2i="",
+    )
+    library_repo.create_family(
+        conn,
+        id="t2i_fam",
+        display_name="Other2",
+        prompt_guide="base2",
+        prompt_i2i="",
+        prompt_t2i="haystack t2i specifics",
+    )
+    assert [r["id"] for r in library_repo.list_families(conn, q="needle")] == ["abcxyz"]
+    hay = sorted(r["id"] for r in library_repo.list_families(conn, q="haystack"))
+    assert hay == ["i2i_fam", "t2i_fam"]
 
 
 def test_model_update_delete_and_filters(conn):

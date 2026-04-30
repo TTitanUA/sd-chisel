@@ -29,8 +29,12 @@ def list_families(conn: sqlite3.Connection, q: str | None = None) -> list[dict[s
     sql = "SELECT * FROM families"
     params: list[Any] = []
     if q:
-        sql += " WHERE lower(id) LIKE ? OR lower(display_name) LIKE ? OR lower(prompt_guide) LIKE ?"
-        params.extend([_like(q), _like(q), _like(q)])
+        sql += (
+            " WHERE lower(id) LIKE ? OR lower(display_name) LIKE ? "
+            "OR lower(prompt_guide) LIKE ? OR lower(prompt_i2i) LIKE ? OR lower(prompt_t2i) LIKE ?"
+        )
+        like = _like(q)
+        params.extend([like, like, like, like, like])
     sql += " ORDER BY id"
     return [dict(r) for r in conn.execute(sql, params)]
 
@@ -45,12 +49,14 @@ def create_family(
     id: str,
     display_name: str,
     prompt_guide: str,
+    prompt_i2i: str = "",
+    prompt_t2i: str = "",
 ) -> dict[str, Any]:
     now = _now()
     conn.execute(
-        "INSERT INTO families(id, display_name, prompt_guide, created_at, updated_at) "
-        "VALUES (?, ?, ?, ?, ?)",
-        (id, display_name, prompt_guide, now, now),
+        "INSERT INTO families(id, display_name, prompt_guide, prompt_i2i, prompt_t2i, "
+        "created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (id, display_name, prompt_guide, prompt_i2i, prompt_t2i, now, now),
     )
     return get_family(conn, id)  # type: ignore[return-value]
 
@@ -61,11 +67,14 @@ def update_family(
     *,
     display_name: str,
     prompt_guide: str,
+    prompt_i2i: str = "",
+    prompt_t2i: str = "",
 ) -> dict[str, Any] | None:
     now = _now()
     cur = conn.execute(
-        "UPDATE families SET display_name = ?, prompt_guide = ?, updated_at = ? WHERE id = ?",
-        (display_name, prompt_guide, now, family_id),
+        "UPDATE families SET display_name = ?, prompt_guide = ?, prompt_i2i = ?, "
+        "prompt_t2i = ?, updated_at = ? WHERE id = ?",
+        (display_name, prompt_guide, prompt_i2i, prompt_t2i, now, family_id),
     )
     if cur.rowcount == 0:
         return None
