@@ -55,7 +55,8 @@ describe("AssistantPane", () => {
     }));
 
     const onArtifact = vi.fn();
-    render(withClient(<AssistantPane onArtifact={onArtifact} />));
+    const getCurrentState = () => ({ prompt_guide: "", prompt_i2i: "", prompt_t2i: "" });
+    render(withClient(<AssistantPane getCurrentState={getCurrentState} onArtifact={onArtifact} />));
 
     await waitFor(() => expect(screen.getByText(/paste documentation/i)).toBeInTheDocument());
     const select = screen.getByRole("combobox");
@@ -72,7 +73,7 @@ describe("AssistantPane", () => {
       if (url.includes("/families/assist") && init?.method === "POST") {
         return makeStreamResponse([
           'data: {"type":"delta","content":"Here is a guide."}\n\n',
-          'data: {"type":"artifact","content":"# My Guide"}\n\n',
+          'data: {"type":"artifact","field":"prompt_guide","content":"# My Guide"}\n\n',
           'data: {"type":"done","response_id":"resp_1"}\n\n',
         ]);
       }
@@ -80,13 +81,14 @@ describe("AssistantPane", () => {
     }));
 
     const onArtifact = vi.fn();
-    render(withClient(<AssistantPane onArtifact={onArtifact} />));
+    const getCurrentState = () => ({ prompt_guide: "", prompt_i2i: "", prompt_t2i: "" });
+    render(withClient(<AssistantPane getCurrentState={getCurrentState} onArtifact={onArtifact} />));
 
     const input = await screen.findByRole("textbox");
     await userEvent.type(input, "help me");
     await userEvent.click(screen.getByRole("button", { name: /^send$/i }));
 
-    await waitFor(() => expect(onArtifact).toHaveBeenCalledWith("# My Guide"));
+    await waitFor(() => expect(onArtifact).toHaveBeenCalledWith("prompt_guide", "# My Guide"));
     await waitFor(() => expect(screen.getByText(/here is a guide/i)).toBeInTheDocument());
   });
 });
