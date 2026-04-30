@@ -9,6 +9,7 @@ from starlette.responses import StreamingResponse
 
 from app.api.deps import get_conn
 from app.models.library import (
+    AssistFieldsSnapshot,
     AssistRequest,
     FamilyCreate,
     FamilyOut,
@@ -162,7 +163,7 @@ def _assist_sse(payload: dict) -> bytes:
     return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n".encode()
 
 
-def _format_snapshot(snap) -> str:
+def _format_snapshot(snap: AssistFieldsSnapshot) -> str:
     """Render the editor state block prepended to the user message.
 
     `snap` is an `AssistFieldsSnapshot` instance. Empty fields show as

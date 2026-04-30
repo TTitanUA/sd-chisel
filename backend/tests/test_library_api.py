@@ -309,10 +309,55 @@ def test_assist_streams_text_and_artifact_via_function_call(client, conn, monkey
 
     artifact = next(e for e in events if e["type"] == "artifact")
     assert artifact["content"] == "# Guide\nUse tags."
+    assert artifact["field"] == "prompt_guide"
 
     done = next(e for e in events if e["type"] == "done")
     # last response id from second pass
     assert done["response_id"] == "resp_2"
+
+
+@pytest.mark.parametrize(
+    "tool_name,expected_field",
+    [
+        ("update_prompt_i2i", "prompt_i2i"),
+        ("update_prompt_t2i", "prompt_t2i"),
+    ],
+)
+def test_assist_artifact_field_maps_to_tool_name(
+    client, conn, monkeypatch, tool_name, expected_field
+):
+    """The artifact SSE event's `field` must reflect which update_* tool fired."""
+    from app.storage import settings_repo
+    settings_repo.set_lmstudio(conn, url="http://localhost:1234", api_key=None)
+    settings_repo.upsert_lm_models(conn, models=[
+        {"name": "tool-model", "vision": False, "tool_use": True, "reasoning": False},
+    ])
+
+    pass_no = {"i": 0}
+
+    def fake_stream(**kwargs):
+        pass_no["i"] += 1
+        if pass_no["i"] == 1:
+            return iter([
+                {"type": "function_call",
+                 "call_id": "call_1", "name": tool_name,
+                 "arguments": {"content": "body"}},
+                {"type": "completed", "response_id": "resp_1"},
+            ])
+        return iter([{"type": "completed", "response_id": "resp_2"}])
+
+    monkeypatch.setattr(lmstudio_client, "chat_responses_stream", fake_stream)
+
+    resp = client.post(
+        "/api/library/families/assist",
+        json={"model": "tool-model", "message": "go"},
+    )
+    assert resp.status_code == 200
+
+    events = _parse_assist_sse(resp.text)
+    artifact = next(e for e in events if e["type"] == "artifact")
+    assert artifact["content"] == "body"
+    assert artifact["field"] == expected_field
 
 
 def test_assist_sends_function_call_output_on_followup(client, conn, monkeypatch):
