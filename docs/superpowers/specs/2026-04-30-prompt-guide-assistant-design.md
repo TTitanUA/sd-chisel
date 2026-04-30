@@ -4,6 +4,8 @@
 
 An AI assistant sidebar on the family create/edit page (`/library/families/new`, `/library/families/:id/edit`) that helps users write prompt guides through a conversational chat interface. The assistant can read documentation from user-provided URLs (via MCP/Playwright on the LMStudio side) and automatically update the prompt guide field in the form.
 
+Families are not limited to Stable Diffusion — they can represent any generative model family (Flux, Midjourney, etc.). The prompt guide covers both image-to-image (i2i) and text-to-image (t2i) workflows.
+
 ## Requirements
 
 - Users can chat with an LLM to collaboratively write a prompt guide
@@ -48,9 +50,10 @@ Like `chat_stream()` but accepts a `tools` parameter and yields structured event
 
 **System prompt:**
 ```
-You are a prompt-guide writing assistant for Stable Diffusion model families.
+You are a prompt-guide writing assistant for generative image model families.
 Help the user write a prompt guide — a set of rules that the LLM will follow
-when generating image-to-image prompts for this family.
+when generating prompts for this family in both text-to-image (t2i) and
+image-to-image (i2i) workflows.
 
 You have a tool `update_prompt_guide` — call it whenever you have a draft or
 update of the prompt guide. The user will see the result in real-time in the
@@ -66,6 +69,7 @@ Keep the prompt guide concise and actionable. Focus on:
 - Token limits or recommendations
 - LoRA interaction patterns
 - Negative prompt conventions
+- Any differences between t2i and i2i prompting for this family
 ```
 
 **Tool definition (OpenAI function calling format):**
@@ -161,3 +165,15 @@ The assistant is available on both create and edit modes.
 
 - LMStudio must have MCP/Playwright configured for URL fetching (document in README)
 - User must select a model with `tool_use` capability for the assistant to work
+
+## Future: mode-specific prompt guides
+
+This spec implements a single `prompt_guide` field. A planned follow-up will split guidance into three fields:
+
+- **`prompt_guide`** (base) — shared rules: tag syntax, quality tokens, LoRA patterns, negative prompt conventions
+- **`prompt_i2i`** — i2i-specific additions: what to preserve from the source, transformation language, denoising guidance
+- **`prompt_t2i`** — t2i-specific additions: full scene composition, subject description conventions
+
+At generation time the system prompt will be assembled as `prompt_guide` + `prompt_i2i` or `prompt_guide` + `prompt_t2i` depending on the session mode. The assistant will be extended to work with all three fields via separate tool calls (`update_prompt_guide`, `update_prompt_i2i`, `update_prompt_t2i`).
+
+This is a separate change requiring a DB migration, API updates, and form changes — not part of the current scope.
