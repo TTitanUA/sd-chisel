@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/atoms/Button";
 import { Icon } from "@/components/atoms/Icon";
-import { streamAssist } from "@/api/assist";
+import { streamAssist, type AssistFieldName, type AssistFieldsSnapshot } from "@/api/assist";
 import { useLmModels } from "@/api/settings";
 import styles from "./AssistantPane.module.css";
 
@@ -9,6 +9,12 @@ type ChatEntry = { role: "user" | "assistant"; content: string };
 
 const isMac = typeof navigator !== "undefined" && /Mac|iPhone|iPod|iPad/i.test(navigator.platform);
 const SEND_HINT = isMac ? "⌘↵ to send" : "Ctrl↵ to send";
+
+const TOOL_LABELS: Record<string, string> = {
+  update_prompt_guide: "updating base guide",
+  update_prompt_i2i: "updating i2i guide",
+  update_prompt_t2i: "updating t2i guide",
+};
 
 // Collapse model-emitted whitespace runs (reasoning padding, blank deltas
 // around tool calls, post-function-call continuations, etc.) so the chat
@@ -18,9 +24,11 @@ function normalizeAssistantText(raw: string): string {
 }
 
 export function AssistantPane({
+  getCurrentState,
   onArtifact,
 }: {
-  onArtifact: (content: string) => void;
+  getCurrentState: () => AssistFieldsSnapshot;
+  onArtifact: (field: AssistFieldName, content: string) => void;
 }) {
   const allModels = useLmModels();
   const toolModels = useMemo(
@@ -63,15 +71,16 @@ export function AssistantPane({
     setError(null);
     setPending(true);
 
+    const snapshot = getCurrentState();
     let assistantText = "";
     try {
-      await streamAssist(model, content, responseId, {
+      await streamAssist(model, content, responseId, snapshot, {
         onDelta: (chunk) => {
           assistantText += chunk;
           setStreaming(assistantText);
         },
-        onArtifact: (artifactContent) => {
-          onArtifact(artifactContent);
+        onArtifact: (field, artifactContent) => {
+          onArtifact(field, artifactContent);
         },
         onToolStatus: (tool, status) => {
           if (status === "running") {
@@ -111,8 +120,11 @@ export function AssistantPane({
   const streamingDisplay = pending ? normalizeAssistantText(streaming) : "";
   const showThinking = pending && streamingDisplay.length === 0 && !currentTool;
   const showStreaming = pending && streamingDisplay.length > 0;
+  const toolLabel = currentTool
+    ? (TOOL_LABELS[currentTool] ?? `running ${currentTool}…`)
+    : "";
   const statusLabel = currentTool
-    ? `running ${currentTool}…`
+    ? toolLabel
     : showStreaming
       ? "writing reply…"
       : "thinking…";
