@@ -81,12 +81,13 @@ def list_lm_models(conn: Conn) -> dict:
 
 @router.patch("/api/settings/lmstudio/models/{name}", response_model=LmModelOut)
 def patch_lm_model(name: str, body: LmModelPatch, conn: Conn) -> dict:
-    if all(v is None for v in [body.vision, body.tool_use, body.reasoning, body.enabled]):
+    if all(v is None for v in [body.vision, body.tool_use, body.reasoning, body.enabled, body.favorite]):
         raise HTTPException(status_code=422, detail="provide at least one field")
     row = settings_repo.patch_lm_model(
         conn, name=name,
         vision=body.vision, tool_use=body.tool_use,
         reasoning=body.reasoning, enabled=body.enabled,
+        favorite=body.favorite,
     )
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"unknown model: {name}")

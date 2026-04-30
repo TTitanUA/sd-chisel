@@ -17,12 +17,16 @@ def _normalize_url(value: str | None) -> str | None:
     return stripped or None
 
 
+_MODEL_COLS = "name, enabled, last_seen, vision, tool_use, reasoning, favorite"
+
+
 def _model_row(r: sqlite3.Row) -> dict[str, Any]:
     d = dict(r)
     d["enabled"] = bool(d["enabled"])
     d["vision"] = bool(d["vision"])
     d["tool_use"] = bool(d["tool_use"])
     d["reasoning"] = bool(d["reasoning"])
+    d["favorite"] = bool(d["favorite"])
     return d
 
 
@@ -61,17 +65,23 @@ def set_lmstudio(
 
 def list_lm_models(conn: sqlite3.Connection) -> list[dict[str, Any]]:
     rows = conn.execute(
-        "SELECT name, enabled, last_seen, vision, tool_use, reasoning "
-        "FROM lm_models ORDER BY name"
+        f"SELECT {_MODEL_COLS} FROM lm_models ORDER BY name"
     ).fetchall()
     return [_model_row(r) for r in rows]
 
 
 def get_lm_model(conn: sqlite3.Connection, name: str) -> dict[str, Any] | None:
     row = conn.execute(
-        "SELECT name, enabled, last_seen, vision, tool_use, reasoning "
-        "FROM lm_models WHERE name = ?",
+        f"SELECT {_MODEL_COLS} FROM lm_models WHERE name = ?",
         (name,),
+    ).fetchone()
+    return _model_row(row) if row is not None else None
+
+
+def get_favorite_lm_model(conn: sqlite3.Connection) -> dict[str, Any] | None:
+    row = conn.execute(
+        f"SELECT {_MODEL_COLS} FROM lm_models "
+        "WHERE favorite = 1 AND enabled = 1 LIMIT 1",
     ).fetchone()
     return _model_row(row) if row is not None else None
 
@@ -104,7 +114,15 @@ def patch_lm_model(
     tool_use: bool | None = None,
     reasoning: bool | None = None,
     enabled: bool | None = None,
+    favorite: bool | None = None,
 ) -> dict[str, Any] | None:
+    # favorite is exclusive — setting one clears the others.
+    if favorite is True:
+        if conn.execute("SELECT 1 FROM lm_models WHERE name = ?", (name,)).fetchone() is None:
+            return None
+        conn.execute("UPDATE lm_models SET favorite = 0 WHERE favorite = 1")
+        conn.execute("UPDATE lm_models SET favorite = 1 WHERE name = ?", (name,))
+
     sets: list[str] = []
     params: list[Any] = []
     if vision is not None:
@@ -115,12 +133,14 @@ def patch_lm_model(
         sets.append("reasoning = ?"); params.append(1 if reasoning else 0)
     if enabled is not None:
         sets.append("enabled = ?"); params.append(1 if enabled else 0)
+    if favorite is False:
+        sets.append("favorite = ?"); params.append(0)
     if not sets:
         return get_lm_model(conn, name)
     params.append(name)
     cur = conn.execute(
         f"UPDATE lm_models SET {', '.join(sets)} WHERE name = ?", params,
     )
-    if cur.rowcount == 0:
+    if cur.rowcount == 0 and favorite is not True:
         return None
     return get_lm_model(conn, name)

@@ -25,6 +25,7 @@ class LmModelOut(StrictModel):
     tool_use: bool
     reasoning: bool
     enabled: bool
+    favorite: bool
     last_seen: int
 
 
@@ -37,3 +38,4 @@ class LmModelPatch(StrictModel):
     tool_use: bool | None = None
     reasoning: bool | None = None
     enabled: bool | None = None
+    favorite: bool | None = None

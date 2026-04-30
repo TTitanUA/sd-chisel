@@ -33,7 +33,8 @@ export function AssistantPane({
 
   useEffect(() => {
     if (!model && toolModels.length > 0) {
-      setModel(toolModels[0].name);
+      const favorite = toolModels.find((m) => m.favorite);
+      setModel((favorite ?? toolModels[0]).name);
     }
   }, [model, toolModels]);
 

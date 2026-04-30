@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
+import { Star } from "lucide-react";
 import { Button } from "@/components/atoms/Button";
 import { Icon } from "@/components/atoms/Icon";
 import { TextInput } from "@/components/molecules/FormField";
@@ -40,12 +41,13 @@ export function LmStudioSettings() {
   });
 
   const patch = useMutation({
-    mutationFn: (args: { name: string; vision?: boolean; tool_use?: boolean; reasoning?: boolean; enabled?: boolean }) =>
+    mutationFn: (args: { name: string; vision?: boolean; tool_use?: boolean; reasoning?: boolean; enabled?: boolean; favorite?: boolean }) =>
       settingsApi.patchModel(args.name, {
         ...(args.vision !== undefined ? { vision: args.vision } : {}),
         ...(args.tool_use !== undefined ? { tool_use: args.tool_use } : {}),
         ...(args.reasoning !== undefined ? { reasoning: args.reasoning } : {}),
         ...(args.enabled !== undefined ? { enabled: args.enabled } : {}),
+        ...(args.favorite !== undefined ? { favorite: args.favorite } : {}),
       }),
     onSuccess: () => invalidate.models(),
   });
@@ -128,6 +130,7 @@ export function LmStudioSettings() {
           <div className={styles.modelTable} role="table">
             <div className={styles.headCell}>Model</div>
             <div className={styles.headCell}>Capabilities</div>
+            <div className={styles.headCell}>Favorite</div>
             <div className={styles.headCell}>Enabled</div>
             <div className={styles.headCell}>Last seen</div>
             {(models.data ?? []).map((m) => (
@@ -146,6 +149,20 @@ export function LmStudioSettings() {
                       {cap === "tool_use" ? "tools" : cap}
                     </label>
                   ))}
+                </div>
+                <div>
+                  <button
+                    type="button"
+                    className={styles.starBtn}
+                    aria-label={m.favorite ? "Unset favorite" : "Set as favorite"}
+                    aria-pressed={m.favorite}
+                    onClick={() =>
+                      patch.mutate({ name: m.name, favorite: !m.favorite })
+                    }
+                    title={m.favorite ? "Favorite (used by default)" : "Set as favorite"}
+                  >
+                    <Star size={14} strokeWidth={1.75} fill={m.favorite ? "currentColor" : "none"} />
+                  </button>
                 </div>
                 <div>
                   <input

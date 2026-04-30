@@ -12,6 +12,9 @@ const TOOLBAR = [
   commands.divider,
   commands.unorderedListCommand,
   commands.orderedListCommand,
+  commands.divider,
+  commands.codeEdit,
+  commands.codePreview,
 ];
 
 export function MarkdownField({
@@ -29,9 +32,8 @@ export function MarkdownField({
     <FormField label={label} hint={hint}>
       <div className={styles.editor} data-color-mode="light">
         <MDEditor
-          height={200}
-          preview="edit"
-          visibleDragbar={false}
+          height={500}
+          visibleDragbar
           value={value}
           onChange={(next) => onChange(next ?? "")}
           commands={TOOLBAR}

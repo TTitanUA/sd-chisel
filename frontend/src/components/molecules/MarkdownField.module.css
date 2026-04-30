@@ -5,6 +5,8 @@
   border: var(--stroke-thin) solid var(--border);
   border-radius: var(--r-sm, 6px);
   box-shadow: none;
+  min-height: 500px;
+  resize: vertical;
 }
 
 .editor :global(.w-md-editor-toolbar) {

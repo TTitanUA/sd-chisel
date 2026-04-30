@@ -14,6 +14,7 @@ export type LmModel = {
   tool_use: boolean;
   reasoning: boolean;
   enabled: boolean;
+  favorite: boolean;
   last_seen: number;
 };
 
@@ -37,7 +38,7 @@ export const settingsApi = {
     apiFetch<{ models: LmModel[] }>("/api/settings/lmstudio/models"),
   patchModel: (
     name: string,
-    patch: { vision?: boolean; tool_use?: boolean; reasoning?: boolean; enabled?: boolean },
+    patch: { vision?: boolean; tool_use?: boolean; reasoning?: boolean; enabled?: boolean; favorite?: boolean },
   ) =>
     apiFetch<LmModel>(`/api/settings/lmstudio/models/${encodeURIComponent(name)}`, {
       method: "PATCH",

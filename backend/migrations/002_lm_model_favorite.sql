@@ -1,0 +1,2 @@
+ALTER TABLE lm_models
+  ADD COLUMN favorite INTEGER NOT NULL DEFAULT 0 CHECK (favorite IN (0,1));

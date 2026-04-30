@@ -1,6 +1,6 @@
 import * as Dialog from "@radix-ui/react-dialog";
 import { Link, useNavigate } from "react-router-dom";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { Button } from "@/components/atoms/Button";
 import { Icon } from "@/components/atoms/Icon";
@@ -38,6 +38,15 @@ export function SessionSettingsDrawer({
   const [vlModel, setVlModel] = useState(session.vl_model_name ?? "");
   const [promptModel, setPromptModel] = useState(session.prompt_model_name ?? "");
   const [loraSearch, setLoraSearch] = useState("");
+
+  // Auto-pick favorite for prompt model when session has no value yet.
+  useEffect(() => {
+    if (promptModel) return;
+    const list = promptChoices.data ?? [];
+    if (list.length === 0) return;
+    const favorite = list.find((m) => m.favorite);
+    if (favorite) setPromptModel(favorite.name);
+  }, [promptModel, promptChoices.data]);
 
   const save = useMutation({
     mutationFn: () =>

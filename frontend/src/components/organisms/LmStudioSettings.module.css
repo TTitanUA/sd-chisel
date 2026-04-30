@@ -43,7 +43,7 @@
 
 .modelTable {
   display: grid;
-  grid-template-columns: 1fr 220px 90px 110px;
+  grid-template-columns: 1fr 220px 80px 90px 130px;
   gap: 0;
   border: 1px solid var(--border);
   border-radius: var(--r-sm);
@@ -58,8 +58,28 @@
   align-items: center;
 }
 
-.modelTable > div:nth-last-child(-n+4) {
+.modelTable > div:nth-last-child(-n+5) {
   border-bottom: 0;
+}
+
+.starBtn {
+  background: none;
+  border: none;
+  padding: 4px;
+  cursor: pointer;
+  color: var(--text-subtle);
+  display: inline-flex;
+  align-items: center;
+  border-radius: var(--r-xs, 3px);
+}
+
+.starBtn[aria-pressed="true"] {
+  color: var(--accent, #d97706);
+}
+
+.starBtn:hover {
+  color: var(--accent, #d97706);
+  background: var(--bg-raised);
 }
 
 .headCell {
