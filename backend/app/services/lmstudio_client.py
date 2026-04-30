@@ -326,6 +326,7 @@ def chat_responses_stream(
         payload["previous_response_id"] = previous_response_id
 
     fn_calls: dict[str, dict[str, Any]] = {}
+    mcp_names: dict[str, str] = {}  # item_id -> tool name
 
     try:
         with httpx.Client(transport=transport, timeout=RESPONSES_TIMEOUT) as client:
@@ -360,6 +361,16 @@ def chat_responses_stream(
                                 "name": item.get("name", ""),
                                 "args": item.get("arguments", "") or "",
                             }
+                        elif item.get("type") in ("mcp_call", "tool_call"):
+                            iid = item.get("id", "")
+                            tool = item.get("name") or item.get("tool", "")
+                            if iid:
+                                mcp_names[iid] = tool
+                            yield {
+                                "type": "mcp_status",
+                                "tool": tool,
+                                "status": "running",
+                            }
                     elif etype == "response.function_call_arguments.delta":
                         iid = data.get("item_id", "")
                         if iid in fn_calls:
@@ -382,21 +393,17 @@ def chat_responses_stream(
                                 "arguments": parsed,
                             }
                         elif itype in ("mcp_call", "tool_call"):
-                            tool = item.get("name") or item.get("tool", "")
+                            iid = item.get("id", "")
+                            tool = item.get("name") or item.get("tool", "") or mcp_names.pop(iid, "")
                             ok = item.get("error") in (None, "")
                             yield {
                                 "type": "mcp_status",
                                 "tool": tool,
                                 "status": "done" if ok else "failed",
                             }
-                    elif etype == "response.mcp_call.in_progress" or etype == "response.mcp_call.arguments.delta":
-                        if etype.endswith("in_progress"):
-                            item = data.get("item") or {}
-                            yield {
-                                "type": "mcp_status",
-                                "tool": item.get("name") or item.get("tool", ""),
-                                "status": "running",
-                            }
+                    elif etype == "response.mcp_call.in_progress":
+                        # output_item.added already emitted "running" — skip duplicate.
+                        pass
                     elif etype == "response.completed":
                         response = data.get("response") or {}
                         yield {

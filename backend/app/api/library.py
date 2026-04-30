@@ -81,6 +81,8 @@ ASSIST_SYSTEM_PROMPT = (
     "- No marketing prose, model history, benchmark numbers, or licensing notes.\n"
     "- No links, citations, or 'see docs at …' references.\n"
     "- No emojis.\n"
+    "- No code examples, no API/SDK snippets, no curl/python/json blocks. The "
+    "downstream LLM writes prompts, not code — examples of code waste its context.\n"
     "- No filler like 'this section explains' — write the rule directly.\n"
     "- Prefer compact tables and bullet lists over paragraphs.\n\n"
     "Cover only what changes how a prompt is written:\n"

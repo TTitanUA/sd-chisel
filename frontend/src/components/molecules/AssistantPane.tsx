@@ -10,6 +10,13 @@ type ChatEntry = { role: "user" | "assistant"; content: string };
 const isMac = typeof navigator !== "undefined" && /Mac|iPhone|iPod|iPad/i.test(navigator.platform);
 const SEND_HINT = isMac ? "⌘↵ to send" : "Ctrl↵ to send";
 
+// Collapse model-emitted whitespace runs (reasoning padding, blank deltas
+// around tool calls, post-function-call continuations, etc.) so the chat
+// bubble doesn't grow into a tall empty box.
+function normalizeAssistantText(raw: string): string {
+  return raw.replace(/\n{3,}/g, "\n\n").trim();
+}
+
 export function AssistantPane({
   onArtifact,
 }: {
@@ -26,7 +33,8 @@ export function AssistantPane({
   const [draft, setDraft] = useState("");
   const [pending, setPending] = useState(false);
   const [streaming, setStreaming] = useState("");
-  const [toolInfo, setToolInfo] = useState<string | null>(null);
+  const [currentTool, setCurrentTool] = useState<string | null>(null);
+  const [toolCount, setToolCount] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [responseId, setResponseId] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -50,7 +58,8 @@ export function AssistantPane({
     setMessages((prev) => [...prev, { role: "user", content }]);
     setDraft("");
     setStreaming("");
-    setToolInfo(null);
+    setCurrentTool(null);
+    setToolCount(0);
     setError(null);
     setPending(true);
 
@@ -65,8 +74,14 @@ export function AssistantPane({
           onArtifact(artifactContent);
         },
         onToolStatus: (tool, status) => {
-          if (status === "running") setToolInfo(`Using ${tool}…`);
-          else setToolInfo(null);
+          if (status === "running") {
+            setCurrentTool(tool || "tool");
+          } else {
+            setCurrentTool(null);
+            if (status === "done" || status === "failed") {
+              setToolCount((n) => n + 1);
+            }
+          }
         },
         onDone: (rid) => {
           if (rid) setResponseId(rid);
@@ -76,12 +91,13 @@ export function AssistantPane({
     } catch (err) {
       setError(String(err));
     } finally {
-      if (assistantText) {
-        setMessages((prev) => [...prev, { role: "assistant", content: assistantText }]);
+      const cleaned = normalizeAssistantText(assistantText);
+      if (cleaned) {
+        setMessages((prev) => [...prev, { role: "assistant", content: cleaned }]);
       }
       setPending(false);
       setStreaming("");
-      setToolInfo(null);
+      setCurrentTool(null);
     }
   }
 
@@ -92,8 +108,14 @@ export function AssistantPane({
     }
   }
 
-  const showThinking = pending && streaming.length === 0 && !toolInfo;
-  const showStreaming = pending && streaming.length > 0;
+  const streamingDisplay = pending ? normalizeAssistantText(streaming) : "";
+  const showThinking = pending && streamingDisplay.length === 0 && !currentTool;
+  const showStreaming = pending && streamingDisplay.length > 0;
+  const statusLabel = currentTool
+    ? `running ${currentTool}…`
+    : showStreaming
+      ? "writing reply…"
+      : "thinking…";
 
   return (
     <div className={styles.pane}>
@@ -116,8 +138,18 @@ export function AssistantPane({
         </select>
       </div>
       <div className={styles.body}>
+        {pending && (
+          <div className={styles.statusBar} role="status" aria-live="polite">
+            <span className={styles.statusDot} />
+            <span className={styles.statusLabel}>{statusLabel}</span>
+            <span className={styles.statusSpacer} />
+            <span className={styles.statusCount}>
+              {toolCount === 1 ? "1 tool used" : `${toolCount} tools used`}
+            </span>
+          </div>
+        )}
         <div className={styles.scroll} ref={scrollRef}>
-          {messages.length === 0 && !showThinking && !showStreaming && !toolInfo && (
+          {messages.length === 0 && !pending && (
             <div className={styles.empty}>
               Paste documentation or describe the model family to get started.
             </div>
@@ -125,20 +157,7 @@ export function AssistantPane({
           {messages.map((m, i) => (
             <Bubble key={i} role={m.role} content={m.content} />
           ))}
-          {showStreaming && <Bubble role="assistant" content={streaming} streaming />}
-          {toolInfo && !showStreaming && (
-            <div className="ds-chat ds-chat-assistant">
-              <div className="ds-chat-avatar" aria-hidden="true">
-                <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-                  <path d="M3 11L7 3L11 11L7 8.5L3 11Z" fill="currentColor" />
-                </svg>
-              </div>
-              <div className="ds-chat-body">
-                <div className="ds-chat-meta">Assistant</div>
-                <div className={styles.msgContent}>{toolInfo}</div>
-              </div>
-            </div>
-          )}
+          {showStreaming && <Bubble role="assistant" content={streamingDisplay} streaming />}
           {showThinking && <ThinkingBubble />}
         </div>
         {error && <div className={styles.error} role="alert">{error}</div>}

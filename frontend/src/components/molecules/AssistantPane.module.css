@@ -56,6 +56,49 @@
   overflow: hidden;
 }
 
+.statusBar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  background: var(--bg-raised);
+  border-bottom: 1px solid var(--border);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-subtle);
+  flex-shrink: 0;
+}
+
+.statusDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: status-pulse 1.4s infinite ease-in-out;
+  flex-shrink: 0;
+}
+
+.statusLabel {
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.statusSpacer {
+  flex: 1;
+}
+
+.statusCount {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+@keyframes status-pulse {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 1; }
+}
+
 .scroll {
   flex: 1;
   overflow-y: auto;
