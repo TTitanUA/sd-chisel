@@ -17,54 +17,38 @@ def conn(tmp_path):
 
 def test_default_lmstudio_settings_are_blank(conn):
     cfg = settings_repo.get_lmstudio(conn)
-    assert cfg["lmstudio_base_url"] is None
+    assert cfg["lmstudio_url"] is None
     assert cfg["lmstudio_api_key"] is None
 
 
-def test_set_lmstudio_round_trips_and_bumps_updated_at(conn):
-    before = settings_repo.get_lmstudio(conn)
-    settings_repo.set_lmstudio(
-        conn,
-        base_url="http://localhost:1234/v1",
-        api_key="lm-studio",
-    )
-    after = settings_repo.get_lmstudio(conn)
-    assert after["lmstudio_base_url"] == "http://localhost:1234/v1"
-    assert after["lmstudio_api_key"] == "lm-studio"
-    assert after["updated_at"] >= before["updated_at"]
+def test_set_lmstudio_stores_server_root(conn):
+    settings_repo.set_lmstudio(conn, url="http://localhost:1234", api_key="k")
+    cfg = settings_repo.get_lmstudio(conn)
+    assert cfg["lmstudio_url"] == "http://localhost:1234"
+    assert cfg["lmstudio_api_key"] == "k"
 
 
-def test_set_lmstudio_strips_trailing_slash_in_base_url(conn):
-    settings_repo.set_lmstudio(conn, base_url="http://h/v1/", api_key=None)
-    assert settings_repo.get_lmstudio(conn)["lmstudio_base_url"] == "http://h/v1"
+def test_set_lmstudio_strips_trailing_slash(conn):
+    settings_repo.set_lmstudio(conn, url="http://localhost:1234/", api_key=None)
+    assert settings_repo.get_lmstudio(conn)["lmstudio_url"] == "http://localhost:1234"
 
 
-def test_set_lmstudio_appends_v1_when_path_is_empty(conn):
-    settings_repo.set_lmstudio(conn, base_url="http://localhost:1234", api_key=None)
-    assert settings_repo.get_lmstudio(conn)["lmstudio_base_url"] == "http://localhost:1234/v1"
+def test_set_lmstudio_does_not_append_v1(conn):
+    settings_repo.set_lmstudio(conn, url="http://localhost:1234", api_key=None)
+    assert settings_repo.get_lmstudio(conn)["lmstudio_url"] == "http://localhost:1234"
 
 
-def test_set_lmstudio_appends_v1_when_path_is_root_slash(conn):
-    settings_repo.set_lmstudio(conn, base_url="http://localhost:1234/", api_key=None)
-    assert settings_repo.get_lmstudio(conn)["lmstudio_base_url"] == "http://localhost:1234/v1"
-
-
-def test_set_lmstudio_keeps_custom_path_intact(conn):
-    """Reverse-proxy prefixes like /proxy/openai/v1 must not be mangled."""
-    settings_repo.set_lmstudio(
-        conn, base_url="https://proxy.example.com/proxy/openai/v1", api_key=None,
-    )
-    assert (
-        settings_repo.get_lmstudio(conn)["lmstudio_base_url"]
-        == "https://proxy.example.com/proxy/openai/v1"
-    )
+def test_set_lmstudio_bumps_updated_at(conn):
+    before = settings_repo.get_lmstudio(conn)["updated_at"]
+    settings_repo.set_lmstudio(conn, url="http://h", api_key=None)
+    assert settings_repo.get_lmstudio(conn)["updated_at"] >= before
 
 
 def test_set_lmstudio_can_clear_to_null(conn):
-    settings_repo.set_lmstudio(conn, base_url="http://h/v1", api_key="k")
-    settings_repo.set_lmstudio(conn, base_url=None, api_key=None)
+    settings_repo.set_lmstudio(conn, url="http://h", api_key="k")
+    settings_repo.set_lmstudio(conn, url=None, api_key=None)
     cfg = settings_repo.get_lmstudio(conn)
-    assert cfg["lmstudio_base_url"] is None
+    assert cfg["lmstudio_url"] is None
     assert cfg["lmstudio_api_key"] is None
 
 
