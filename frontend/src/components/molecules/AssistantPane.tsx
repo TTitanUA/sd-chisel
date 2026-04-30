@@ -35,7 +35,7 @@ export function AssistantPane({
 
   useEffect(() => {
     const el = scrollRef.current;
-    if (el) el.scrollTo({ top: el.scrollHeight });
+    if (el && typeof el.scrollTo === "function") el.scrollTo({ top: el.scrollHeight });
   }, [messages.length, streaming]);
 
   async function send() {
