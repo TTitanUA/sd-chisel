@@ -3,11 +3,7 @@ from __future__ import annotations
 
 import sqlite3
 import time
-from collections.abc import Iterable
-from typing import Any, Literal
-
-ROLE = Literal["vl", "prompt", "both"]
-_VALID_ROLES = {"vl", "prompt", "both"}
+from typing import Any
 
 
 def _now() -> int:
@@ -19,6 +15,15 @@ def _normalize_url(value: str | None) -> str | None:
         return None
     stripped = value.strip().rstrip("/")
     return stripped or None
+
+
+def _model_row(r: sqlite3.Row) -> dict[str, Any]:
+    d = dict(r)
+    d["enabled"] = bool(d["enabled"])
+    d["vision"] = bool(d["vision"])
+    d["tool_use"] = bool(d["tool_use"])
+    d["reasoning"] = bool(d["reasoning"])
+    return d
 
 
 # --- app_settings ---------------------------------------------------------
@@ -56,75 +61,65 @@ def set_lmstudio(
 
 def list_lm_models(conn: sqlite3.Connection) -> list[dict[str, Any]]:
     rows = conn.execute(
-        "SELECT name, role, enabled, last_seen FROM lm_models ORDER BY name"
+        "SELECT name, enabled, last_seen, vision, tool_use, reasoning "
+        "FROM lm_models ORDER BY name"
     ).fetchall()
-    out: list[dict[str, Any]] = []
-    for r in rows:
-        d = dict(r)
-        d["enabled"] = bool(d["enabled"])
-        out.append(d)
-    return out
+    return [_model_row(r) for r in rows]
 
 
 def get_lm_model(conn: sqlite3.Connection, name: str) -> dict[str, Any] | None:
     row = conn.execute(
-        "SELECT name, role, enabled, last_seen FROM lm_models WHERE name = ?",
+        "SELECT name, enabled, last_seen, vision, tool_use, reasoning "
+        "FROM lm_models WHERE name = ?",
         (name,),
     ).fetchone()
-    if row is None:
-        return None
-    d = dict(row)
-    d["enabled"] = bool(d["enabled"])
-    return d
+    return _model_row(row) if row is not None else None
 
 
 def upsert_lm_models(
     conn: sqlite3.Connection,
     *,
-    names: Iterable[str],
+    models: list[dict[str, Any]],
     seen_at: int | None = None,
 ) -> None:
-    """Add new models with defaults; refresh `last_seen` on existing rows.
-
-    Never clobbers user-set role / enabled flags. Models that are no longer
-    reported by LMStudio remain in the cache so the user can still see them
-    (with stale `last_seen`) — operationally less surprising than dropping
-    rows on every refresh.
-    """
     ts = seen_at if seen_at is not None else _now()
-    for name in names:
+    for m in models:
         conn.execute(
-            "INSERT INTO lm_models(name, role, enabled, last_seen) "
-            "VALUES (?, 'both', 1, ?) "
-            "ON CONFLICT(name) DO UPDATE SET last_seen = excluded.last_seen",
-            (name, ts),
+            "INSERT INTO lm_models(name, enabled, last_seen, vision, tool_use, reasoning) "
+            "VALUES (?, 1, ?, ?, ?, ?) "
+            "ON CONFLICT(name) DO UPDATE SET "
+            "last_seen = excluded.last_seen, "
+            "vision = excluded.vision, "
+            "tool_use = excluded.tool_use, "
+            "reasoning = excluded.reasoning",
+            (m["name"], ts, int(m["vision"]), int(m["tool_use"]), int(m["reasoning"])),
         )
 
 
-def update_lm_model(
+def patch_lm_model(
     conn: sqlite3.Connection,
     *,
     name: str,
-    role: ROLE | None = None,
+    vision: bool | None = None,
+    tool_use: bool | None = None,
+    reasoning: bool | None = None,
     enabled: bool | None = None,
 ) -> dict[str, Any] | None:
-    if role is not None and role not in _VALID_ROLES:
-        raise ValueError(f"invalid role: {role!r}")
-    if role is None and enabled is None:
-        return get_lm_model(conn, name)
-
     sets: list[str] = []
     params: list[Any] = []
-    if role is not None:
-        sets.append("role = ?")
-        params.append(role)
+    if vision is not None:
+        sets.append("vision = ?"); params.append(1 if vision else 0)
+    if tool_use is not None:
+        sets.append("tool_use = ?"); params.append(1 if tool_use else 0)
+    if reasoning is not None:
+        sets.append("reasoning = ?"); params.append(1 if reasoning else 0)
     if enabled is not None:
-        sets.append("enabled = ?")
-        params.append(1 if enabled else 0)
+        sets.append("enabled = ?"); params.append(1 if enabled else 0)
+    if not sets:
+        return get_lm_model(conn, name)
     params.append(name)
     cur = conn.execute(
-        f"UPDATE lm_models SET {', '.join(sets)} WHERE name = ?",
-        params,
+        f"UPDATE lm_models SET {', '.join(sets)} WHERE name = ?", params,
     )
     if cur.rowcount == 0:
         return None
