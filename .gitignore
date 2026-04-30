@@ -29,3 +29,6 @@ frontend/.tsbuild-node/
 *.swp
 .DS_Store
 Thumbs.db
+
+# claude
+.claude/settings.local.json

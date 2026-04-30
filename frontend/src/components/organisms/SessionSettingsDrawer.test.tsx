@@ -1,11 +1,12 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import { SessionSettingsDrawer } from "./SessionSettingsDrawer";
 import * as settingsApi from "@/api/settings";
 import * as libraryApi from "@/api/library";
-import type { Session } from "@/api/sessions";
+import { sessionsApi, type Session } from "@/api/sessions";
 
 const baseSession: Session = {
   id: "s1",
@@ -66,5 +67,31 @@ describe("SessionSettingsDrawer model pickers", () => {
     vi.spyOn(settingsApi, "useLmModelsByRole").mockReturnValue({ data: [] } as unknown as LmModelsByRoleResult);
     renderDrawer();
     expect(screen.getByRole("link", { name: /configure lmstudio/i })).toBeInTheDocument();
+  });
+});
+
+describe("SessionSettingsDrawer delete", () => {
+  beforeEach(() => {
+    vi.spyOn(libraryApi, "useLoras").mockReturnValue({ data: [] } as unknown as LorasResult);
+    vi.spyOn(libraryApi, "useModels").mockReturnValue({ data: [] } as unknown as ModelsResult);
+    vi.spyOn(settingsApi, "useLmModelsByRole").mockReturnValue({ data: [] } as unknown as LmModelsByRoleResult);
+  });
+  afterEach(() => vi.restoreAllMocks());
+
+  it("calls deleteSession when user confirms", async () => {
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+    const deleteSpy = vi.spyOn(sessionsApi, "deleteSession").mockResolvedValue(undefined);
+    renderDrawer();
+    await userEvent.click(screen.getByRole("button", { name: /delete session/i }));
+    expect(confirmSpy).toHaveBeenCalledTimes(1);
+    expect(deleteSpy).toHaveBeenCalledWith("s1");
+  });
+
+  it("does not call deleteSession when user cancels", async () => {
+    vi.spyOn(window, "confirm").mockReturnValue(false);
+    const deleteSpy = vi.spyOn(sessionsApi, "deleteSession").mockResolvedValue(undefined);
+    renderDrawer();
+    await userEvent.click(screen.getByRole("button", { name: /delete session/i }));
+    expect(deleteSpy).not.toHaveBeenCalled();
   });
 });

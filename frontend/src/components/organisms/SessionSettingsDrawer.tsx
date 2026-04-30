@@ -1,5 +1,5 @@
 import * as Dialog from "@radix-ui/react-dialog";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { Button } from "@/components/atoms/Button";
@@ -29,6 +29,7 @@ export function SessionSettingsDrawer({
   const vlChoices = useLmModelsByRole("vl");
   const promptChoices = useLmModelsByRole("prompt");
   const invalidate = useSessionInvalidation();
+  const navigate = useNavigate();
 
   const [name, setName] = useState(session.name ?? "");
   const [modelName, setModelName] = useState(session.model_name ?? "");
@@ -53,6 +54,22 @@ export function SessionSettingsDrawer({
       onOpenChange(false);
     },
   });
+
+  const deleteMutation = useMutation({
+    mutationFn: () => sessionsApi.deleteSession(session.id),
+    onSuccess: () => {
+      invalidate.projects();
+      onOpenChange(false);
+      navigate(`/projects/${session.project_id}`, { replace: true });
+    },
+  });
+
+  function onDeleteClick() {
+    const ok = window.confirm(
+      `Delete session "${session.name ?? "untitled"}"? This cannot be undone.`,
+    );
+    if (ok) deleteMutation.mutate();
+  }
 
   function togglePin(lora: Lora) {
     setPinned((current) =>
@@ -187,6 +204,19 @@ export function SessionSettingsDrawer({
                   <div style={{ padding: 12, color: "var(--text-subtle)" }}>No LoRAs match.</div>
                 )}
               </div>
+            </div>
+
+            <div className={styles.dangerZone}>
+              <Button
+                type="button"
+                variant="ghost"
+                className={styles.dangerBtn}
+                icon={<Icon name="Trash2" size={12} />}
+                onClick={onDeleteClick}
+                disabled={deleteMutation.isPending}
+              >
+                {deleteMutation.isPending ? "Deleting…" : "Delete session"}
+              </Button>
             </div>
           </div>
           <div className={styles.foot}>
