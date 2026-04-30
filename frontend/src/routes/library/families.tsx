@@ -12,6 +12,7 @@ import {
 import { FamilyForm } from "@/components/organisms/FamilyForm";
 import { LibraryCrud, type CrudMode } from "@/components/organisms/LibraryCrud";
 import { LibraryDetailBlock, LibraryDetailMeta } from "@/components/molecules/LibraryV2Detail";
+import { MarkdownView } from "@/components/molecules/MarkdownField";
 import detailStyles from "@/components/molecules/LibraryV2Detail.module.css";
 import { formatUpdated } from "@/lib/formatUpdated";
 import listStyles from "@/components/organisms/LibraryCrud.module.css";
@@ -168,7 +169,9 @@ export default function FamiliesRoute() {
             ]}
           />
           <LibraryDetailBlock label="Prompt guide" isLast>
-            <p className={detailStyles.desc}>{selected.prompt_guide}</p>
+            {selected.prompt_guide
+              ? <MarkdownView value={selected.prompt_guide} />
+              : <p className={detailStyles.desc}>—</p>}
           </LibraryDetailBlock>
         </>
       )}

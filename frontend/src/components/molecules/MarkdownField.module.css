@@ -54,3 +54,14 @@
   padding: 12px 14px;
   -webkit-text-fill-color: var(--text);
 }
+
+.preview :global(.wmde-markdown) {
+  background: var(--bg-raised);
+  color: var(--text);
+  border: var(--stroke-thin) solid var(--border);
+  border-radius: var(--r-sm, 6px);
+  padding: 14px 18px;
+  font-family: var(--font-ui);
+  font-size: 13.5px;
+  line-height: 1.65;
+}

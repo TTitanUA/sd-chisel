@@ -2,6 +2,14 @@ import MDEditor, { commands } from "@uiw/react-md-editor";
 import { FormField } from "./FormField";
 import styles from "./MarkdownField.module.css";
 
+export function MarkdownView({ value }: { value: string }) {
+  return (
+    <div className={styles.preview} data-color-mode="light">
+      <MDEditor.Markdown source={value} />
+    </div>
+  );
+}
+
 const TOOLBAR = [
   commands.bold,
   commands.italic,
