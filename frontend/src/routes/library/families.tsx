@@ -168,11 +168,29 @@ export default function FamiliesRoute() {
               },
             ]}
           />
-          <LibraryDetailBlock label="Prompt guide" isLast>
-            {selected.prompt_guide
-              ? <MarkdownView value={selected.prompt_guide} />
-              : <p className={detailStyles.desc}>—</p>}
-          </LibraryDetailBlock>
+          {(() => {
+            const i2iFilled = selected.prompt_i2i.trim() !== "";
+            const t2iFilled = selected.prompt_t2i.trim() !== "";
+            return (
+              <>
+                <LibraryDetailBlock label="Prompt guide (base)" isLast={!i2iFilled && !t2iFilled}>
+                  {selected.prompt_guide
+                    ? <MarkdownView value={selected.prompt_guide} />
+                    : <p className={detailStyles.desc}>—</p>}
+                </LibraryDetailBlock>
+                {i2iFilled && (
+                  <LibraryDetailBlock label="Image-to-image additions" isLast={!t2iFilled}>
+                    <MarkdownView value={selected.prompt_i2i} />
+                  </LibraryDetailBlock>
+                )}
+                {t2iFilled && (
+                  <LibraryDetailBlock label="Text-to-image additions" isLast>
+                    <MarkdownView value={selected.prompt_t2i} />
+                  </LibraryDetailBlock>
+                )}
+              </>
+            );
+          })()}
         </>
       )}
     </LibraryCrud>

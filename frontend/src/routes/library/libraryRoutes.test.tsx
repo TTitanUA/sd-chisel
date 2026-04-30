@@ -29,7 +29,7 @@ function json(data: unknown) {
 describe("library routes", () => {
   it("renders families from the API", async () => {
     vi.stubGlobal("fetch", vi.fn(() => json([
-      { id: "sdxl", display_name: "SDXL", prompt_guide: "Guide", created_at: 1, updated_at: 1 },
+      { id: "sdxl", display_name: "SDXL", prompt_guide: "Guide", prompt_i2i: "", prompt_t2i: "", created_at: 1, updated_at: 1 },
     ])));
 
     renderRoute(<FamiliesRoute />);
@@ -42,7 +42,7 @@ describe("library routes", () => {
   it("renders models from the API", async () => {
     vi.stubGlobal("fetch", vi.fn((url: string) => {
       if (url.includes("/families")) {
-        return json([{ id: "sdxl", display_name: "SDXL", prompt_guide: "Guide", created_at: 1, updated_at: 1 }]);
+        return json([{ id: "sdxl", display_name: "SDXL", prompt_guide: "Guide", prompt_i2i: "", prompt_t2i: "", created_at: 1, updated_at: 1 }]);
       }
       return json([
         {
@@ -69,7 +69,7 @@ describe("library routes", () => {
   it("renders loras from the API", async () => {
     vi.stubGlobal("fetch", vi.fn((url: string) => {
       if (url.includes("/families")) {
-        return json([{ id: "sdxl", display_name: "SDXL", prompt_guide: "Guide", created_at: 1, updated_at: 1 }]);
+        return json([{ id: "sdxl", display_name: "SDXL", prompt_guide: "Guide", prompt_i2i: "", prompt_t2i: "", created_at: 1, updated_at: 1 }]);
       }
       return json([
         {
@@ -101,8 +101,8 @@ describe("library routes", () => {
     vi.stubGlobal("fetch", vi.fn((url: string) => {
       if (url.includes("/families")) {
         return json([
-          { id: "sdxl", display_name: "SDXL", prompt_guide: "A", created_at: 1, updated_at: 1 },
-          { id: "sd1", display_name: "SD1", prompt_guide: "B", created_at: 1, updated_at: 1 },
+          { id: "sdxl", display_name: "SDXL", prompt_guide: "A", prompt_i2i: "", prompt_t2i: "", created_at: 1, updated_at: 1 },
+          { id: "sd1", display_name: "SD1", prompt_guide: "B", prompt_i2i: "", prompt_t2i: "", created_at: 1, updated_at: 1 },
         ]);
       }
       return json([
@@ -167,7 +167,7 @@ describe("library routes", () => {
   it("renders an Indexed badge in the LoRA detail meta", async () => {
     vi.stubGlobal("fetch", vi.fn((url: string) => {
       if (url.includes("/families")) {
-        return json([{ id: "sdxl", display_name: "SDXL", prompt_guide: "", created_at: 0, updated_at: 0 }]);
+        return json([{ id: "sdxl", display_name: "SDXL", prompt_guide: "", prompt_i2i: "", prompt_t2i: "", created_at: 0, updated_at: 0 }]);
       }
       return json([
         {
