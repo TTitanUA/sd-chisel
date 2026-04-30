@@ -96,3 +96,13 @@ class LoraUpdate(StrictModel):
     author: str | None = None
     version: str | None = None
     source_url: HttpUrl | None = None
+
+
+class AssistMessage(StrictModel):
+    role: str = Field(pattern=r"^(user|assistant)$")
+    content: str = Field(min_length=1)
+
+
+class AssistRequest(StrictModel):
+    model: str = Field(min_length=1)
+    messages: list[AssistMessage] = Field(min_length=1)

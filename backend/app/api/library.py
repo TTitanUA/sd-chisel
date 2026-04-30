@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
+from starlette.responses import StreamingResponse
 
 from app.api.deps import get_conn
 from app.models.library import (
+    AssistRequest,
     FamilyCreate,
     FamilyOut,
     FamilyUpdate,
@@ -17,8 +20,8 @@ from app.models.library import (
     ModelOut,
     ModelUpdate,
 )
-from app.services import embedder, library_service
-from app.storage import library_repo
+from app.services import embedder, library_service, lmstudio_client
+from app.storage import library_repo, settings_repo
 
 Conn = Annotated[sqlite3.Connection, Depends(get_conn)]
 
@@ -60,6 +63,99 @@ def create_family(body: FamilyCreate, conn: Conn):
         return library_repo.create_family(conn, **body.model_dump())
     except sqlite3.IntegrityError as exc:
         raise _conflict(exc) from exc
+
+
+ASSIST_SYSTEM_PROMPT = (
+    "You are a prompt-guide writing assistant for generative image model families. "
+    "Help the user write a prompt guide — a set of rules that the LLM will follow "
+    "when generating prompts for this family in both text-to-image (t2i) and "
+    "image-to-image (i2i) workflows.\n\n"
+    "You have a tool `update_prompt_guide` — call it whenever you have a draft or "
+    "update of the prompt guide. The user will see the result in real-time in the editor.\n\n"
+    "When the user provides documentation links, read them using your MCP tools and "
+    "extract relevant information about the model's prompting style, supported tags, "
+    "quality tokens, and any family-specific syntax.\n\n"
+    "Keep the prompt guide concise and actionable. Focus on:\n"
+    "- Tag syntax and formatting rules\n"
+    "- Quality/style tokens specific to this family\n"
+    "- Token limits or recommendations\n"
+    "- LoRA interaction patterns\n"
+    "- Negative prompt conventions\n"
+    "- Any differences between t2i and i2i prompting for this family"
+)
+
+ASSIST_TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "update_prompt_guide",
+            "description": "Update the prompt guide content in the editor. Call this whenever you have a new or revised version of the prompt guide.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "content": {
+                        "type": "string",
+                        "description": "The full prompt guide markdown content",
+                    },
+                },
+                "required": ["content"],
+            },
+        },
+    },
+]
+
+
+def _assist_sse(payload: dict) -> bytes:
+    return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n".encode()
+
+
+@router.post("/families/assist")
+def assist(body: AssistRequest, conn: Conn) -> StreamingResponse:
+    cfg = settings_repo.get_lmstudio(conn)
+    if not cfg["lmstudio_url"]:
+        raise HTTPException(status_code=409, detail="LMStudio base_url is not configured")
+
+    row = settings_repo.get_lm_model(conn, body.model)
+    if row is None or not row["enabled"]:
+        raise HTTPException(status_code=409, detail=f"model {body.model!r} is not enabled")
+    if not row["tool_use"]:
+        raise HTTPException(status_code=409, detail=f"model {body.model!r} does not support tool use")
+
+    endpoint = {
+        "server_root": cfg["lmstudio_url"],
+        "api_key": cfg["lmstudio_api_key"],
+    }
+    payload_messages: list[dict] = [{"role": "system", "content": ASSIST_SYSTEM_PROMPT}]
+    for m in body.messages:
+        payload_messages.append({"role": m.role, "content": m.content})
+
+    def gen():
+        try:
+            for event in lmstudio_client.chat_stream_with_tools(
+                endpoint=endpoint,
+                model=body.model,
+                messages=payload_messages,
+                tools=ASSIST_TOOLS,
+            ):
+                if event["type"] == "delta":
+                    yield _assist_sse({"type": "delta", "content": event["content"]})
+                elif event["type"] == "tool_call" and event["name"] == "update_prompt_guide":
+                    content = event["arguments"].get("content", "")
+                    yield _assist_sse({"type": "artifact", "content": content})
+        except lmstudio_client.LmError as exc:
+            yield _assist_sse({"type": "error", "detail": str(exc)})
+            return
+        yield _assist_sse({"type": "done"})
+
+    return StreamingResponse(
+        gen(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        },
+    )
 
 
 @router.put("/families/{family_id}", response_model=FamilyOut)

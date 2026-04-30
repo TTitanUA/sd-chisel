@@ -223,3 +223,71 @@ def test_lora_create_rejects_is_indexed_in_body(client):
     payload["is_indexed"] = True
     resp = client.post("/api/library/loras", json=payload)
     assert resp.status_code == 422
+
+
+import json
+
+from app.services import lmstudio_client
+
+
+def test_assist_streams_text_and_artifact(client, conn):
+    from app.storage import settings_repo
+    settings_repo.set_lmstudio(conn, url="http://localhost:1234", api_key=None)
+    settings_repo.upsert_lm_models(conn, models=[
+        {"name": "tool-model", "vision": False, "tool_use": True, "reasoning": False},
+    ])
+
+    fake_events = [
+        {"type": "delta", "content": "I'll write a guide."},
+        {"type": "tool_call", "name": "update_prompt_guide", "arguments": {"content": "# Guide\nUse tags."}},
+    ]
+
+    def fake_stream(**kwargs):
+        return iter(fake_events)
+
+    original = lmstudio_client.chat_stream_with_tools
+    lmstudio_client.chat_stream_with_tools = fake_stream
+    try:
+        resp = client.post(
+            "/api/library/families/assist",
+            json={
+                "model": "tool-model",
+                "messages": [{"role": "user", "content": "help me write a guide"}],
+            },
+        )
+        assert resp.status_code == 200
+        assert "text/event-stream" in resp.headers["content-type"]
+
+        events = []
+        for line in resp.text.strip().split("\n\n"):
+            for part in line.split("\n"):
+                if part.startswith("data:"):
+                    events.append(json.loads(part[len("data:"):].strip()))
+
+        types = [e["type"] for e in events]
+        assert "delta" in types
+        assert "artifact" in types
+        assert "done" in types
+
+        artifact = next(e for e in events if e["type"] == "artifact")
+        assert artifact["content"] == "# Guide\nUse tags."
+    finally:
+        lmstudio_client.chat_stream_with_tools = original
+
+
+def test_assist_rejects_model_without_tool_use(client, conn):
+    from app.storage import settings_repo
+    settings_repo.set_lmstudio(conn, url="http://localhost:1234", api_key=None)
+    settings_repo.upsert_lm_models(conn, models=[
+        {"name": "no-tools", "vision": False, "tool_use": False, "reasoning": False},
+    ])
+
+    resp = client.post(
+        "/api/library/families/assist",
+        json={
+            "model": "no-tools",
+            "messages": [{"role": "user", "content": "help"}],
+        },
+    )
+    assert resp.status_code == 409
+    assert "tool use" in resp.json()["detail"]
