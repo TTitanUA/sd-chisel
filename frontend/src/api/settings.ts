@@ -1,8 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "./client";
 
-export type LmRole = "vl" | "prompt" | "both";
-
 export type LmStudioConfig = {
   base_url: string | null;
   api_key: string | null;
@@ -12,7 +10,9 @@ export type LmStudioConfig = {
 
 export type LmModel = {
   name: string;
-  role: LmRole;
+  vision: boolean;
+  tool_use: boolean;
+  reasoning: boolean;
   enabled: boolean;
   last_seen: number;
 };
@@ -37,11 +37,11 @@ export const settingsApi = {
     apiFetch<{ models: LmModel[] }>("/api/settings/lmstudio/models"),
   patchModel: (
     name: string,
-    body: { role?: LmRole; enabled?: boolean },
+    patch: { vision?: boolean; tool_use?: boolean; reasoning?: boolean; enabled?: boolean },
   ) =>
     apiFetch<LmModel>(`/api/settings/lmstudio/models/${encodeURIComponent(name)}`, {
       method: "PATCH",
-      body: JSON.stringify(body),
+      body: JSON.stringify(patch),
     }),
 };
 
@@ -57,16 +57,6 @@ export function useLmModels() {
     queryKey: settingsKeys.lmModels(),
     queryFn: () => settingsApi.listModels().then((r) => r.models),
   });
-}
-
-export function useLmModelsByRole(role: "vl" | "prompt") {
-  const all = useLmModels();
-  return {
-    ...all,
-    data: (all.data ?? []).filter(
-      (m) => m.enabled && (m.role === role || m.role === "both"),
-    ),
-  };
 }
 
 export function useSettingsInvalidation() {
@@ -93,4 +83,20 @@ export function useRefreshLmStudio() {
       invalidate.config();
     },
   });
+}
+
+export function useLmModelsForVision() {
+  const all = useLmModels();
+  return {
+    ...all,
+    data: (all.data ?? []).filter((m) => m.enabled && m.vision),
+  };
+}
+
+export function useLmModelsForChat() {
+  const all = useLmModels();
+  return {
+    ...all,
+    data: (all.data ?? []).filter((m) => m.enabled),
+  };
 }

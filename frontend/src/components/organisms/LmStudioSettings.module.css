@@ -43,7 +43,7 @@
 
 .modelTable {
   display: grid;
-  grid-template-columns: 1fr 130px 90px 110px;
+  grid-template-columns: 1fr 220px 90px 110px;
   gap: 0;
   border: 1px solid var(--border);
   border-radius: var(--r-sm);
@@ -91,7 +91,18 @@
   color: var(--accent);
 }
 
-.modelRoleSelect {
-  width: 100%;
-  font-size: var(--text-sm);
+.capabilities {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.capLabel {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  cursor: pointer;
+  white-space: nowrap;
 }

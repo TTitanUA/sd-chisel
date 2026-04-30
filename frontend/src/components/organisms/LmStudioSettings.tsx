@@ -9,12 +9,10 @@ import {
   useLmStudioConfig,
   useRefreshLmStudio,
   useSettingsInvalidation,
-  type LmRole,
 } from "@/api/settings";
 import styles from "./LmStudioSettings.module.css";
 
-const ROLES: LmRole[] = ["vl", "prompt", "both"];
-const LM_STUDIO_DEFAULT_URL = "http://localhost:1234/v1";
+const LM_STUDIO_DEFAULT_URL = "http://localhost:1234";
 
 export function LmStudioSettings() {
   const cfg = useLmStudioConfig();
@@ -42,9 +40,11 @@ export function LmStudioSettings() {
   });
 
   const patch = useMutation({
-    mutationFn: (args: { name: string; role?: LmRole; enabled?: boolean }) =>
+    mutationFn: (args: { name: string; vision?: boolean; tool_use?: boolean; reasoning?: boolean; enabled?: boolean }) =>
       settingsApi.patchModel(args.name, {
-        ...(args.role !== undefined ? { role: args.role } : {}),
+        ...(args.vision !== undefined ? { vision: args.vision } : {}),
+        ...(args.tool_use !== undefined ? { tool_use: args.tool_use } : {}),
+        ...(args.reasoning !== undefined ? { reasoning: args.reasoning } : {}),
         ...(args.enabled !== undefined ? { enabled: args.enabled } : {}),
       }),
     onSuccess: () => invalidate.models(),
@@ -65,7 +65,7 @@ export function LmStudioSettings() {
         <div className={styles.urlField}>
           <TextInput
             label="Base URL"
-            placeholder="http://localhost:1234/v1"
+            placeholder="http://localhost:1234"
             value={baseUrl}
             onChange={(e) => setBaseUrl(e.currentTarget.value)}
           />
@@ -127,26 +127,25 @@ export function LmStudioSettings() {
         {(models.data ?? []).length > 0 && (
           <div className={styles.modelTable} role="table">
             <div className={styles.headCell}>Model</div>
-            <div className={styles.headCell}>Role</div>
+            <div className={styles.headCell}>Capabilities</div>
             <div className={styles.headCell}>Enabled</div>
             <div className={styles.headCell}>Last seen</div>
             {(models.data ?? []).map((m) => (
               <Row key={m.name}>
                 <div title={m.name}>{m.name}</div>
-                <div>
-                  <select
-                    className={styles.modelRoleSelect}
-                    value={m.role}
-                    onChange={(e) =>
-                      patch.mutate({ name: m.name, role: e.currentTarget.value as LmRole })
-                    }
-                  >
-                    {ROLES.map((r) => (
-                      <option key={r} value={r}>
-                        {r}
-                      </option>
-                    ))}
-                  </select>
+                <div className={styles.capabilities}>
+                  {(["vision", "tool_use", "reasoning"] as const).map((cap) => (
+                    <label key={cap} className={styles.capLabel}>
+                      <input
+                        type="checkbox"
+                        checked={m[cap]}
+                        onChange={(e) =>
+                          patch.mutate({ name: m.name, [cap]: e.currentTarget.checked })
+                        }
+                      />
+                      {cap === "tool_use" ? "tools" : cap}
+                    </label>
+                  ))}
                 </div>
                 <div>
                   <input

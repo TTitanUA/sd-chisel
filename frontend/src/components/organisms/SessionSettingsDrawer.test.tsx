@@ -37,7 +37,7 @@ function renderDrawer() {
 
 type LorasResult = ReturnType<typeof libraryApi.useLoras>;
 type ModelsResult = ReturnType<typeof libraryApi.useModels>;
-type LmModelsByRoleResult = ReturnType<typeof settingsApi.useLmModelsByRole>;
+type LmModelsResult = ReturnType<typeof settingsApi.useLmModelsForVision>;
 
 describe("SessionSettingsDrawer model pickers", () => {
   beforeEach(() => {
@@ -46,14 +46,21 @@ describe("SessionSettingsDrawer model pickers", () => {
   });
   afterEach(() => vi.restoreAllMocks());
 
-  it("VL select offers vl + both, hides prompt-only", () => {
-    vi.spyOn(settingsApi, "useLmModelsByRole").mockImplementation((role) =>
-      ({
-        data: role === "vl"
-          ? [{ name: "qwen-vl", role: "vl", enabled: true, last_seen: 0 },
-             { name: "any-model", role: "both", enabled: true, last_seen: 0 }]
-          : [{ name: "any-model", role: "both", enabled: true, last_seen: 0 }],
-      } as unknown as LmModelsByRoleResult),
+  it("VL select offers vision-capable models, chat select offers all enabled", () => {
+    vi.spyOn(settingsApi, "useLmModelsForVision").mockReturnValue(
+      {
+        data: [
+          { name: "qwen-vl", vision: true, tool_use: false, reasoning: false, enabled: true, last_seen: 0 },
+          { name: "any-model", vision: true, tool_use: false, reasoning: false, enabled: true, last_seen: 0 },
+        ],
+      } as unknown as LmModelsResult,
+    );
+    vi.spyOn(settingsApi, "useLmModelsForChat").mockReturnValue(
+      {
+        data: [
+          { name: "any-model", vision: true, tool_use: false, reasoning: false, enabled: true, last_seen: 0 },
+        ],
+      } as unknown as LmModelsResult,
     );
     renderDrawer();
     const vlSelect = screen.getByLabelText(/vl model/i) as HTMLSelectElement;
@@ -64,7 +71,8 @@ describe("SessionSettingsDrawer model pickers", () => {
   });
 
   it("shows 'Configure LMStudio' link when no models cached", () => {
-    vi.spyOn(settingsApi, "useLmModelsByRole").mockReturnValue({ data: [] } as unknown as LmModelsByRoleResult);
+    vi.spyOn(settingsApi, "useLmModelsForVision").mockReturnValue({ data: [] } as unknown as LmModelsResult);
+    vi.spyOn(settingsApi, "useLmModelsForChat").mockReturnValue({ data: [] } as unknown as LmModelsResult);
     renderDrawer();
     expect(screen.getByRole("link", { name: /configure lmstudio/i })).toBeInTheDocument();
   });
@@ -74,7 +82,8 @@ describe("SessionSettingsDrawer delete", () => {
   beforeEach(() => {
     vi.spyOn(libraryApi, "useLoras").mockReturnValue({ data: [] } as unknown as LorasResult);
     vi.spyOn(libraryApi, "useModels").mockReturnValue({ data: [] } as unknown as ModelsResult);
-    vi.spyOn(settingsApi, "useLmModelsByRole").mockReturnValue({ data: [] } as unknown as LmModelsByRoleResult);
+    vi.spyOn(settingsApi, "useLmModelsForVision").mockReturnValue({ data: [] } as unknown as LmModelsResult);
+    vi.spyOn(settingsApi, "useLmModelsForChat").mockReturnValue({ data: [] } as unknown as LmModelsResult);
   });
   afterEach(() => vi.restoreAllMocks());
 

@@ -12,7 +12,7 @@ import {
   type PinnedLora,
   type Session,
 } from "@/api/sessions";
-import { useLmModelsByRole } from "@/api/settings";
+import { useLmModelsForVision, useLmModelsForChat } from "@/api/settings";
 import styles from "./SessionSettingsDrawer.module.css";
 
 export function SessionSettingsDrawer({
@@ -26,8 +26,8 @@ export function SessionSettingsDrawer({
 }) {
   const models = useModels();
   const loras = useLoras();
-  const vlChoices = useLmModelsByRole("vl");
-  const promptChoices = useLmModelsByRole("prompt");
+  const vlChoices = useLmModelsForVision();
+  const promptChoices = useLmModelsForChat();
   const invalidate = useSessionInvalidation();
   const navigate = useNavigate();
 
