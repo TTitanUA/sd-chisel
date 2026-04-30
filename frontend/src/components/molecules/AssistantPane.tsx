@@ -1,0 +1,194 @@
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Button } from "@/components/atoms/Button";
+import { Icon } from "@/components/atoms/Icon";
+import { streamAssist, type AssistantMessage } from "@/api/assist";
+import { useLmModels } from "@/api/settings";
+import styles from "./AssistantPane.module.css";
+
+const isMac = typeof navigator !== "undefined" && /Mac|iPhone|iPod|iPad/i.test(navigator.platform);
+const SEND_HINT = isMac ? "⌘↵ to send" : "Ctrl↵ to send";
+
+export function AssistantPane({
+  onArtifact,
+}: {
+  onArtifact: (content: string) => void;
+}) {
+  const allModels = useLmModels();
+  const toolModels = useMemo(
+    () => (allModels.data ?? []).filter((m) => m.enabled && m.tool_use),
+    [allModels.data],
+  );
+
+  const [model, setModel] = useState("");
+  const [messages, setMessages] = useState<AssistantMessage[]>([]);
+  const [draft, setDraft] = useState("");
+  const [pending, setPending] = useState(false);
+  const [streaming, setStreaming] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!model && toolModels.length > 0) {
+      setModel(toolModels[0].name);
+    }
+  }, [model, toolModels]);
+
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (el) el.scrollTo({ top: el.scrollHeight });
+  }, [messages.length, streaming]);
+
+  async function send() {
+    const content = draft.trim();
+    if (!content || pending || !model) return;
+
+    const userMsg: AssistantMessage = { role: "user", content };
+    const updated = [...messages, userMsg];
+    setMessages(updated);
+    setDraft("");
+    setStreaming("");
+    setError(null);
+    setPending(true);
+
+    let assistantText = "";
+    try {
+      await streamAssist(model, updated, {
+        onDelta: (chunk) => {
+          assistantText += chunk;
+          setStreaming(assistantText);
+        },
+        onArtifact: (artifactContent) => {
+          onArtifact(artifactContent);
+        },
+        onDone: () => {},
+        onError: (detail) => setError(detail),
+      });
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      if (assistantText) {
+        setMessages((prev) => [...prev, { role: "assistant", content: assistantText }]);
+      }
+      setPending(false);
+      setStreaming("");
+    }
+  }
+
+  function onKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+      e.preventDefault();
+      void send();
+    }
+  }
+
+  const showThinking = pending && streaming.length === 0;
+  const showStreaming = pending && streaming.length > 0;
+
+  return (
+    <div className={styles.pane}>
+      <div className={styles.head}>
+        <span className={styles.title}>Assistant</span>
+        <div className={styles.spacer} />
+        <select
+          className={styles.modelSelect}
+          value={model}
+          onChange={(e) => setModel(e.target.value)}
+          disabled={pending}
+        >
+          {toolModels.length === 0 && <option value="">No tool_use models</option>}
+          {toolModels.map((m) => (
+            <option key={m.name} value={m.name}>{m.name}</option>
+          ))}
+        </select>
+      </div>
+      <div className={styles.body}>
+        <div className={styles.scroll} ref={scrollRef}>
+          {messages.length === 0 && !showThinking && !showStreaming && (
+            <div className={styles.empty}>
+              Paste documentation or describe the model family to get started.
+            </div>
+          )}
+          {messages.map((m, i) => (
+            <Bubble key={i} role={m.role} content={m.content} />
+          ))}
+          {showStreaming && <Bubble role="assistant" content={streaming} streaming />}
+          {showThinking && <ThinkingBubble />}
+        </div>
+        {error && <div className={styles.error} role="alert">{error}</div>}
+        <div className={styles.composer}>
+          <textarea
+            className={styles.textarea}
+            placeholder="Describe the family or paste docs…"
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={onKeyDown}
+            disabled={pending}
+          />
+          <div className={styles.composerRow}>
+            <span className={styles.hint}>{SEND_HINT}</span>
+            <div className={styles.spacer} />
+            <Button
+              size="sm"
+              variant="primary"
+              icon={<Icon name="Send" size={12} />}
+              onClick={() => void send()}
+              disabled={pending || draft.trim().length === 0 || !model}
+            >
+              {pending ? "Sending…" : "Send"}
+            </Button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Bubble({
+  role,
+  content,
+  streaming = false,
+}: {
+  role: "user" | "assistant";
+  content: string;
+  streaming?: boolean;
+}) {
+  const variantClass = role === "user" ? "ds-chat-user" : "ds-chat-assistant";
+  return (
+    <div className={`ds-chat ${variantClass}`}>
+      {role !== "user" && (
+        <div className="ds-chat-avatar" aria-hidden="true">
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+            <path d="M3 11L7 3L11 11L7 8.5L3 11Z" fill="currentColor" />
+          </svg>
+        </div>
+      )}
+      <div className="ds-chat-body">
+        <div className="ds-chat-meta">
+          {role === "user" ? "You" : "Assistant"}
+        </div>
+        <div className={styles.msgContent}>
+          {content}
+          {streaming && <span className="ds-chat-cursor" />}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ThinkingBubble() {
+  return (
+    <div className="ds-chat ds-chat-assistant">
+      <div className="ds-chat-avatar" aria-hidden="true">
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+          <path d="M3 11L7 3L11 11L7 8.5L3 11Z" fill="currentColor" />
+        </svg>
+      </div>
+      <div className="ds-chat-body">
+        <div className="ds-chat-meta">Assistant · thinking</div>
+        <div className={styles.typing}>
+          <span /><span /><span />
+        </div>
+      </div>
+    </div>
+  );
+}
