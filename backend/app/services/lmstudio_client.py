@@ -1,15 +1,16 @@
-"""Thin OpenAI-compatible client for an LMStudio-style server.
+"""Unified LMStudio client.
 
-We deliberately stay on raw httpx instead of pulling the openai SDK — slice 3
-needs only two methods, and slice 4 (chat) will make its own decision on SSE.
+Handles both OpenAI-compat endpoints ({server_root}/v1/...) and
+LMStudio-native system endpoints ({server_root}/api/v1/...).
 
-`endpoint` shape used everywhere here: ``{"base_url": str, "api_key": str|None}``.
+`endpoint` shape: {"server_root": str, "api_key": str | None}
 """
 from __future__ import annotations
 
 import base64
 import json
 from collections.abc import Iterator
+from dataclasses import dataclass
 from typing import Any, Literal
 
 import httpx
@@ -26,10 +27,15 @@ VL_SYSTEM_PROMPT = (
 )
 
 
-class LmError(Exception):
-    """Failure raised by lm_client. `slots=True` is intentionally NOT used —
-    combining it with `Exception` triggers a layout conflict on CPython."""
+@dataclass
+class LmsModel:
+    name: str
+    vision: bool
+    tool_use: bool
+    reasoning: bool
 
+
+class LmError(Exception):
     def __init__(self, kind: Literal["upstream", "timeout", "shape", "config"], detail: str) -> None:
         super().__init__(f"LmError({kind}): {detail}")
         self.kind = kind
@@ -37,14 +43,14 @@ class LmError(Exception):
 
 
 def _resolve(endpoint: dict[str, Any]) -> tuple[str, dict[str, str]]:
-    base_url = str(endpoint.get("base_url") or "").strip().rstrip("/")
-    if not base_url:
-        raise LmError("config", "lmstudio base_url is not configured")
+    server_root = str(endpoint.get("server_root") or "").strip().rstrip("/")
+    if not server_root:
+        raise LmError("config", "lmstudio server URL is not configured")
     headers = {"Content-Type": "application/json"}
     api_key = endpoint.get("api_key") or None
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
-    return base_url, headers
+    return server_root, headers
 
 
 def _request(
@@ -65,25 +71,62 @@ def _request(
         raise LmError("upstream", str(exc)) from exc
 
 
+# ---------------------------------------------------------------------------
+# System methods (LMStudio-native /api/v1/...)
+# ---------------------------------------------------------------------------
+
 def list_models(
     *,
     endpoint: dict[str, Any],
     transport: httpx.BaseTransport | None = None,
-) -> list[str]:
-    base_url, headers = _resolve(endpoint)
+) -> list[LmsModel]:
+    server_root, headers = _resolve(endpoint)
     resp = _request(
-        "GET", f"{base_url}/models",
+        "GET", f"{server_root}/api/v1/models",
         headers=headers, json=None, transport=transport, timeout=LIST_TIMEOUT,
     )
     if resp.status_code >= 400:
         raise LmError("upstream", f"{resp.status_code}: {resp.text[:200]}")
     try:
         body = resp.json()
-        names = sorted(item["id"] for item in body["data"])
+        items = body["data"]
     except (ValueError, KeyError, TypeError) as exc:
-        raise LmError("shape", f"unexpected /models body: {exc}") from exc
-    return names
+        raise LmError("shape", f"unexpected /api/v1/models body: {exc}") from exc
 
+    models: list[LmsModel] = []
+    for item in items:
+        if item.get("type") != "llm":
+            continue
+        caps = item.get("capabilities") or {}
+        reasoning_obj = caps.get("reasoning") or {}
+        models.append(LmsModel(
+            name=item["id"],
+            vision=bool(caps.get("vision", False)),
+            tool_use=bool(caps.get("trained_for_tool_use", False)),
+            reasoning=bool(reasoning_obj.get("allowed_options")),
+        ))
+    return sorted(models, key=lambda m: m.name)
+
+
+def unload_model(
+    *,
+    endpoint: dict[str, Any],
+    instance_id: str,
+    transport: httpx.BaseTransport | None = None,
+) -> None:
+    server_root, headers = _resolve(endpoint)
+    resp = _request(
+        "POST", f"{server_root}/api/v1/models/unload",
+        headers=headers, json={"instance_id": instance_id},
+        transport=transport, timeout=DEFAULT_TIMEOUT,
+    )
+    if resp.status_code >= 400:
+        raise LmError("upstream", f"{resp.status_code}: {resp.text[:200]}")
+
+
+# ---------------------------------------------------------------------------
+# OpenAI-compat methods ({server_root}/v1/...)
+# ---------------------------------------------------------------------------
 
 def analyze_image(
     *,
@@ -95,8 +138,7 @@ def analyze_image(
 ) -> str:
     if not model.strip():
         raise LmError("config", "model is required")
-
-    base_url, headers = _resolve(endpoint)
+    server_root, headers = _resolve(endpoint)
     b64 = base64.b64encode(image_bytes).decode("ascii")
     payload = {
         "model": model,
@@ -113,7 +155,7 @@ def analyze_image(
         "stream": False,
     }
     resp = _request(
-        "POST", f"{base_url}/chat/completions",
+        "POST", f"{server_root}/v1/chat/completions",
         headers=headers, json=payload, transport=transport, timeout=DEFAULT_TIMEOUT,
     )
     if resp.status_code >= 400:
@@ -135,25 +177,16 @@ def chat_stream(
     messages: list[dict[str, Any]],
     transport: httpx.BaseTransport | None = None,
 ) -> Iterator[str]:
-    """Yield assistant content chunks from an OpenAI-compatible streaming chat.
-
-    Connects to ``{base_url}/chat/completions`` with ``stream=true``, parses
-    Server-Sent Events line by line, and yields the ``choices[0].delta.content``
-    string of each chunk that has one. The terminal ``data: [DONE]`` line ends
-    iteration. Lines that aren't JSON or that have no content delta are
-    skipped silently — LMStudio occasionally emits role-only or
-    finish_reason-only chunks at the boundaries.
-    """
     if not model.strip():
         raise LmError("config", "model is required")
     if not messages:
         raise LmError("config", "messages must not be empty")
-    base_url, headers = _resolve(endpoint)
+    server_root, headers = _resolve(endpoint)
     payload = {"model": model, "messages": messages, "stream": True}
     try:
         with httpx.Client(transport=transport, timeout=CHAT_TIMEOUT) as client:
             with client.stream(
-                "POST", f"{base_url}/chat/completions",
+                "POST", f"{server_root}/v1/chat/completions",
                 headers=headers, json=payload,
             ) as resp:
                 if resp.status_code >= 400:
@@ -190,23 +223,16 @@ def chat_complete(
     response_format: dict[str, Any] | None = None,
     transport: httpx.BaseTransport | None = None,
 ) -> str:
-    """Non-streaming OpenAI-compat chat. Returns the assistant content as a string.
-
-    `response_format` is forwarded as-is when provided (e.g. ``{"type":
-    "json_object"}``). LMStudio supports json_object on most prompt-tuned
-    models; json_schema support is patchy, so callers should validate the
-    parsed JSON themselves.
-    """
     if not model.strip():
         raise LmError("config", "model is required")
     if not messages:
         raise LmError("config", "messages must not be empty")
-    base_url, headers = _resolve(endpoint)
+    server_root, headers = _resolve(endpoint)
     payload: dict[str, Any] = {"model": model, "messages": messages, "stream": False}
     if response_format is not None:
         payload["response_format"] = response_format
     resp = _request(
-        "POST", f"{base_url}/chat/completions",
+        "POST", f"{server_root}/v1/chat/completions",
         headers=headers, json=payload, transport=transport, timeout=CHAT_TIMEOUT,
     )
     if resp.status_code >= 400:

@@ -70,6 +70,27 @@
   text-transform: uppercase;
 }
 
+.urlField {
+  position: relative;
+}
+
+.urlDefault {
+  position: absolute;
+  top: 0;
+  right: 0;
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--text-subtle);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  line-height: 1;
+}
+
+.urlDefault:hover {
+  color: var(--accent);
+}
+
 .modelRoleSelect {
   width: 100%;
   font-size: var(--text-sm);

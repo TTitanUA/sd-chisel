@@ -14,6 +14,7 @@ import {
 import styles from "./LmStudioSettings.module.css";
 
 const ROLES: LmRole[] = ["vl", "prompt", "both"];
+const LM_STUDIO_DEFAULT_URL = "http://localhost:1234/v1";
 
 export function LmStudioSettings() {
   const cfg = useLmStudioConfig();
@@ -61,12 +62,21 @@ export function LmStudioSettings() {
           OpenAI-compatible base URL exposed by LMStudio. The API key is optional —
           LMStudio ignores it; leave empty unless your reverse proxy needs it.
         </div>
-        <TextInput
-          label="Base URL"
-          placeholder="http://localhost:1234/v1"
-          value={baseUrl}
-          onChange={(e) => setBaseUrl(e.currentTarget.value)}
-        />
+        <div className={styles.urlField}>
+          <TextInput
+            label="Base URL"
+            placeholder="http://localhost:1234/v1"
+            value={baseUrl}
+            onChange={(e) => setBaseUrl(e.currentTarget.value)}
+          />
+          <button
+            type="button"
+            className={styles.urlDefault}
+            onClick={() => setBaseUrl(LM_STUDIO_DEFAULT_URL)}
+          >
+            Use default
+          </button>
+        </div>
         <TextInput
           label="API key (optional)"
           placeholder="leave empty for local LMStudio"
