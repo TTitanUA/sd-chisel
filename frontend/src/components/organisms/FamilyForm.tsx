@@ -5,6 +5,7 @@ import { TextInput } from "@/components/molecules/FormField";
 import { LibraryFormPage, LibraryFormSection } from "@/components/organisms/LibraryFormSection";
 import libForm from "@/components/organisms/libraryForm.module.css";
 import { MarkdownField } from "@/components/molecules/MarkdownField";
+import { AssistantPane } from "@/components/molecules/AssistantPane";
 import type { Family, FamilyCreate, FamilyUpdate } from "@/api/library";
 
 export function FamilyForm({
@@ -21,15 +22,16 @@ export function FamilyForm({
   const [id, setId] = useState(family?.id ?? "");
   const [displayName, setDisplayName] = useState(family?.display_name ?? "");
   const [promptGuide, setPromptGuide] = useState(family?.prompt_guide ?? "");
+  const [showAssistant, setShowAssistant] = useState(false);
 
   const isEdit = Boolean(family);
   const pageTitle = isEdit && family ? `Edit · ${family.display_name}` : "New family";
 
   const canSave = displayName.trim() !== "" && promptGuide.trim() !== "" && (Boolean(family) || id.trim() !== "");
 
-  return (
+  const form = (
     <form
-      className={libForm.formShell}
+      className={showAssistant ? libForm.formMain : libForm.formShell}
       onSubmit={(event) => {
         event.preventDefault();
         if (!canSave) return;
@@ -54,6 +56,16 @@ export function FamilyForm({
         }
         foot={
           <>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              icon={<Icon name="MessageSquare" size={12} />}
+              onClick={() => setShowAssistant((v) => !v)}
+            >
+              {showAssistant ? "Hide assistant" : "Assistant"}
+            </Button>
+            <div style={{ flex: 1 }} />
             <Button type="button" variant="ghost" onClick={onCancel}>
               Cancel
             </Button>
@@ -98,5 +110,14 @@ export function FamilyForm({
         </LibraryFormSection>
       </LibraryFormPage>
     </form>
+  );
+
+  if (!showAssistant) return form;
+
+  return (
+    <div className={libForm.formWithAssistant}>
+      {form}
+      <AssistantPane onArtifact={setPromptGuide} />
+    </div>
   );
 }
