@@ -239,19 +239,35 @@ def _parse_assist_sse(text: str) -> list[dict]:
     return events
 
 
-def test_assist_streams_text_and_artifact(client, conn, monkeypatch):
+def test_assist_streams_text_and_artifact_via_function_call(client, conn, monkeypatch):
+    """Model emits text delta + function_call(update_prompt_guide). Backend
+    yields delta + artifact, then sends function_call_output, then receives a
+    final completion."""
     from app.storage import settings_repo
     settings_repo.set_lmstudio(conn, url="http://localhost:1234", api_key=None)
     settings_repo.upsert_lm_models(conn, models=[
         {"name": "tool-model", "vision": False, "tool_use": True, "reasoning": False},
     ])
 
-    fake_events = [
-        {"type": "delta", "content": "Here is your guide.\n\n<artifact>\n# Guide\nUse tags.\n</artifact>"},
-        {"type": "chat_end", "response_id": "resp_123"},
-    ]
+    pass_no = {"i": 0}
 
-    monkeypatch.setattr(lmstudio_client, "chat_native_stream", lambda **_: iter(fake_events))
+    def fake_stream(**kwargs):
+        pass_no["i"] += 1
+        if pass_no["i"] == 1:
+            return iter([
+                {"type": "delta", "content": "Sure, let me write it."},
+                {"type": "function_call",
+                 "call_id": "call_1", "name": "update_prompt_guide",
+                 "arguments": {"content": "# Guide\nUse tags."}},
+                {"type": "completed", "response_id": "resp_1"},
+            ])
+        # second pass — model finalises after receiving function_call_output
+        return iter([
+            {"type": "delta", "content": "Done!"},
+            {"type": "completed", "response_id": "resp_2"},
+        ])
+
+    monkeypatch.setattr(lmstudio_client, "chat_responses_stream", fake_stream)
 
     resp = client.post(
         "/api/library/families/assist",
@@ -270,39 +286,58 @@ def test_assist_streams_text_and_artifact(client, conn, monkeypatch):
     assert artifact["content"] == "# Guide\nUse tags."
 
     done = next(e for e in events if e["type"] == "done")
-    assert done["response_id"] == "resp_123"
+    # last response id from second pass
+    assert done["response_id"] == "resp_2"
 
 
-def test_assist_forwards_previous_response_id(client, conn, monkeypatch):
+def test_assist_sends_function_call_output_on_followup(client, conn, monkeypatch):
     from app.storage import settings_repo
     settings_repo.set_lmstudio(conn, url="http://localhost:1234", api_key=None)
     settings_repo.upsert_lm_models(conn, models=[
         {"name": "tool-model", "vision": False, "tool_use": True, "reasoning": False},
     ])
 
-    captured: dict = {}
+    captures: list[dict] = []
 
     def fake_stream(**kwargs):
-        captured.update(kwargs)
-        return iter([{"type": "chat_end", "response_id": "resp_456"}])
+        captures.append(kwargs)
+        if len(captures) == 1:
+            return iter([
+                {"type": "function_call",
+                 "call_id": "call_X", "name": "update_prompt_guide",
+                 "arguments": {"content": "# Guide"}},
+                {"type": "completed", "response_id": "resp_A"},
+            ])
+        return iter([{"type": "completed", "response_id": "resp_B"}])
 
-    monkeypatch.setattr(lmstudio_client, "chat_native_stream", fake_stream)
+    monkeypatch.setattr(lmstudio_client, "chat_responses_stream", fake_stream)
 
     resp = client.post(
         "/api/library/families/assist",
         json={
             "model": "tool-model",
-            "message": "refine it",
-            "previous_response_id": "resp_123",
+            "message": "go",
+            "previous_response_id": "resp_prev",
         },
     )
     assert resp.status_code == 200
-    assert captured["previous_response_id"] == "resp_123"
-    assert captured["user_input"] == "refine it"
-    assert "mcp/playwright" in captured["integrations"]
+
+    # First pass: tools + integrations + previous_response_id from request
+    first = captures[0]
+    assert first["previous_response_id"] == "resp_prev"
+    assert first["user_input"] == "go"
+    assert any(t.get("name") == "update_prompt_guide" for t in first["tools"])
+    assert "mcp/playwright" in first["integrations"]
+
+    # Second pass: function_call_output + previous_response_id from first pass
+    second = captures[1]
+    assert second["previous_response_id"] == "resp_A"
+    assert isinstance(second["user_input"], list)
+    assert second["user_input"][0]["type"] == "function_call_output"
+    assert second["user_input"][0]["call_id"] == "call_X"
 
 
-def test_assist_forwards_tool_status(client, conn, monkeypatch):
+def test_assist_forwards_mcp_status(client, conn, monkeypatch):
     from app.storage import settings_repo
     settings_repo.set_lmstudio(conn, url="http://localhost:1234", api_key=None)
     settings_repo.upsert_lm_models(conn, models=[
@@ -310,13 +345,13 @@ def test_assist_forwards_tool_status(client, conn, monkeypatch):
     ])
 
     fake_events = [
-        {"type": "tool_status", "tool": "browser_navigate", "status": "running"},
-        {"type": "tool_status", "tool": "browser_navigate", "status": "done"},
+        {"type": "mcp_status", "tool": "browser_navigate", "status": "running"},
+        {"type": "mcp_status", "tool": "browser_navigate", "status": "done"},
         {"type": "delta", "content": "Done."},
-        {"type": "chat_end", "response_id": ""},
+        {"type": "completed", "response_id": "resp_X"},
     ]
 
-    monkeypatch.setattr(lmstudio_client, "chat_native_stream", lambda **_: iter(fake_events))
+    monkeypatch.setattr(lmstudio_client, "chat_responses_stream", lambda **_: iter(fake_events))
 
     resp = client.post(
         "/api/library/families/assist",

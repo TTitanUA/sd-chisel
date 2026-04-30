@@ -268,65 +268,70 @@ def test_chat_stream_with_tools_raises_on_upstream_error():
     assert exc.value.kind == "upstream"
 
 
-# --- chat_native_stream ---
+# --- chat_responses_stream ---
 
-def _native_sse(*events: tuple[str, dict]) -> str:
-    lines = []
-    for etype, data in events:
-        lines.append(f"event: {etype}\ndata: {json.dumps(data)}\n")
-    return "\n".join(lines)
+def _resp_sse(*events: dict) -> str:
+    """Build an SSE body for /v1/responses (data lines only — type is in the JSON)."""
+    return "".join(f"data: {json.dumps(e)}\n\n" for e in events) + "data: [DONE]\n\n"
 
 
-def test_chat_native_stream_yields_deltas_and_tool_status():
-    body = _native_sse(
-        ("message.delta", {"content": "Reading docs..."}),
-        ("tool_call.start", {"tool": "browser_navigate", "provider_info": {}}),
-        ("tool_call.success", {"tool": "browser_navigate", "output": "ok"}),
-        ("message.delta", {"content": " Done."}),
-        ("chat.end", {"response_id": "resp_abc"}),
+def test_chat_responses_stream_yields_text_and_function_call():
+    body = _resp_sse(
+        {"type": "response.output_text.delta", "delta": "Working on it..."},
+        {"type": "response.output_item.added", "item": {
+            "type": "function_call", "id": "fc_1", "call_id": "call_1",
+            "name": "update_prompt_guide", "arguments": "",
+        }},
+        {"type": "response.function_call_arguments.delta",
+         "item_id": "fc_1", "delta": '{"content":'},
+        {"type": "response.function_call_arguments.delta",
+         "item_id": "fc_1", "delta": '"the guide"}'},
+        {"type": "response.output_item.done", "item": {
+            "type": "function_call", "id": "fc_1", "call_id": "call_1",
+            "name": "update_prompt_guide", "arguments": '{"content":"the guide"}',
+        }},
+        {"type": "response.completed", "response": {"id": "resp_xyz"}},
     )
 
     def handler(request: httpx.Request) -> httpx.Response:
         payload = json.loads(request.content)
-        assert payload["input"] == "read this"
-        assert payload["system_prompt"] == "be helpful"
-        assert "mcp/playwright" in payload["integrations"]
+        assert payload["input"] == "do it"
+        assert payload["instructions"] == "be helpful"
         assert payload["stream"] is True
+        assert "mcp/playwright" in payload["integrations"]
+        assert any(t.get("name") == "update_prompt_guide" for t in payload["tools"])
         return httpx.Response(200, text=body, headers={"content-type": "text/event-stream"})
 
-    events = list(lmstudio_client.chat_native_stream(
+    events = list(lmstudio_client.chat_responses_stream(
         endpoint=ENDPOINT,
         model="m",
-        system_prompt="be helpful",
-        user_input="read this",
+        instructions="be helpful",
+        user_input="do it",
+        tools=[{"type": "function", "name": "update_prompt_guide", "parameters": {}}],
         integrations=["mcp/playwright"],
         transport=_make_transport(handler),
     ))
-    assert events == [
-        {"type": "delta", "content": "Reading docs..."},
-        {"type": "tool_status", "tool": "browser_navigate", "status": "running"},
-        {"type": "tool_status", "tool": "browser_navigate", "status": "done"},
-        {"type": "delta", "content": " Done."},
-        {"type": "chat_end", "response_id": "resp_abc"},
-    ]
+    assert events[0] == {"type": "delta", "content": "Working on it..."}
+    fc = next(e for e in events if e["type"] == "function_call")
+    assert fc["call_id"] == "call_1"
+    assert fc["name"] == "update_prompt_guide"
+    assert fc["arguments"] == {"content": "the guide"}
+    last = events[-1]
+    assert last == {"type": "completed", "response_id": "resp_xyz"}
 
 
-def test_chat_native_stream_passes_previous_response_id():
-    body = _native_sse(
-        ("message.delta", {"content": "ok"}),
-        ("chat.end", {"response_id": "resp_2"}),
-    )
-
+def test_chat_responses_stream_passes_previous_response_id():
+    body = _resp_sse({"type": "response.completed", "response": {"id": "resp_2"}})
     captured: dict = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
         captured.update(json.loads(request.content))
         return httpx.Response(200, text=body, headers={"content-type": "text/event-stream"})
 
-    list(lmstudio_client.chat_native_stream(
+    list(lmstudio_client.chat_responses_stream(
         endpoint=ENDPOINT,
         model="m",
-        system_prompt="sys",
+        instructions="sys",
         user_input="follow up",
         previous_response_id="resp_1",
         transport=_make_transport(handler),
@@ -334,14 +339,14 @@ def test_chat_native_stream_passes_previous_response_id():
     assert captured["previous_response_id"] == "resp_1"
 
 
-def test_chat_native_stream_raises_on_upstream_error():
+def test_chat_responses_stream_raises_on_upstream_error():
     transport = _make_transport(lambda r: httpx.Response(500, text="server error"))
 
     with pytest.raises(lmstudio_client.LmError) as exc:
-        list(lmstudio_client.chat_native_stream(
+        list(lmstudio_client.chat_responses_stream(
             endpoint=ENDPOINT,
             model="m",
-            system_prompt="sys",
+            instructions="sys",
             user_input="hi",
             transport=transport,
         ))

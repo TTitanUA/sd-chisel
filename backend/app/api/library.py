@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from starlette.responses import StreamingResponse
@@ -71,11 +71,12 @@ ASSIST_SYSTEM_PROMPT = (
     "when generating prompts for this family in both text-to-image (t2i) and "
     "image-to-image (i2i) workflows.\n\n"
     "When the user provides documentation links, use your browser tools to navigate "
-    "to the URL and read the content.\n\n"
-    "When you have a draft or update of the prompt guide, output it inside "
-    "<artifact> and </artifact> tags. The content between these tags will appear "
-    "in the editor automatically. Do not just describe what you plan to write — "
-    "produce the draft immediately.\n\n"
+    "to the URL and read the content. Then extract the relevant prompting "
+    "information.\n\n"
+    "When you have a draft or update of the prompt guide, call the "
+    "`update_prompt_guide` function with the full markdown content. The user will "
+    "see the result in the editor in real time. Do not just describe what you "
+    "plan to write — call the function with the actual draft.\n\n"
     "Keep the prompt guide concise and actionable. Focus on:\n"
     "- Tag syntax and formatting rules\n"
     "- Quality/style tokens specific to this family\n"
@@ -85,70 +86,33 @@ ASSIST_SYSTEM_PROMPT = (
     "- Any differences between t2i and i2i prompting for this family"
 )
 
-ARTIFACT_OPEN = "<artifact>"
-ARTIFACT_CLOSE = "</artifact>"
+ASSIST_TOOLS = [
+    {
+        "type": "function",
+        "name": "update_prompt_guide",
+        "description": (
+            "Update the prompt guide content in the editor. Call this whenever you "
+            "have a new or revised version of the prompt guide."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "content": {
+                    "type": "string",
+                    "description": "The full prompt guide markdown content",
+                },
+            },
+            "required": ["content"],
+            "additionalProperties": False,
+        },
+    },
+]
+
+ASSIST_INTEGRATIONS = ["mcp/playwright"]
 
 
 def _assist_sse(payload: dict) -> bytes:
     return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n".encode()
-
-
-class _ArtifactParser:
-    """Detects <artifact>...</artifact> in a token stream.
-
-    Text outside tags → delta events.
-    Text inside tags → single artifact event on close.
-    """
-
-    def __init__(self) -> None:
-        self._buf = ""
-        self._inside = False
-        self._art_buf = ""
-
-    def feed(self, text: str) -> list[dict]:
-        events: list[dict] = []
-        self._buf += text
-        while self._buf:
-            if not self._inside:
-                idx = self._buf.find(ARTIFACT_OPEN)
-                if idx >= 0:
-                    if idx > 0:
-                        events.append({"type": "delta", "content": self._buf[:idx]})
-                    self._buf = self._buf[idx + len(ARTIFACT_OPEN):]
-                    self._inside = True
-                    continue
-                # keep potential partial tag at end
-                for i in range(min(len(ARTIFACT_OPEN) - 1, len(self._buf)), 0, -1):
-                    if self._buf.endswith(ARTIFACT_OPEN[:i]):
-                        safe = self._buf[:-i]
-                        if safe:
-                            events.append({"type": "delta", "content": safe})
-                        self._buf = self._buf[-i:]
-                        return events
-                events.append({"type": "delta", "content": self._buf})
-                self._buf = ""
-            else:
-                idx = self._buf.find(ARTIFACT_CLOSE)
-                if idx >= 0:
-                    self._art_buf += self._buf[:idx]
-                    events.append({"type": "artifact", "content": self._art_buf.strip()})
-                    self._buf = self._buf[idx + len(ARTIFACT_CLOSE):]
-                    self._inside = False
-                    self._art_buf = ""
-                    continue
-                self._art_buf += self._buf
-                self._buf = ""
-        return events
-
-    def flush(self) -> list[dict]:
-        events: list[dict] = []
-        if self._buf:
-            events.append({"type": "delta", "content": self._buf})
-        if self._art_buf:
-            events.append({"type": "delta", "content": self._art_buf})
-        self._buf = ""
-        self._art_buf = ""
-        return events
 
 
 @router.post("/families/assist")
@@ -168,39 +132,70 @@ def assist(body: AssistRequest, conn: Conn) -> StreamingResponse:
         "api_key": cfg["lmstudio_api_key"],
     }
 
+    def _stream_pass(user_input, prev_id):
+        """Run one /v1/responses pass and yield (sse_event, function_call_outputs, response_id)."""
+        sse_events: list[dict] = []
+        pending_outputs: list[dict] = []
+        response_id = ""
+        for event in lmstudio_client.chat_responses_stream(
+            endpoint=endpoint,
+            model=body.model,
+            instructions=ASSIST_SYSTEM_PROMPT,
+            user_input=user_input,
+            tools=ASSIST_TOOLS,
+            integrations=ASSIST_INTEGRATIONS,
+            previous_response_id=prev_id,
+        ):
+            etype = event["type"]
+            if etype == "delta":
+                yield ("sse", {"type": "delta", "content": event["content"]}, "")
+            elif etype == "mcp_status":
+                yield ("sse", {
+                    "type": "tool_status",
+                    "tool": event.get("tool", ""),
+                    "status": event.get("status", ""),
+                }, "")
+            elif etype == "function_call":
+                if event.get("name") == "update_prompt_guide":
+                    content = event.get("arguments", {}).get("content", "")
+                    yield ("sse", {"type": "artifact", "content": content}, "")
+                yield ("call", {
+                    "type": "function_call_output",
+                    "call_id": event.get("call_id", ""),
+                    "output": "ok",
+                }, "")
+            elif etype == "completed":
+                yield ("done", {}, event.get("response_id", ""))
+
     def gen():
-        parser = _ArtifactParser()
+        user_input: Any = body.message
+        prev_id = body.previous_response_id
+        last_response_id = prev_id or ""
         try:
-            for event in lmstudio_client.chat_native_stream(
-                endpoint=endpoint,
-                model=body.model,
-                system_prompt=ASSIST_SYSTEM_PROMPT,
-                user_input=body.message,
-                integrations=["mcp/playwright"],
-                previous_response_id=body.previous_response_id,
-            ):
-                etype = event["type"]
-                if etype == "delta":
-                    for ev in parser.feed(event["content"]):
-                        yield _assist_sse(ev)
-                elif etype == "tool_status":
-                    yield _assist_sse(event)
-                elif etype == "chat_end":
-                    for ev in parser.flush():
-                        yield _assist_sse(ev)
-                    yield _assist_sse({
-                        "type": "done",
-                        "response_id": event.get("response_id", ""),
-                    })
-                    return
+            for _ in range(8):  # cap follow-up loops
+                pending_outputs: list[dict] = []
+                had_call = False
+                completed = False
+                for kind, payload, rid in _stream_pass(user_input, prev_id):
+                    if kind == "sse":
+                        yield _assist_sse(payload)
+                    elif kind == "call":
+                        pending_outputs.append(payload)
+                        had_call = True
+                    elif kind == "done":
+                        if rid:
+                            last_response_id = rid
+                        completed = True
+                if not completed:
+                    break
+                if not had_call:
+                    break
+                user_input = pending_outputs
+                prev_id = last_response_id
         except lmstudio_client.LmError as exc:
-            for ev in parser.flush():
-                yield _assist_sse(ev)
             yield _assist_sse({"type": "error", "detail": str(exc)})
             return
-        for ev in parser.flush():
-            yield _assist_sse(ev)
-        yield _assist_sse({"type": "done", "response_id": ""})
+        yield _assist_sse({"type": "done", "response_id": last_response_id})
 
     return StreamingResponse(
         gen(),

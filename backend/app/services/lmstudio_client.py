@@ -285,86 +285,128 @@ def chat_stream_with_tools(
         raise LmError("upstream", str(exc)) from exc
 
 
-NATIVE_CHAT_TIMEOUT = httpx.Timeout(180.0, connect=5.0, read=180.0)
+RESPONSES_TIMEOUT = httpx.Timeout(180.0, connect=5.0, read=180.0)
 
 
-def chat_native_stream(
+def chat_responses_stream(
     *,
     endpoint: dict[str, Any],
     model: str,
-    system_prompt: str,
-    user_input: str,
+    instructions: str,
+    user_input: Any,
+    tools: list[dict[str, Any]] | None = None,
     integrations: list[Any] | None = None,
     previous_response_id: str | None = None,
     transport: httpx.BaseTransport | None = None,
 ) -> Iterator[dict[str, Any]]:
+    """Stream events from LMStudio's /v1/responses endpoint.
+
+    Supports custom function tools AND MCP integrations simultaneously.
+
+    Yields:
+        {"type": "delta", "content": "..."}              -- assistant text
+        {"type": "function_call", "call_id", "name", "arguments"}  -- custom tool call
+        {"type": "mcp_status", "tool", "status"}         -- MCP tool progress
+        {"type": "completed", "response_id": "..."}      -- response complete
+    """
     if not model.strip():
         raise LmError("config", "model is required")
-    if not user_input.strip():
-        raise LmError("config", "user_input must not be empty")
     server_root, headers = _resolve(endpoint)
     payload: dict[str, Any] = {
         "model": model,
         "input": user_input,
-        "system_prompt": system_prompt,
+        "instructions": instructions,
         "stream": True,
-        "store": True,
     }
+    if tools:
+        payload["tools"] = tools
     if integrations:
         payload["integrations"] = integrations
     if previous_response_id:
         payload["previous_response_id"] = previous_response_id
+
+    fn_calls: dict[str, dict[str, Any]] = {}
+
     try:
-        with httpx.Client(transport=transport, timeout=NATIVE_CHAT_TIMEOUT) as client:
+        with httpx.Client(transport=transport, timeout=RESPONSES_TIMEOUT) as client:
             with client.stream(
-                "POST", f"{server_root}/api/v1/chat",
+                "POST", f"{server_root}/v1/responses",
                 headers=headers, json=payload,
             ) as resp:
                 if resp.status_code >= 400:
                     body = resp.read().decode("utf-8", errors="replace")
                     raise LmError("upstream", f"{resp.status_code}: {body[:200]}")
-                event_type = ""
                 for line in resp.iter_lines():
-                    if not line:
-                        event_type = ""
-                        continue
-                    if line.startswith("event:"):
-                        event_type = line[len("event:"):].strip()
-                        continue
-                    if not line.startswith("data:"):
+                    if not line or not line.startswith("data:"):
                         continue
                     raw = line[len("data:"):].strip()
+                    if not raw or raw == "[DONE]":
+                        continue
                     try:
                         data = json.loads(raw)
                     except ValueError:
                         continue
-                    if event_type == "message.delta":
-                        content = data.get("content", "")
-                        if content:
-                            yield {"type": "delta", "content": content}
-                    elif event_type == "tool_call.start":
+                    etype = data.get("type", "")
+                    if etype == "response.output_text.delta":
+                        delta = data.get("delta", "")
+                        if delta:
+                            yield {"type": "delta", "content": delta}
+                    elif etype == "response.output_item.added":
+                        item = data.get("item") or {}
+                        if item.get("type") == "function_call":
+                            iid = item.get("id", "")
+                            fn_calls[iid] = {
+                                "call_id": item.get("call_id", iid),
+                                "name": item.get("name", ""),
+                                "args": item.get("arguments", "") or "",
+                            }
+                    elif etype == "response.function_call_arguments.delta":
+                        iid = data.get("item_id", "")
+                        if iid in fn_calls:
+                            fn_calls[iid]["args"] += data.get("delta", "")
+                    elif etype == "response.output_item.done":
+                        item = data.get("item") or {}
+                        itype = item.get("type", "")
+                        if itype == "function_call":
+                            iid = item.get("id", "")
+                            slot = fn_calls.pop(iid, None)
+                            args_raw = (slot or {}).get("args") or item.get("arguments", "") or ""
+                            try:
+                                parsed = json.loads(args_raw) if args_raw else {}
+                            except ValueError:
+                                parsed = {}
+                            yield {
+                                "type": "function_call",
+                                "call_id": item.get("call_id", iid),
+                                "name": item.get("name", "") or (slot or {}).get("name", ""),
+                                "arguments": parsed,
+                            }
+                        elif itype in ("mcp_call", "tool_call"):
+                            tool = item.get("name") or item.get("tool", "")
+                            ok = item.get("error") in (None, "")
+                            yield {
+                                "type": "mcp_status",
+                                "tool": tool,
+                                "status": "done" if ok else "failed",
+                            }
+                    elif etype == "response.mcp_call.in_progress" or etype == "response.mcp_call.arguments.delta":
+                        if etype.endswith("in_progress"):
+                            item = data.get("item") or {}
+                            yield {
+                                "type": "mcp_status",
+                                "tool": item.get("name") or item.get("tool", ""),
+                                "status": "running",
+                            }
+                    elif etype == "response.completed":
+                        response = data.get("response") or {}
                         yield {
-                            "type": "tool_status",
-                            "tool": data.get("tool", ""),
-                            "status": "running",
+                            "type": "completed",
+                            "response_id": response.get("id", ""),
                         }
-                    elif event_type == "tool_call.success":
-                        yield {
-                            "type": "tool_status",
-                            "tool": data.get("tool", ""),
-                            "status": "done",
-                        }
-                    elif event_type == "tool_call.failure":
-                        yield {
-                            "type": "tool_status",
-                            "tool": data.get("tool", ""),
-                            "status": "failed",
-                        }
-                    elif event_type == "chat.end":
-                        yield {
-                            "type": "chat_end",
-                            "response_id": data.get("response_id", ""),
-                        }
+                    elif etype == "error":
+                        err = data.get("error") or {}
+                        msg = err.get("message") if isinstance(err, dict) else str(err)
+                        raise LmError("upstream", str(msg or "responses stream error"))
     except httpx.TimeoutException as exc:
         raise LmError("timeout", str(exc)) from exc
     except httpx.HTTPError as exc:
