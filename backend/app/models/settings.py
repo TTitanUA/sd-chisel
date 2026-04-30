@@ -1,15 +1,10 @@
 from __future__ import annotations
 
-from typing import Literal
-
 from pydantic import BaseModel, ConfigDict, Field
 
 
 class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
-
-
-Role = Literal["vl", "prompt", "both"]
 
 
 class LmStudioConfig(StrictModel):
@@ -26,7 +21,9 @@ class LmStudioConfigOut(StrictModel):
 
 class LmModelOut(StrictModel):
     name: str
-    role: Role
+    vision: bool
+    tool_use: bool
+    reasoning: bool
     enabled: bool
     last_seen: int
 
@@ -36,5 +33,7 @@ class LmModelsOut(StrictModel):
 
 
 class LmModelPatch(StrictModel):
-    role: Role | None = None
+    vision: bool | None = None
+    tool_use: bool | None = None
+    reasoning: bool | None = None
     enabled: bool | None = None
