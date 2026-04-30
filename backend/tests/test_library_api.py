@@ -350,7 +350,9 @@ def test_assist_sends_function_call_output_on_followup(client, conn, monkeypatch
     # First pass: tools (function + mcp) + previous_response_id from request
     first = captures[0]
     assert first["previous_response_id"] == "resp_prev"
-    assert first["user_input"] == "go"
+    # Snapshot block is prepended to the user message on the first pass.
+    assert "Current editor state:" in first["user_input"]
+    assert first["user_input"].endswith("---\ngo")
     assert any(t.get("name") == "update_prompt_guide" for t in first["tools"])
     assert any(
         t.get("type") == "mcp" and t.get("server_label") == "playwright"

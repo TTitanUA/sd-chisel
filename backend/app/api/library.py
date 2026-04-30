@@ -66,54 +66,92 @@ def create_family(body: FamilyCreate, conn: Conn):
 
 
 ASSIST_SYSTEM_PROMPT = (
-    "You are writing a prompt guide for a generative image model family. The guide "
-    "you produce will be fed to ANOTHER LLM whose only job is to write image-generation "
-    "prompts (text-to-image and image-to-image) for this family. So everything you "
-    "write must directly help that downstream LLM produce better prompts — nothing "
-    "else.\n\n"
-    "When the user provides documentation links, use your browser tools to navigate "
-    "to the URL and read the content. Extract only the prompt-relevant facts.\n\n"
-    "When you have a draft or update, call the `update_prompt_guide` function with "
-    "the full markdown content. Do not describe what you plan to write — call the "
-    "function with the actual draft. The user sees the result in the editor in real "
-    "time.\n\n"
-    "Strict rules for the guide content:\n"
+    "You are writing prompt guides for a generative image model family. "
+    "The guides you produce will be fed to ANOTHER LLM whose only job is to "
+    "write image prompts (text-to-image and image-to-image) for this family.\n\n"
+    "There are THREE separate guides you can update independently:\n\n"
+    "[prompt_guide] — BASE rules shared across all modes:\n"
+    "- REQUIRED: language the output prompt must be written in (e.g. "
+    "English-only, Booru tags in English with descriptive prose in English, "
+    "etc.). This is about the OUTPUT prompt language, not the user's chat "
+    "language.\n"
+    "- Tag/keyword syntax and formatting.\n"
+    "- Quality and style tokens.\n"
+    "- Token limits and recommended length.\n"
+    "- LoRA interaction patterns and weight conventions.\n"
+    "- Negative prompt conventions.\n\n"
+    "[prompt_i2i] — IMAGE-TO-IMAGE-specific additions only:\n"
+    "- What to preserve from the source image.\n"
+    "- Transformation language (subtle vs aggressive edits).\n"
+    "- Denoising / strength guidance, if family-specific.\n\n"
+    "[prompt_t2i] — TEXT-TO-IMAGE-specific additions only:\n"
+    "- Full scene composition rules.\n"
+    "- Subject and background description conventions.\n"
+    "- How to describe pose, framing, camera, etc.\n\n"
+    "Use the corresponding tool to update each guide:\n"
+    "- update_prompt_guide for the base guide.\n"
+    "- update_prompt_i2i for the i2i additions.\n"
+    "- update_prompt_t2i for the t2i additions.\n\n"
+    "The base [prompt_guide] MUST include a section specifying the language "
+    "the output prompt should be written in. If the user does not provide it, "
+    "ask.\n\n"
+    "Do not duplicate base rules into i2i/t2i guides. Mode-specific guides "
+    "should contain ONLY what is specific to that mode.\n\n"
+    "When the user provides documentation links, use your browser tools to "
+    "navigate to the URL and read the content. Extract only the prompt-relevant "
+    "facts.\n\n"
+    "Strict rules for guide content:\n"
     "- No marketing prose, model history, benchmark numbers, or licensing notes.\n"
     "- No links, citations, or 'see docs at …' references.\n"
     "- No emojis.\n"
-    "- No code examples, no API/SDK snippets, no curl/python/json blocks. The "
-    "downstream LLM writes prompts, not code — examples of code waste its context.\n"
+    "- No code examples, no API/SDK snippets, no curl/python/json blocks.\n"
     "- No filler like 'this section explains' — write the rule directly.\n"
     "- Prefer compact tables and bullet lists over paragraphs.\n\n"
-    "Cover only what changes how a prompt is written:\n"
-    "- Tag/keyword syntax and formatting rules.\n"
-    "- Quality and style tokens specific to this family.\n"
-    "- Token limits or recommended length.\n"
-    "- LoRA interaction patterns and weight conventions.\n"
-    "- Negative prompt conventions.\n"
-    "- Differences between t2i and i2i prompting for this family."
+    "The user's message will be preceded by a 'Current editor state:' block "
+    "with the latest values of all three guides. Use it to know what is already "
+    "written and what to change. Call the appropriate update_* tool with the "
+    "FULL new content of that field (not a diff)."
 )
 
-ASSIST_TOOLS = [
-    {
+
+def _function_tool(name: str, description: str) -> dict:
+    return {
         "type": "function",
-        "name": "update_prompt_guide",
-        "description": (
-            "Update the prompt guide content in the editor. Call this whenever you "
-            "have a new or revised version of the prompt guide."
-        ),
+        "name": name,
+        "description": description,
         "parameters": {
             "type": "object",
             "properties": {
                 "content": {
                     "type": "string",
-                    "description": "The full prompt guide markdown content",
+                    "description": "Full markdown content for this guide.",
                 },
             },
             "required": ["content"],
             "additionalProperties": False,
         },
-    },
+    }
+
+
+ASSIST_FIELD_BY_TOOL = {
+    "update_prompt_guide": "prompt_guide",
+    "update_prompt_i2i": "prompt_i2i",
+    "update_prompt_t2i": "prompt_t2i",
+}
+
+ASSIST_TOOLS = [
+    _function_tool(
+        "update_prompt_guide",
+        "Update the BASE prompt guide (shared rules across all modes).",
+    ),
+    _function_tool(
+        "update_prompt_i2i",
+        "Update the IMAGE-TO-IMAGE-specific additions to the prompt guide.",
+    ),
+    _function_tool(
+        "update_prompt_t2i",
+        "Update the TEXT-TO-IMAGE-specific additions to the prompt guide.",
+    ),
     # Reference Playwright MCP from LMStudio's mcp.json. The "Allow calling
     # servers from mcp.json" setting must be enabled in LMStudio Server Settings.
     {"type": "mcp", "server_label": "playwright"},
@@ -122,6 +160,25 @@ ASSIST_TOOLS = [
 
 def _assist_sse(payload: dict) -> bytes:
     return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n".encode()
+
+
+def _format_snapshot(snap) -> str:
+    """Render the editor state block prepended to the user message.
+
+    `snap` is an `AssistFieldsSnapshot` instance. Empty fields show as
+    "(empty)" so the model knows there's nothing yet rather than guessing.
+    """
+    def section(label: str, value: str) -> str:
+        return f"[{label}]\n{value if value.strip() else '(empty)'}"
+
+    return (
+        "Current editor state:\n"
+        + section("prompt_guide", snap.prompt_guide)
+        + "\n\n"
+        + section("prompt_i2i", snap.prompt_i2i)
+        + "\n\n"
+        + section("prompt_t2i", snap.prompt_t2i)
+    )
 
 
 @router.post("/families/assist")
@@ -143,9 +200,6 @@ def assist(body: AssistRequest, conn: Conn) -> StreamingResponse:
 
     def _stream_pass(user_input, prev_id):
         """Run one /v1/responses pass and yield (sse_event, function_call_outputs, response_id)."""
-        sse_events: list[dict] = []
-        pending_outputs: list[dict] = []
-        response_id = ""
         for event in lmstudio_client.chat_responses_stream(
             endpoint=endpoint,
             model=body.model,
@@ -164,9 +218,11 @@ def assist(body: AssistRequest, conn: Conn) -> StreamingResponse:
                     "status": event.get("status", ""),
                 }, "")
             elif etype == "function_call":
-                if event.get("name") == "update_prompt_guide":
+                tool_name = event.get("name") or ""
+                field = ASSIST_FIELD_BY_TOOL.get(tool_name)
+                if field is not None:
                     content = event.get("arguments", {}).get("content", "")
-                    yield ("sse", {"type": "artifact", "content": content}, "")
+                    yield ("sse", {"type": "artifact", "field": field, "content": content}, "")
                 yield ("call", {
                     "type": "function_call_output",
                     "call_id": event.get("call_id", ""),
@@ -176,7 +232,7 @@ def assist(body: AssistRequest, conn: Conn) -> StreamingResponse:
                 yield ("done", {}, event.get("response_id", ""))
 
     def gen():
-        user_input: Any = body.message
+        user_input: Any = f"{_format_snapshot(body.current_state)}\n\n---\n{body.message}"
         prev_id = body.previous_response_id
         last_response_id = prev_id or ""
         try:
