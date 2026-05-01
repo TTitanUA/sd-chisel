@@ -77,6 +77,17 @@ def delete_lora(conn: sqlite3.Connection, name: str) -> bool:
     return deleted
 
 
+def rename_lora(
+    conn: sqlite3.Connection, old_name: str, new_name: str,
+) -> dict[str, Any] | None:
+    """Rename a LoRA's primary key. The embedding is preserved — the text
+    fed to the embedder does not contain ``name`` (see
+    ``embedder.build_embedding_text``). The repo function manages its own
+    transaction."""
+    renamed = library_repo.rename_lora(conn, old_name, new_name)
+    return _hydrated_with_index_status(conn, renamed)
+
+
 def reindex_one(conn: sqlite3.Connection, name: str) -> bool:
     """Re-embed and replace the vector for an existing LoRA. Used by `reindex-all`.
 

@@ -115,3 +115,29 @@ def test_delete_removes_row_and_vector_atomically(conn):
 
 def test_delete_returns_false_when_missing(conn):
     assert library_service.delete_lora(conn, "missing") is False
+
+
+def test_rename_lora_succeeds_and_does_not_call_embedder(conn, monkeypatch):
+    library_service.create_lora(conn, name="old_slug", **CREATE_KW)
+
+    calls = []
+    real_embed = embedder.embed
+    def spy(text):
+        calls.append(text)
+        return real_embed(text)
+    monkeypatch.setattr(embedder, "embed", spy)
+
+    out = library_service.rename_lora(conn, "old_slug", "new_slug")
+    assert out is not None
+    assert out["name"] == "new_slug"
+    assert out["is_indexed"] is True
+    assert calls == [], "rename must not recompute the embedding"
+
+    rows = conn.execute(
+        "SELECT rowid FROM lora_vec_map WHERE lora_name = ?", ("new_slug",),
+    ).fetchall()
+    assert len(rows) == 1
+
+
+def test_rename_lora_returns_none_when_missing(conn):
+    assert library_service.rename_lora(conn, "ghost", "still_ghost") is None
