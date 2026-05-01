@@ -134,6 +134,7 @@ def create_session(
     conn: sqlite3.Connection,
     *,
     project_id: str,
+    session_type: str = "i2i",
     name: str | None = None,
     model_name: str | None = None,
     use_negative: bool = True,
@@ -141,9 +142,12 @@ def create_session(
     now = _now()
     sid = new_id()
     conn.execute(
-        "INSERT INTO sessions(id, project_id, name, model_name, use_negative, "
-        "created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-        (sid, project_id, name, model_name, 1 if use_negative else 0, now, now),
+        "INSERT INTO sessions(id, project_id, name, session_type, model_name, "
+        "use_negative, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            sid, project_id, name, session_type, model_name,
+            1 if use_negative else 0, now, now,
+        ),
     )
     conn.execute(
         "UPDATE projects SET updated_at = ? WHERE id = ?",

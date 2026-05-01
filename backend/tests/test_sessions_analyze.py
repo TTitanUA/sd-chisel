@@ -65,7 +65,7 @@ def _bootstrap(client, monkeypatch, *, vl_model: str | None = "qwen2-vl-7b-instr
     pid = client.post("/api/projects", json={"name": "P"}).json()["id"]
     sid = client.post(
         f"/api/projects/{pid}/sessions",
-        json={"name": "s", "model_name": None, "use_negative": True},
+        json={"session_type": "i2i", "name": "s", "model_name": None, "use_negative": True},
     ).json()["id"]
     client.patch(
         f"/api/sessions/{sid}",
@@ -116,7 +116,7 @@ def test_analyze_409_when_no_lmstudio_config(client, monkeypatch):
     pid = client.post("/api/projects", json={"name": "P"}).json()["id"]
     sid = client.post(
         f"/api/projects/{pid}/sessions",
-        json={"name": "s", "model_name": None, "use_negative": True},
+        json={"session_type": "i2i", "name": "s", "model_name": None, "use_negative": True},
     ).json()["id"]
     client.post(
         f"/api/sessions/{sid}/source",
@@ -133,7 +133,7 @@ def test_analyze_409_when_no_source_image(client, monkeypatch):
     pid = client.post("/api/projects", json={"name": "P"}).json()["id"]
     sid = client.post(
         f"/api/projects/{pid}/sessions",
-        json={"name": "s", "model_name": None, "use_negative": True},
+        json={"session_type": "i2i", "name": "s", "model_name": None, "use_negative": True},
     ).json()["id"]
     resp = client.post(f"/api/sessions/{sid}/analyze-source")
     assert resp.status_code == 409

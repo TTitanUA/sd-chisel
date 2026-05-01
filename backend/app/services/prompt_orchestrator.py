@@ -88,6 +88,12 @@ def generate(
     session = session_repo.get_session_with_pinned(conn, session_id)
     if session is None:
         raise PreconditionError(f"session not found: {session_id}")
+
+    mode = session.get("session_type") or "i2i"
+    if mode == "t2i":
+        raise PreconditionError(
+            "t2i prompt generation is not yet implemented",
+        )
     if not session.get("vl_summary"):
         raise PreconditionError(
             "session has no source image analysis (vl_summary) yet",
@@ -104,6 +110,14 @@ def generate(
             family_row = library_repo.get_family(conn, family_id)
             if family_row is not None:
                 family_prompt_guide = family_row["prompt_guide"]
+                # Append the mode-specific guide when the family provides one.
+                # Spec §4.3: composition receives prompt_guide PLUS the
+                # relevant prompt_i2i / prompt_t2i.
+                mode_key = "prompt_i2i" if mode == "i2i" else "prompt_t2i"
+                mode_guide = (family_row[mode_key] or "").strip()
+                if mode_guide:
+                    base = family_prompt_guide.strip()
+                    family_prompt_guide = f"{base}\n\n{mode_guide}" if base else mode_guide
     if not family_prompt_guide:
         family_prompt_guide = (
             "You are writing a Stable Diffusion image-to-image prompt. Be "
@@ -115,6 +129,7 @@ def generate(
 
     # ---- Step 1: intents -------------------------------------------------
     intent_messages = prompt_builder.build_intent_messages(
+        mode=mode,
         vl_summary=session["vl_summary"],
         chat_messages=chat_messages,
         distinct_tags=distinct_tags,
@@ -147,6 +162,7 @@ def generate(
 
     # ---- Step 3: composition --------------------------------------------
     comp_messages = prompt_builder.build_composition_messages(
+        mode=mode,
         family_prompt_guide=family_prompt_guide,
         model_description=model_description,
         candidates=bundle["candidates"],

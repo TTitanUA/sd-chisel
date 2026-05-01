@@ -55,7 +55,7 @@ def _make_session(client) -> str:
     pid = client.post("/api/projects", json={"name": "P"}).json()["id"]
     return client.post(
         f"/api/projects/{pid}/sessions",
-        json={"name": "s", "model_name": None, "use_negative": True},
+        json={"session_type": "i2i", "name": "s", "model_name": None, "use_negative": True},
     ).json()["id"]
 
 
@@ -253,7 +253,7 @@ def test_chat_persists_assistant_with_yield_dep_lifecycle(tmp_path, monkeypatch)
         pid = local_client.post("/api/projects", json={"name": "P"}).json()["id"]
         sid = local_client.post(
             f"/api/projects/{pid}/sessions",
-            json={"name": "s", "model_name": None, "use_negative": True},
+            json={"session_type": "i2i", "name": "s", "model_name": None, "use_negative": True},
         ).json()["id"]
         local_client.patch(
             f"/api/sessions/{sid}",

@@ -43,6 +43,7 @@ def _session_to_api_dict(row: dict) -> dict:
         "id": row["id"],
         "project_id": row["project_id"],
         "name": row["name"],
+        "session_type": row.get("session_type") or "i2i",
         "model_name": row["model_name"],
         "use_negative": row["use_negative"],
         "pinned_loras": row.get("pinned_loras", []),
@@ -136,6 +137,7 @@ def create_session(project_id: str, body: SessionCreate, conn: Conn):
         row = session_repo.create_session(
             conn,
             project_id=project_id,
+            session_type=body.session_type,
             name=body.name,
             model_name=body.model_name,
             use_negative=body.use_negative,

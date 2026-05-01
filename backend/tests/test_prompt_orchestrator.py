@@ -238,3 +238,48 @@ def test_generate_does_not_pass_response_format(conn, session_id, monkeypatch):
     assert captured == [None, None], (
         "response_format must remain unset until LMStudio json_schema support is wired"
     )
+
+
+def test_generate_rejects_t2i_session_with_precondition_error(conn, session_id):
+    conn.execute(
+        "UPDATE sessions SET session_type = 't2i' WHERE id = ?", (session_id,),
+    )
+    with pytest.raises(prompt_orchestrator.PreconditionError) as exc:
+        prompt_orchestrator.generate(
+            conn, session_id=session_id,
+            endpoint={"base_url": "http://x/v1", "api_key": None},
+            prompt_model="m1",
+        )
+    assert "t2i" in str(exc.value)
+
+
+def test_generate_appends_family_prompt_i2i_to_composition_system(
+    conn, session_id, monkeypatch,
+):
+    conn.execute(
+        "UPDATE families SET prompt_i2i = ? WHERE id = 'sdxl'",
+        ("APPEND_I2I_GUIDE_MARKER",),
+    )
+    monkeypatch.setattr(
+        "app.services.retriever.embedder.embed",
+        lambda text: [0.001] * 1024,
+    )
+    captured: dict = {"calls": []}
+
+    def fake_complete(*, endpoint, model, messages, response_format=None, transport=None):
+        captured["calls"].append(messages)
+        if len(captured["calls"]) == 1:
+            return json.dumps({"intents": [{"kind": "k", "query": "q"}]})
+        return json.dumps({"positive": "p", "negative": "n", "loras": []})
+
+    monkeypatch.setattr(
+        "app.services.prompt_orchestrator.lmstudio_client.chat_complete", fake_complete,
+    )
+    prompt_orchestrator.generate(
+        conn, session_id=session_id,
+        endpoint={"base_url": "http://x/v1", "api_key": None},
+        prompt_model="m1",
+    )
+    composition_system = captured["calls"][1][0]["content"]
+    assert "APPEND_I2I_GUIDE_MARKER" in composition_system
+    assert "# Mode: i2i" in composition_system

@@ -8,13 +8,26 @@ from __future__ import annotations
 
 from typing import Any
 
-INTENT_SYSTEM = (
+INTENT_SYSTEM_I2I = (
     "You are a planner that turns an image-to-image editing brief into a "
     "small list of search intents. For each intent emit a `kind` (a short "
     "tag like 'style', 'detail', 'character', or anything that matches a "
     "tag we tell you about) and a `query` — a poetic phrase describing the "
     "*effect* you want to find a LoRA for, NOT a literal description of the "
     "source image. Output must be a JSON object matching this schema:\n"
+    '{"intents": [{"kind": "string", "query": "string"}, ...]}\n'
+    "1 to 6 intents. No prose, no markdown — JSON only."
+)
+
+# Reserved for the t2i wiring slice. The orchestrator currently short-
+# circuits t2i sessions, so this constant is unused at runtime.
+INTENT_SYSTEM_T2I = (
+    "You are a planner that turns a text-to-image brief into a small list "
+    "of search intents. For each intent emit a `kind` (a short tag like "
+    "'style', 'subject', 'composition', or anything that matches a tag we "
+    "tell you about) and a `query` — a poetic phrase describing the "
+    "*effect* you want to find a LoRA for. Output must be a JSON object "
+    "matching this schema:\n"
     '{"intents": [{"kind": "string", "query": "string"}, ...]}\n'
     "1 to 6 intents. No prose, no markdown — JSON only."
 )
@@ -39,6 +52,7 @@ def _format_history(chat_messages: list[dict[str, Any]]) -> str:
 
 def build_intent_messages(
     *,
+    mode: str = "i2i",
     vl_summary: str,
     chat_messages: list[dict[str, Any]],
     distinct_tags: list[str],
@@ -57,8 +71,9 @@ def build_intent_messages(
         f"# Recent conversation\n{_format_history(chat_messages)}\n\n"
         f"# {tag_block}"
     )
+    system = INTENT_SYSTEM_T2I if mode == "t2i" else INTENT_SYSTEM_I2I
     return [
-        {"role": "system", "content": INTENT_SYSTEM},
+        {"role": "system", "content": system},
         {"role": "user", "content": user_content},
     ]
 
@@ -77,6 +92,7 @@ def _format_lora_block(lora: dict[str, Any]) -> str:
 
 def build_composition_messages(
     *,
+    mode: str = "i2i",
     family_prompt_guide: str,
     model_description: str | None,
     candidates: list[dict[str, Any]],
@@ -84,7 +100,7 @@ def build_composition_messages(
     chat_messages: list[dict[str, Any]],
     use_negative: bool,
 ) -> list[dict[str, str]]:
-    parts = [family_prompt_guide.strip()]
+    parts = [f"# Mode: {mode}", family_prompt_guide.strip()]
     if model_description and model_description.strip():
         parts.append(model_description.strip())
     if candidates:

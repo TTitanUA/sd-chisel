@@ -12,6 +12,7 @@ const session: Session = {
   id: "ses1",
   project_id: "p1",
   name: "s",
+  session_type: "i2i",
   model_name: "m1",
   use_negative: true,
   pinned_loras: [{ lora_name: "pinned-x", weight_override: null }],

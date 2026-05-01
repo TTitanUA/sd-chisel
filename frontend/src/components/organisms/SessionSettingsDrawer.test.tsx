@@ -12,6 +12,7 @@ const baseSession: Session = {
   id: "s1",
   project_id: "p1",
   name: null,
+  session_type: "i2i",
   model_name: null,
   use_negative: true,
   vl_model_name: null,

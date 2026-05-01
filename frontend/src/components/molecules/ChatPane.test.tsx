@@ -10,6 +10,7 @@ const SESSION: Session = {
   id: "s1",
   project_id: "p1",
   name: "demo",
+  session_type: "i2i",
   model_name: null,
   use_negative: true,
   pinned_loras: [],

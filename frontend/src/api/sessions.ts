@@ -12,10 +12,13 @@ export type Project = {
 
 export type PinnedLora = { lora_name: string; weight_override: number | null };
 
+export type SessionType = "i2i" | "t2i";
+
 export type Session = {
   id: string;
   project_id: string;
   name: string | null;
+  session_type: SessionType;
   model_name: string | null;
   use_negative: boolean;
   pinned_loras: PinnedLora[];
@@ -30,6 +33,7 @@ export type Session = {
 };
 
 export type SessionCreate = {
+  session_type: SessionType;
   name?: string | null;
   model_name?: string | null;
   use_negative?: boolean;

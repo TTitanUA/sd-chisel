@@ -44,7 +44,7 @@ def _make_session(client) -> str:
     pid = client.post("/api/projects", json={"name": "P"}).json()["id"]
     return client.post(
         f"/api/projects/{pid}/sessions",
-        json={"name": "s", "model_name": None, "use_negative": True},
+        json={"session_type": "i2i", "name": "s", "model_name": None, "use_negative": True},
     ).json()["id"]
 
 
@@ -121,11 +121,11 @@ def test_delete_project_cleans_all_session_dirs(client, data_root):
     pid = client.post("/api/projects", json={"name": "P"}).json()["id"]
     s1 = client.post(
         f"/api/projects/{pid}/sessions",
-        json={"name": "a", "model_name": None, "use_negative": True},
+        json={"session_type": "i2i", "name": "a", "model_name": None, "use_negative": True},
     ).json()["id"]
     s2 = client.post(
         f"/api/projects/{pid}/sessions",
-        json={"name": "b", "model_name": None, "use_negative": True},
+        json={"session_type": "i2i", "name": "b", "model_name": None, "use_negative": True},
     ).json()["id"]
     client.post(
         f"/api/sessions/{s1}/source",

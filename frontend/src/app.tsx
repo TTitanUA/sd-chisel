@@ -7,6 +7,7 @@ import { WorkspaceLayout } from "./components/templates/WorkspaceLayout";
 import { LibraryLayout } from "./components/templates/LibraryLayout";
 import { SettingsLayout } from "./components/templates/SettingsLayout";
 import WorkspaceRoute, { ProjectLanding } from "./routes/workspace";
+import NewSessionRoute from "./routes/newSession";
 import FamiliesRoute from "./routes/library/families";
 import ModelsRoute from "./routes/library/models";
 import LorasRoute from "./routes/library/loras";
@@ -39,6 +40,14 @@ export function App() {
               element={
                 <WorkspaceLayout>
                   <ProjectLanding />
+                </WorkspaceLayout>
+              }
+            />
+            <Route
+              path="/projects/:projectId/sessions/new"
+              element={
+                <WorkspaceLayout>
+                  <NewSessionRoute />
                 </WorkspaceLayout>
               }
             />

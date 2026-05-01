@@ -1,0 +1,87 @@
+.wrap {
+  display: grid;
+  place-items: center;
+  height: 100%;
+  padding: 24px;
+  overflow: auto;
+}
+
+.card {
+  width: 100%;
+  max-width: 520px;
+  background: var(--surface, var(--bg));
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.subtitle {
+  margin: 0;
+  color: var(--text-subtle);
+  font-size: 12px;
+}
+
+.types {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.typeCard {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  transition: border-color 0.12s, background 0.12s;
+}
+
+.typeCard:hover {
+  border-color: var(--border-strong, var(--border));
+}
+
+.typeCardActive {
+  border-color: var(--accent, currentColor);
+  background: var(--surface-active, var(--bg));
+}
+
+.typeKey {
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.typeDesc {
+  font-size: 11px;
+  color: var(--text-subtle);
+  line-height: 1.4;
+}
+
+.foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.error {
+  color: var(--danger, crimson);
+  font-size: 12px;
+}

@@ -8,6 +8,7 @@ const FAKE_SESSION = {
   id: "abc1234567",
   project_id: "p1",
   name: "test session",
+  session_type: "i2i" as const,
   model_name: null,
   use_negative: true,
   pinned_loras: [] as { lora_name: string; weight_override: number | null }[],

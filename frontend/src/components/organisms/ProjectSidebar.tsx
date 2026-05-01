@@ -9,6 +9,8 @@ import {
   useSessionsByProject,
   type Project,
 } from "@/api/sessions";
+// Note: session creation moved to the dedicated /projects/:id/sessions/new
+// route; the sidebar only navigates there.
 import { useShowHidden } from "@/api/settings";
 import styles from "./ProjectSidebar.module.css";
 
@@ -37,19 +39,6 @@ export function ProjectSidebar() {
     onSuccess: (p: Project) => {
       invalidate.projects();
       navigate(`/projects/${p.id}`);
-    },
-  });
-
-  const createSession = useMutation({
-    mutationFn: (pid: string) =>
-      sessionsApi.createSession(pid, {
-        name: `untitled · ${new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`,
-        model_name: null,
-        use_negative: true,
-      }),
-    onSuccess: (s) => {
-      invalidate.projects();
-      navigate(`/projects/${s.project_id}/sessions/${s.id}`);
     },
   });
 
@@ -101,10 +90,10 @@ export function ProjectSidebar() {
         <button
           type="button"
           className={styles.sidebarNew}
-          disabled={!targetProjectId || createSession.isPending}
+          disabled={!targetProjectId}
           title={targetProjectId ? "New session in current or first project" : "Create a project first"}
           onClick={() => {
-            if (targetProjectId) createSession.mutate(targetProjectId);
+            if (targetProjectId) navigate(`/projects/${targetProjectId}/sessions/new`);
           }}
         >
           <Icon name="Plus" size={12} />

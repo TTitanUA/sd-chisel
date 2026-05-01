@@ -56,13 +56,14 @@ def test_session_crud_nested_under_project(client):
 
     create = client.post(
         f"/api/projects/{pid}/sessions",
-        json={"name": "first", "model_name": None, "use_negative": True},
+        json={"session_type": "i2i", "name": "first", "model_name": None, "use_negative": True},
     )
     assert create.status_code == 201
     sid = create.json()["id"]
     assert create.json()["project_id"] == pid
     assert create.json()["use_negative"] is True
     assert create.json()["pinned_loras"] == []
+    assert create.json()["session_type"] == "i2i"
 
     listed = client.get(f"/api/projects/{pid}/sessions").json()
     assert [s["id"] for s in listed] == [sid]
@@ -102,7 +103,7 @@ def test_session_not_found(client):
 def test_create_session_under_missing_project_is_409(client):
     resp = client.post(
         "/api/projects/nope/sessions",
-        json={"name": "x", "model_name": None, "use_negative": True},
+        json={"session_type": "i2i", "name": "x", "model_name": None, "use_negative": True},
     )
     assert resp.status_code == 409
 
@@ -111,7 +112,7 @@ def test_pinned_fk_missing_lora_is_409(client):
     pid = client.post("/api/projects", json={"name": "P"}).json()["id"]
     sid = client.post(
         f"/api/projects/{pid}/sessions",
-        json={"name": "s", "model_name": None, "use_negative": True},
+        json={"session_type": "i2i", "name": "s", "model_name": None, "use_negative": True},
     ).json()["id"]
 
     resp = client.patch(
@@ -130,7 +131,7 @@ def test_patch_session_round_trips_vl_and_prompt_model_names(client):
     pid = client.post("/api/projects", json={"name": "P"}).json()["id"]
     sid = client.post(
         f"/api/projects/{pid}/sessions",
-        json={"name": "s", "model_name": None, "use_negative": True},
+        json={"session_type": "i2i", "name": "s", "model_name": None, "use_negative": True},
     ).json()["id"]
 
     payload = {
@@ -154,3 +155,55 @@ def test_patch_session_round_trips_vl_and_prompt_model_names(client):
     ).json()
     assert cleared["vl_model_name"] is None
     assert cleared["prompt_model_name"] is None
+
+
+def test_create_session_t2i_round_trips_type(client):
+    pid = client.post("/api/projects", json={"name": "P"}).json()["id"]
+    create = client.post(
+        f"/api/projects/{pid}/sessions",
+        json={"session_type": "t2i", "name": "T", "model_name": None, "use_negative": True},
+    )
+    assert create.status_code == 201
+    body = create.json()
+    assert body["session_type"] == "t2i"
+    fetched = client.get(f"/api/sessions/{body['id']}").json()
+    assert fetched["session_type"] == "t2i"
+
+
+def test_create_session_rejects_missing_session_type(client):
+    pid = client.post("/api/projects", json={"name": "P"}).json()["id"]
+    resp = client.post(
+        f"/api/projects/{pid}/sessions",
+        json={"name": "no-type", "model_name": None, "use_negative": True},
+    )
+    assert resp.status_code == 422
+
+
+def test_create_session_rejects_unknown_session_type(client):
+    pid = client.post("/api/projects", json={"name": "P"}).json()["id"]
+    resp = client.post(
+        f"/api/projects/{pid}/sessions",
+        json={"session_type": "v2v", "name": "x", "model_name": None, "use_negative": True},
+    )
+    assert resp.status_code == 422
+
+
+def test_session_type_is_immutable_via_patch(client):
+    """SessionUpdate has no `session_type` field — passing one is rejected
+    by extra='forbid'."""
+    pid = client.post("/api/projects", json={"name": "P"}).json()["id"]
+    sid = client.post(
+        f"/api/projects/{pid}/sessions",
+        json={"session_type": "i2i", "name": "s", "model_name": None, "use_negative": True},
+    ).json()["id"]
+    resp = client.patch(
+        f"/api/sessions/{sid}",
+        json={
+            "session_type": "t2i",
+            "name": "s",
+            "model_name": None,
+            "use_negative": True,
+            "pinned_loras": [],
+        },
+    )
+    assert resp.status_code == 422

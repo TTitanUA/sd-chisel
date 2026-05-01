@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, Field
+
+SessionType = Literal["i2i", "t2i"]
 
 
 class StrictModel(BaseModel):
@@ -38,6 +42,7 @@ class SessionOut(StrictModel):
     id: str
     project_id: str
     name: str | None
+    session_type: SessionType
     model_name: str | None
     use_negative: bool
     pinned_loras: list[PinnedLoraOut]
@@ -56,6 +61,7 @@ class HiddenPatch(StrictModel):
 
 
 class SessionCreate(StrictModel):
+    session_type: SessionType
     name: str | None = Field(default=None, max_length=160)
     model_name: str | None = None
     use_negative: bool = True

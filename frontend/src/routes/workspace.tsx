@@ -51,6 +51,7 @@ export default function WorkspaceRoute() {
         </div>
         <div className={styles.spacer} />
         <div className={styles.actions}>
+          <Badge variant="accent">{s.session_type}</Badge>
           {s.model_name && <Badge>{s.model_name}</Badge>}
           {s.use_negative && <Badge>neg · on</Badge>}
           {s.pinned_loras.length > 0 && (
@@ -65,11 +66,18 @@ export default function WorkspaceRoute() {
           </Button>
         </div>
       </header>
-      <div className={styles.grid}>
-        <SourceImagePane session={s} />
-        <ChatPane session={s} />
-        <PromptPane session={s} />
-      </div>
+      {s.session_type === "t2i" ? (
+        <div className={styles.empty}>
+          T2I workflow is not yet implemented. Open the session settings or
+          create an i2i session to continue.
+        </div>
+      ) : (
+        <div className={styles.grid}>
+          <SourceImagePane session={s} />
+          <ChatPane session={s} />
+          <PromptPane session={s} />
+        </div>
+      )}
       <SessionSettingsDrawer
         key={s.id}
         session={s}

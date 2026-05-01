@@ -106,13 +106,17 @@ applies them to an empty or existing DB.
 - **`projects`** — slug + display name and timestamps.
 - **`sessions`** — belong to a project (`ON DELETE CASCADE`). Hold:
   - `name` (optional), `model_name` (FK → `models`, `ON DELETE SET NULL`).
+  - `session_type` — `i2i` or `t2i`. Chosen at creation time and
+    immutable thereafter (no PATCH path accepts it; the `SessionUpdate`
+    schema has no field for it). Defaults to `i2i` for rows that
+    pre-date the migration.
   - `use_negative` (0/1) — a workflow property: when `0`, the LLM returns
     `negative: null` and the frontend hides the block.
   - `vl_model_name` and `prompt_model_name` — *names* of the LMStudio
     models picked for the VL call and for the prompt-writer call. Base URL
     and API key are global (see §3.3).
   - `vl_summary` — cached VL analysis of the source image (reused by all
-    later calls; never recomputed).
+    later calls; never recomputed). Only populated for `i2i` sessions.
   - `source_image_path`, `result_image_path` — relative paths to the
     binaries.
 - **`session_pinned_loras`** — required LoRAs for a session: always added
@@ -166,7 +170,8 @@ Deleting a session also clears the folder.
 A single VL call against an LMStudio model with the `vision` capability.
 The system prompt instructs the model to describe the image in terms useful
 for i2i (composition, style, lighting, objects, mood). The result is free
-text, stored in `sessions.vl_summary` and reused by every later call.
+text, stored in `sessions.vl_summary` and reused by every later call. Only
+applicable to `i2i` sessions — `t2i` sessions have no source image.
 
 ### 4.2. `chat` (SSE)
 
@@ -201,8 +206,11 @@ returns a structured list of intents: `[{kind, query}]`, where:
 
 **Step 3 — prompt composition.** A second LLM call receives:
 
-- `family.prompt_guide` (+ `prompt_i2i` or `prompt_t2i`, depending on the
-  mode).
+- `family.prompt_guide` with the relevant `prompt_i2i` or `prompt_t2i`
+  *appended* (when non-empty) — substitution is not used; the
+  mode-specific text is additive on top of the general guide. The
+  composition system message is also tagged with an explicit
+  `# Mode: <i2i|t2i>` header so the LLM sees the mode unambiguously.
 - `model.description` (when not null).
 - Full `description` for every candidate (retrieved + pinned).
 - The VL summary and the last N chat messages.
@@ -270,11 +278,16 @@ Prefix is `/api/`. Endpoints are grouped by domain.
 
 - **Projects:** list, create, partial update, delete, toggle `hidden`.
 - **Sessions:** list per project, create, read, partial update, delete,
-  toggle `hidden`. Source upload (`POST /sessions/{s}/source`). VL
-  analysis (`POST /sessions/{s}/analyze-source`). Chat (`POST
+  toggle `hidden`. The create payload requires `session_type`
+  (`"i2i"` | `"t2i"`); it is not accepted on PATCH and cannot be
+  changed after creation. Source upload (`POST /sessions/{s}/source`).
+  VL analysis (`POST /sessions/{s}/analyze-source`). Chat (`POST
   /sessions/{s}/chat`, SSE). Prompt generation (`POST
   /sessions/{s}/generate-prompt`) — returns `prompt_id` +
-  `GeneratedPrompt` + `intents` + `retrieved` inline in a single response.
+  `GeneratedPrompt` + `intents` + `retrieved` inline in a single
+  response. For a `t2i` session the endpoint currently returns 409
+  ("t2i prompt generation is not yet implemented") — the t2i flow is
+  scoped to creation + display in this slice; full wiring is deferred.
 - **Library / families:** list, read, create, replace, delete, toggle
   `hidden`, `POST /families/assist` (kicks off the assistant, returns a
   task id).
@@ -379,7 +392,17 @@ through TanStack Query hooks in `src/api/`.
 
 - **Workspace** (`/projects/:p/sessions/:s`) — the main four-pane area:
   ProjectSidebar, SourceImagePane, ResultImagePane (placeholder for step
-  6), ChatPane, PromptPane.
+  6), ChatPane, PromptPane. The header carries a session-type badge
+  (`i2i` / `t2i`) next to the model and pinned-loras chips. For `t2i`
+  sessions the body grid is replaced with a "T2I workflow not yet
+  implemented" placeholder; the header and SessionSettingsDrawer still
+  render normally.
+- **New session** (`/projects/:p/sessions/new`) — a small form: pick
+  the session type (i2i / t2i radio cards) and an optional name.
+  Submitting POSTs to the sessions endpoint and navigates to the new
+  workspace. The "New session" button in the sidebar links here rather
+  than creating inline. Future per-session settings (model, pinned
+  LoRAs, etc.) will land on this screen.
 - **Project landing** (`/projects/:p`) — the project's session list.
 - **Library:** `/library/families`, `/library/models`, `/library/loras` —
   CRUD tables with search and filters. Edit forms with markdown editors
@@ -498,7 +521,13 @@ public API for importing LoRA metadata.
 
 - LMStudio settings + capability detection (`vision`, `tool_use`,
   `reasoning`) + the `lm_models` cache + Unload all.
-- Mode-specific prompt guides (`prompt_i2i`, `prompt_t2i`).
+- Mode-specific prompt guides (`prompt_i2i`, `prompt_t2i`) — appended
+  to the family `prompt_guide` during composition.
+- Session types (`i2i` / `t2i`) chosen at creation on a dedicated
+  screen and displayed as an immutable header badge. `i2i` is fully
+  wired and consumes the family's mode-specific guide; `t2i` is a
+  creation + display stub (workspace placeholder, generate-prompt
+  refuses with 409).
 - Privacy/hidden flags on every list entity + a global `show_hidden`.
 - Rename flow for models and LoRAs that preserves embeddings.
 - Background task registry + SSE indicator.
