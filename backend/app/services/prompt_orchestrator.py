@@ -104,7 +104,7 @@ def generate(
         )
     main_summary = main_image["analysis"]
     reference_summaries = [
-        (s["original_filename"], s["analysis"])
+        (f"Image_{s['image_number']}", s["analysis"])
         for s in sources
         if not s["is_main"] and (s.get("analysis") or "").strip()
     ]

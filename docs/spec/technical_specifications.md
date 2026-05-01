@@ -120,12 +120,18 @@ applies them to an empty or existing DB.
 - **`session_source_images`** — child rows under a session (`ON DELETE
   CASCADE`). Each row is one uploaded source image with its own VL analysis.
   Fields: `id` (random hex), `session_id`, `path` (relative to `data/`),
-  `original_filename` (display only), `is_main` (0/1; exactly one row per
-  session is main, enforced by a unique partial index), `analysis` (free
-  VL text, NULL until analyzed; overwritten by every re-analysis), and
-  `analysis_prompt` (the optional refining instruction the user typed for
-  the last run, NULL when none was provided). Only `i2i` sessions hold
-  rows here.
+  `original_filename` (kept for tooltips and downloads), `image_number`
+  (1-based ordinal, unique per session, **never reused**: a new upload
+  always gets `MAX(image_number) + 1`, so deletions leave permanent gaps —
+  this is what guarantees that `Image_N` references in chat / prompt
+  context stay unambiguous across delete + re-upload), `is_main` (0/1;
+  exactly one row per session is main, enforced by a unique partial
+  index), `analysis` (free VL text, NULL until analyzed; overwritten by
+  every re-analysis), and `analysis_prompt` (the optional refining
+  instruction the user typed for the last run, NULL when none was
+  provided). Only `i2i` sessions hold rows here. The canonical user- and
+  LLM-facing identifier for each image is `Image_<image_number>` (e.g.
+  `Image_3`); `original_filename` is metadata.
 - **`session_pinned_loras`** — required LoRAs for a session: always added
   to the LLM context on top of the retrieved set. Optional `weight_override`
   on top of `recommended_weight`.
@@ -199,10 +205,14 @@ it. Re-running overwrites both fields. Only applicable to `i2i` sessions
 — `t2i` sessions have no source images.
 
 Prompt and chat composition consume the analyses as: the **main** row's
-text is the primary "Source image analysis"; every reference row that has
-its own completed analysis is appended under a "Reference images" block
-as `- <original_filename>: <analysis>` lines. References with no
-analysis yet are silently skipped.
+text is the primary "Source image analysis" labelled with its
+`Image_<image_number>` identifier; every reference row that has its own
+completed analysis is appended under a "Reference images" block as
+`- Image_<image_number>: <analysis>` lines. References with no analysis
+yet are silently skipped. The chat system prompt also tells the model
+that the user may refer to images as `@Image_N` and that the model must
+use the same form when referring back to them, never an
+`original_filename`.
 
 ### 4.2. `chat` (SSE)
 
@@ -454,10 +464,11 @@ tokens. No Tailwind, no shadcn. Package manager: pnpm.
 ### 6.1. Decomposition
 
 Atomic design: `atoms/` (Button, Badge, Icon), `molecules/` (form blocks,
-SourceImageCard, AnalyzeImageModal, AnalysisDetailModal,
-SessionSettingsDrawer), `organisms/` (LibraryCrud, SourceImagesPane,
-PromptPane, ChatPane, ProjectSidebar, CRUD forms, LmStudioSettings,
-TaskIndicator), `templates/` (WorkspaceLayout, LibraryLayout, AppShell).
+SourceImageCard, AnalyzeImageModal, AnalysisDetailModal, ImageLightbox,
+MentionPopover, SessionSettingsDrawer), `organisms/` (LibraryCrud,
+SourceImagesPane, PromptPane, ChatPane, ProjectSidebar, CRUD forms,
+LmStudioSettings, TaskIndicator), `templates/` (WorkspaceLayout,
+LibraryLayout, AppShell).
 Pages (`routes/`) are assembled from templates + organisms; data flows in
 through TanStack Query hooks in `src/api/`.
 
@@ -468,18 +479,36 @@ through TanStack Query hooks in `src/api/`.
   step 6), ChatPane, PromptPane. The Sources pane shows a drag-drop
   zone (multi-file) plus a list of cards — one per uploaded image.
   Each card has the image preview on the left (with a star toggle that
-  flips the `main` flag and a `main` badge on whichever row is main),
-  the original filename and a 3-line clamped excerpt of the analysis
-  in the centre (clicking the excerpt opens a modal with the full
-  text), and per-row Analyze / Re-analyze + Delete buttons on the
-  right. Analyze opens a modal with an optional refining-instruction
-  textarea; the modal disables itself while the request is in flight
-  and auto-closes on success (errors keep it open for retry). The
-  header carries a session-type badge (`i2i` / `t2i`) next to the
-  model and pinned-loras chips. For `t2i` sessions the body grid is
-  replaced with a "T2I workflow not yet
-  implemented" placeholder; the header and SessionSettingsDrawer still
-  render normally.
+  flips the `main` flag and a `main` badge on whichever row is main);
+  clicking the preview opens a fullscreen lightbox (Radix Dialog) that
+  shows the image at full size with ←/→ keys and chevron buttons to
+  cycle through every source image in the session in `image_number`
+  order, plus an `Image_N · n / total` counter and ESC to close. The
+  card's centre column shows the canonical name `Image_<image_number>`
+  on top, the original filename below it as a subdued subtitle, and a
+  3-line clamped excerpt of the analysis (clicking the excerpt opens a
+  modal with the full text). Per-row Analyze / Re-analyze + Delete
+  buttons sit on the right. Analyze opens a modal with an optional
+  refining-instruction textarea; the modal disables itself while the
+  request is in flight and auto-closes on success (errors keep it open
+  for retry). The header carries a session-type badge (`i2i` / `t2i`)
+  next to the model and pinned-loras chips. For `t2i` sessions the
+  body grid is replaced with a "T2I workflow not yet implemented"
+  placeholder; the header and SessionSettingsDrawer still render
+  normally. The ChatPane composer supports an `@`-mention picker:
+  typing `@` at the start of a token (start-of-input or after
+  whitespace) opens a popover above the textarea listing every source
+  image in the session as `Image_N` with the original filename as a
+  subtitle. The query (substring after `@`) filters the list against
+  `Image_N`, the bare number, and the original filename. ↑/↓ navigate,
+  Enter or Tab inserts `@Image_N ` (with trailing space) replacing the
+  trigger token, ESC dismisses, whitespace or moving the caret outside
+  the token also closes it. The literal `@Image_N` text is sent to the
+  backend verbatim; the LLM sees the matching identifier in its system
+  prompt and is instructed to refer back to images using the same form.
+  Assistant messages render as Markdown (GFM: headings, lists, tables,
+  inline / fenced code, blockquotes); user messages are rendered as plain
+  text so `@Image_N` and similar literals stay verbatim.
 - **New session** (`/projects/:p/sessions/new`) — a small form: pick
   the session type (i2i / t2i radio cards) and an optional name.
   Submitting POSTs to the sessions endpoint and navigates to the new

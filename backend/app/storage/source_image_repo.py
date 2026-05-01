@@ -63,15 +63,28 @@ def insert(
     is_main: bool,
 ) -> dict[str, Any]:
     """Insert a row. Caller supplies `image_id` if the path needs to embed it
-    (the standard pattern), otherwise one is generated."""
+    (the standard pattern), otherwise one is generated.
+
+    `image_number` is assigned as MAX(image_number) + 1 within the session.
+    Numbers are never reused — deletions leave permanent gaps so the LLM's
+    `Image_N` references stay unambiguous across delete + re-upload.
+    """
     now = _now()
     iid = image_id or new_id()
+    next_number = conn.execute(
+        "SELECT COALESCE(MAX(image_number), 0) + 1 "
+        "FROM session_source_images WHERE session_id = ?",
+        (session_id,),
+    ).fetchone()[0]
     conn.execute(
         "INSERT INTO session_source_images("
-        "id, session_id, path, original_filename, is_main, "
+        "id, session_id, path, original_filename, image_number, is_main, "
         "analysis, analysis_prompt, created_at, updated_at) "
-        "VALUES (?, ?, ?, ?, ?, NULL, NULL, ?, ?)",
-        (iid, session_id, path, original_filename, 1 if is_main else 0, now, now),
+        "VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?)",
+        (
+            iid, session_id, path, original_filename, next_number,
+            1 if is_main else 0, now, now,
+        ),
     )
     conn.execute(
         "UPDATE sessions SET updated_at = ? WHERE id = ?", (now, session_id),

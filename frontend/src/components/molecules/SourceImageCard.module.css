@@ -31,6 +31,23 @@
   display: block;
 }
 
+.imageBtn {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: zoom-in;
+  display: block;
+}
+
+.imageBtn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
 .imageMissing {
   width: 100%;
   height: 100%;
@@ -95,11 +112,19 @@
   gap: 4px;
 }
 
-.filename {
+.title {
   font-family: var(--font-mono);
   font-size: var(--text-sm);
   font-weight: 600;
   color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.filename {
+  font-size: var(--text-xs);
+  color: var(--text-subtle);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

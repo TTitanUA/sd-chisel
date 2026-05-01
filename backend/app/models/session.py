@@ -44,6 +44,7 @@ class SourceImageOut(StrictModel):
     path: str
     url: str
     original_filename: str
+    image_number: int
     is_main: bool
     analysis: str | None
     analysis_prompt: str | None

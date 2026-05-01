@@ -385,3 +385,75 @@ def test_chat_does_not_persist_assistant_when_stream_yields_nothing(client, monk
     assert any(e["type"] == "error" for e in events)
     msgs = client.get(f"/api/sessions/{sid}/messages").json()["messages"]
     assert [m["role"] for m in msgs] == ["user"]
+
+
+def test_chat_tool_call_with_empty_closing_reply_succeeds(client, conn, monkeypatch):
+    """When the LLM invokes regenerate_prompt and the post-tool follow-up
+    yields no text, the turn should still close with `done` (not `error`),
+    because the user already saw the tool_result. No empty assistant row
+    should be persisted."""
+    from app.api import chat as chat_api
+    client.put("/api/settings/lmstudio", json={"base_url": "http://h", "api_key": None})
+    monkeypatch.setattr(lmstudio_client, "list_models", lambda **_: [
+        lmstudio_client.LmsModel(name="mistral-tool", vision=False, tool_use=True, reasoning=False),
+    ])
+    client.post("/api/settings/lmstudio/refresh")
+    client.patch(
+        "/api/settings/lmstudio/models/mistral-tool", json={"enabled": True},
+    )
+    sid = _make_session(client)
+    client.patch(
+        f"/api/sessions/{sid}",
+        json={
+            "name": "s", "model_name": None, "use_negative": True,
+            "pinned_loras": [],
+            "vl_model_name": None,
+            "prompt_model_name": "mistral-tool",
+        },
+    )
+
+    def fake_with_tools(**_):
+        yield {
+            "type": "tool_call",
+            "id": "call-1",
+            "name": "regenerate_prompt",
+            "arguments": {"brief": "make it pop"},
+            "raw_arguments": '{"brief":"make it pop"}',
+        }
+
+    def fake_orchestrator_generate(_conn, **_kwargs):
+        return {
+            "prompt_id": 42,
+            "prompt": {"positive": "p", "negative": "n", "loras": []},
+            "intents": [],
+            "retrieved": [],
+            "created_at": 0,
+        }
+
+    def empty_followup(**_):
+        if False:
+            yield ""  # pragma: no cover
+
+    monkeypatch.setattr(lmstudio_client, "chat_stream_with_tools", fake_with_tools)
+    monkeypatch.setattr(
+        chat_api.prompt_orchestrator, "generate", fake_orchestrator_generate,
+    )
+    monkeypatch.setattr(lmstudio_client, "chat_stream", empty_followup)
+
+    with client.stream(
+        "POST", f"/api/sessions/{sid}/chat", json={"content": "go"},
+    ) as resp:
+        body = b"".join(resp.iter_bytes())
+
+    events = _parse_sse(body)
+    types = [e["type"] for e in events]
+    assert "tool_call" in types
+    assert "tool_result" in types
+    assert "error" not in types
+    done = [e for e in events if e["type"] == "done"]
+    assert len(done) == 1
+    assert done[0]["message_id"] is None
+
+    # User message persisted, but no empty assistant row was written.
+    msgs = client.get(f"/api/sessions/{sid}/messages").json()["messages"]
+    assert [m["role"] for m in msgs] == ["user"]

@@ -90,15 +90,24 @@ def _build_payload_messages(
     sources = source_image_repo.list_for_session(conn, session_row["id"])
     main_image = next((s for s in sources if s["is_main"]), None)
     if main_image is not None and (main_image.get("analysis") or "").strip():
-        block = f"# Source image analysis\n{main_image['analysis']}"
+        main_label = f"Image_{main_image['image_number']}"
+        block = (
+            f"# Source image analysis ({main_label}, main)\n"
+            f"{main_image['analysis']}"
+        )
         ref_lines = []
         for s in sources:
             if s["is_main"] or not (s.get("analysis") or "").strip():
                 continue
             text = s["analysis"].strip().replace("\n", " ")
-            ref_lines.append(f"- {s['original_filename']}: {text}")
+            ref_lines.append(f"- Image_{s['image_number']}: {text}")
         if ref_lines:
             block += "\n\n# Reference images\n" + "\n".join(ref_lines)
+        block += (
+            "\n\nThe user may refer to images as `@Image_N` "
+            "(e.g. `@Image_2`). Use the same `Image_N` form when you "
+            "talk about images — do not invent filenames."
+        )
         msgs.append({"role": "system", "content": block})
     history = session_repo.list_messages(conn, session_id=session_row["id"])
     history = history[-CHAT_HISTORY_LIMIT:]
@@ -163,6 +172,11 @@ def chat(session_id: str, body: ChatRequest, conn: Conn) -> Response:
 
     def gen():
         accumulated: list[str] = []
+        # Holder so the tool-capable generator can report back whether it
+        # actually processed a tool call. When a tool ran, the closing
+        # assistant message is allowed to be empty — the user already saw
+        # the tool_result event, so erroring on empty text would be wrong.
+        tool_state: dict[str, bool] = {"processed": False}
 
         def emit_delta(chunk: str) -> bytes:
             accumulated.append(chunk)
@@ -178,6 +192,7 @@ def chat(session_id: str, body: ChatRequest, conn: Conn) -> Response:
                     payload_messages=payload_messages,
                     accumulated=accumulated,
                     emit_delta=emit_delta,
+                    tool_state=tool_state,
                 )
             else:
                 for chunk in lmstudio_client.chat_stream(
@@ -190,6 +205,11 @@ def chat(session_id: str, body: ChatRequest, conn: Conn) -> Response:
 
         full = "".join(accumulated).strip()
         if not full:
+            if tool_state["processed"]:
+                # Tool already produced the user-visible result; close the
+                # turn cleanly without persisting an empty assistant row.
+                yield _sse({"type": "done", "message_id": None})
+                return
             yield _sse({"type": "error", "detail": "empty assistant response"})
             return
 
@@ -218,6 +238,7 @@ def _gen_tool_capable(
     payload_messages: list[dict[str, Any]],
     accumulated: list[str],
     emit_delta,
+    tool_state: dict[str, bool],
 ):
     """Drive a chat turn with tool-calling.
 
@@ -256,6 +277,7 @@ def _gen_tool_capable(
             "shape", "regenerate_prompt called without a non-empty brief",
         )
 
+    tool_state["processed"] = True
     yield _sse({"type": "tool_call", "name": name, "brief": brief})
 
     if _is_reindexing():

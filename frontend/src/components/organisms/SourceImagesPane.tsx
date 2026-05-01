@@ -7,6 +7,7 @@ import {
   useSessionInvalidation,
   type Session,
 } from "@/api/sessions";
+import { ImageLightbox } from "@/components/molecules/ImageLightbox";
 import { SourceImageCard } from "@/components/molecules/SourceImageCard";
 import styles from "./SourceImagesPane.module.css";
 
@@ -15,6 +16,7 @@ const ACCEPT = ["image/png", "image/jpeg", "image/webp"];
 export function SourceImagesPane({ session }: { session: Session }) {
   const [over, setOver] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [lightboxImageId, setLightboxImageId] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const invalidate = useSessionInvalidation();
 
@@ -115,7 +117,12 @@ export function SourceImagesPane({ session }: { session: Session }) {
         ) : (
           <div className={styles.list}>
             {sources.map((image) => (
-              <SourceImageCard key={image.id} session={session} image={image} />
+              <SourceImageCard
+                key={image.id}
+                session={session}
+                image={image}
+                onOpenLightbox={setLightboxImageId}
+              />
             ))}
             <div className={styles.dropHint}>
               Drag more images here or use <b>Add image</b>.
@@ -124,6 +131,14 @@ export function SourceImagesPane({ session }: { session: Session }) {
         )}
         {error && <div className={styles.error} role="alert">{error}</div>}
       </div>
+      <ImageLightbox
+        images={sources}
+        startImageId={lightboxImageId}
+        open={lightboxImageId !== null}
+        onOpenChange={(o) => {
+          if (!o) setLightboxImageId(null);
+        }}
+      />
     </div>
   );
 }

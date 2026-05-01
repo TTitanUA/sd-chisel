@@ -272,7 +272,7 @@ def test_generate_includes_reference_summaries_in_composition(
         prompt_model="m1",
     )
     composition_system = captured["calls"][1][0]["content"]
-    assert "ref-pose.png" in composition_system
+    assert "Image_2" in composition_system
     assert "dynamic action pose" in composition_system
 
 

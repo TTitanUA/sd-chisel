@@ -20,12 +20,17 @@ export type SourceImage = {
   path: string;
   url: string;
   original_filename: string;
+  image_number: number;
   is_main: boolean;
   analysis: string | null;
   analysis_prompt: string | null;
   created_at: number;
   updated_at: number;
 };
+
+export function imageDisplayName(image: Pick<SourceImage, "image_number">): string {
+  return `Image_${image.image_number}`;
+}
 
 export type Session = {
   id: string;

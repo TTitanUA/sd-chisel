@@ -11,7 +11,7 @@ export type ChatMessage = {
 
 export type ChatStreamEvent =
   | { type: "delta"; content: string }
-  | { type: "done"; message_id: number }
+  | { type: "done"; message_id: number | null }
   | { type: "error"; detail: string }
   | { type: "tool_call"; name: string; brief: string }
   | { type: "tool_result"; ok: true; prompt_id: number }
@@ -44,7 +44,7 @@ export function useChatInvalidation() {
 
 export type StreamCallbacks = {
   onDelta: (chunk: string) => void;
-  onDone: (messageId: number) => void;
+  onDone: (messageId: number | null) => void;
   onError: (detail: string) => void;
   onToolCall?: (name: string, brief: string) => void;
   onToolResult?: (

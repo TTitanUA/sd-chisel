@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { Button } from "@/components/atoms/Button";
 import { Icon } from "@/components/atoms/Icon";
 import {
@@ -8,8 +10,39 @@ import {
   useMessages,
   type ChatMessage,
 } from "@/api/chat";
-import type { Session } from "@/api/sessions";
+import { imageDisplayName, type Session, type SourceImage } from "@/api/sessions";
+import {
+  filterMentionCandidates,
+  MentionPopover,
+} from "./MentionPopover";
 import styles from "./ChatPane.module.css";
+
+type MentionState = {
+  // Position of `@` in textarea value, used as the start of the trigger token.
+  start: number;
+  // Substring after `@` up to caret. Used to filter the candidate list.
+  query: string;
+};
+
+// `@` opens the popover only when it is at the very start of the input or
+// preceded by whitespace/newline. This avoids hijacking emails, etc.
+function detectMention(value: string, caret: number): MentionState | null {
+  // Walk back from the caret looking for `@` or a token-terminator.
+  for (let i = caret - 1; i >= 0; i--) {
+    const ch = value[i];
+    if (ch === "@") {
+      const before = i === 0 ? "" : value[i - 1];
+      if (i === 0 || /\s/.test(before)) {
+        return { start: i, query: value.slice(i + 1, caret) };
+      }
+      return null;
+    }
+    // Stop scanning at any non-mention character; once we hit whitespace
+    // or another `@`, we're outside the trigger token.
+    if (/\s/.test(ch)) return null;
+  }
+  return null;
+}
 
 const isMac = typeof navigator !== "undefined" && /Mac|iPhone|iPod|iPad/i.test(navigator.platform);
 const SEND_HINT = isMac ? "⌘↵ to send" : "Ctrl↵ to send";
@@ -29,7 +62,19 @@ export function ChatPane({ session }: { session: Session }) {
   const [streaming, setStreaming] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [toolChip, setToolChip] = useState<ToolChipState | null>(null);
+  const [mention, setMention] = useState<MentionState | null>(null);
+  const [highlightedIdx, setHighlightedIdx] = useState(0);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  const sourceImages = session.source_images;
+  const mentionCandidates = useMemo(
+    () =>
+      mention
+        ? filterMentionCandidates(sourceImages, mention.query)
+        : [],
+    [sourceImages, mention],
+  );
 
   const rows = messages.data ?? [];
   const hasAnySources = session.source_images.length > 0;
@@ -95,7 +140,70 @@ export function ChatPane({ session }: { session: Session }) {
     }
   }
 
+  function updateMention(value: string, caret: number) {
+    const next = detectMention(value, caret);
+    setMention(next);
+    if (next === null) {
+      setHighlightedIdx(0);
+    }
+  }
+
+  function onChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
+    const value = e.target.value;
+    setDraft(value);
+    updateMention(value, e.target.selectionStart ?? value.length);
+  }
+
+  function onSelectionChange(e: React.SyntheticEvent<HTMLTextAreaElement>) {
+    const el = e.currentTarget;
+    updateMention(el.value, el.selectionStart ?? el.value.length);
+  }
+
+  function insertMention(image: SourceImage) {
+    if (!mention) return;
+    const display = imageDisplayName(image);
+    const before = draft.slice(0, mention.start);
+    const after = draft.slice(mention.start + 1 + mention.query.length);
+    const insertion = `@${display} `;
+    const next = before + insertion + after;
+    const caret = before.length + insertion.length;
+    setDraft(next);
+    setMention(null);
+    setHighlightedIdx(0);
+    requestAnimationFrame(() => {
+      const el = textareaRef.current;
+      if (!el) return;
+      el.focus();
+      el.setSelectionRange(caret, caret);
+    });
+  }
+
   function onKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (mention !== null && mentionCandidates.length > 0) {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setHighlightedIdx((i) => (i + 1) % mentionCandidates.length);
+        return;
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setHighlightedIdx((i) =>
+          (i - 1 + mentionCandidates.length) % mentionCandidates.length,
+        );
+        return;
+      }
+      if (e.key === "Enter" || e.key === "Tab") {
+        e.preventDefault();
+        insertMention(mentionCandidates[highlightedIdx]!);
+        return;
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setMention(null);
+        setHighlightedIdx(0);
+        return;
+      }
+    }
     if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
       e.preventDefault();
       void send();
@@ -138,18 +246,35 @@ export function ChatPane({ session }: { session: Session }) {
         </div>
         {error && <div className={styles.error} role="alert">{error}</div>}
         <div className={styles.composer}>
-          <textarea
-            className={styles.textarea}
-            placeholder={
-              hasAnySources
-                ? "Describe the change…"
-                : "Add source image first"
-            }
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={onKeyDown}
-            disabled={pending}
-          />
+          <div className={styles.composerInputWrap}>
+            <textarea
+              ref={textareaRef}
+              className={styles.textarea}
+              placeholder={
+                hasAnySources
+                  ? "Describe the change…"
+                  : "Add source image first"
+              }
+              value={draft}
+              onChange={onChange}
+              onKeyDown={onKeyDown}
+              onSelect={onSelectionChange}
+              onClick={onSelectionChange}
+              onBlur={() => {
+                // Defer so click events on popover items can run first.
+                setTimeout(() => setMention(null), 100);
+              }}
+              disabled={pending}
+            />
+            <MentionPopover
+              open={mention !== null && hasAnySources}
+              query={mention?.query ?? ""}
+              images={sourceImages}
+              highlightedIndex={highlightedIdx}
+              onHighlightChange={setHighlightedIdx}
+              onSelect={insertMention}
+            />
+          </div>
           <div className={styles.composerRow}>
             <span className={styles.hint}>{SEND_HINT}</span>
             <div className={styles.spacer} />
@@ -201,7 +326,15 @@ function Bubble({
           {role === "user" ? "You" : "sd-chisel"} · {time}
         </div>
         <div className={styles.msgContent}>
-          {content}
+          {role === "assistant" ? (
+            <div className={styles.markdown}>
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                {content}
+              </ReactMarkdown>
+            </div>
+          ) : (
+            content
+          )}
           {streaming && <span className="ds-chat-cursor" />}
         </div>
       </div>

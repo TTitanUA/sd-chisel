@@ -23,6 +23,7 @@ const session: Session = {
       path: "images/ses1/sources/img1.png",
       url: "/media/images/ses1/sources/img1.png",
       original_filename: "main.png",
+      image_number: 1,
       is_main: true,
       analysis: "summary",
       analysis_prompt: null,

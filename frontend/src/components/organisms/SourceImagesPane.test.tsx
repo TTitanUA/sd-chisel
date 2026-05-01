@@ -29,6 +29,7 @@ function makeImage(over: Partial<SourceImage>): SourceImage {
     path: "images/s1/sources/img1.png",
     url: "/media/images/s1/sources/img1.png",
     original_filename: "image-one.png",
+    image_number: 1,
     is_main: true,
     analysis: null,
     analysis_prompt: null,

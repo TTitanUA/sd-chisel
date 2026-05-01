@@ -48,6 +48,7 @@ def _source_image_to_api_dict(row: dict) -> dict:
         "path": row["path"],
         "url": _media_url(row["path"]),
         "original_filename": row["original_filename"],
+        "image_number": row["image_number"],
         "is_main": bool(row["is_main"]),
         "analysis": row.get("analysis"),
         "analysis_prompt": row.get("analysis_prompt"),

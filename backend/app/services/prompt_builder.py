@@ -56,9 +56,9 @@ def _format_references(
     if not reference_summaries:
         return ""
     lines = ["# Reference images"]
-    for filename, analysis in reference_summaries:
+    for label, analysis in reference_summaries:
         text = (analysis or "").strip().replace("\n", " ")
-        lines.append(f"- {filename}: {text}")
+        lines.append(f"- {label}: {text}")
     return "\n".join(lines)
 
 

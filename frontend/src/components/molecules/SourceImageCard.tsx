@@ -4,6 +4,7 @@ import { Button } from "@/components/atoms/Button";
 import { Icon } from "@/components/atoms/Icon";
 import {
   buildSourceImageSrc,
+  imageDisplayName,
   sessionsApi,
   useSessionInvalidation,
   type Session,
@@ -18,9 +19,11 @@ const PREVIEW_LIMIT = 240;
 export function SourceImageCard({
   session,
   image,
+  onOpenLightbox,
 }: {
   session: Session;
   image: SourceImage;
+  onOpenLightbox?: (imageId: string) => void;
 }) {
   const invalidate = useSessionInvalidation();
   const [analyzeOpen, setAnalyzeOpen] = useState(false);
@@ -35,10 +38,12 @@ export function SourceImageCard({
     onSuccess: () => invalidate.session(session.id),
   });
 
+  const displayName = imageDisplayName(image);
+
   function onDeleteClick() {
     if (image.analysis) {
       const ok = window.confirm(
-        `Delete "${image.original_filename}"? Its analysis will be lost.`,
+        `Delete ${displayName} (${image.original_filename})? Its analysis will be lost.`,
       );
       if (!ok) return;
     }
@@ -62,11 +67,19 @@ export function SourceImageCard({
       <div
         className={styles.card}
         data-main={image.is_main || undefined}
-        aria-label={`Source image ${image.original_filename}`}
+        aria-label={`Source image ${displayName}`}
       >
         <div className={styles.imageWrap}>
           {src ? (
-            <img src={src} alt={image.original_filename} />
+            <button
+              type="button"
+              className={styles.imageBtn}
+              onClick={() => onOpenLightbox?.(image.id)}
+              aria-label={`Open ${displayName} fullscreen`}
+              title="Click to view fullscreen"
+            >
+              <img src={src} alt={image.original_filename} />
+            </button>
           ) : (
             <div className={styles.imageMissing}>missing</div>
           )}
@@ -85,6 +98,9 @@ export function SourceImageCard({
         </div>
 
         <div className={styles.center}>
+          <div className={styles.title} title={displayName}>
+            {displayName}
+          </div>
           <div className={styles.filename} title={image.original_filename}>
             {image.original_filename}
           </div>
