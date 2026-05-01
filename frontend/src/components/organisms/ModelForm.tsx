@@ -7,18 +7,26 @@ import { LibraryFormPage, LibraryFormSection } from "@/components/organisms/Libr
 import libForm from "@/components/organisms/libraryForm.module.css";
 import type { Family, Model, ModelCreate, ModelUpdate } from "@/api/library";
 
+const SLUG_RE = /^[a-zA-Z0-9_.-]+$/;
+
 export function ModelForm({
   model,
   families,
   onCancel,
   onSubmit,
   isSaving,
+  onRename,
+  isRenaming,
+  renameError,
 }: {
   model?: Model;
   families: Family[];
   onCancel: () => void;
   onSubmit: (body: ModelCreate | ModelUpdate) => void;
   isSaving: boolean;
+  onRename?: (newName: string) => void;
+  isRenaming?: boolean;
+  renameError?: string | null;
 }) {
   const [name, setName] = useState(model?.name ?? "");
   const [displayName, setDisplayName] = useState(model?.display_name ?? "");
@@ -27,6 +35,8 @@ export function ModelForm({
   const [author, setAuthor] = useState(model?.author ?? "");
   const [version, setVersion] = useState(model?.version ?? "");
   const [sourceUrl, setSourceUrl] = useState(model?.source_url ?? "");
+  const [renameOpen, setRenameOpen] = useState(false);
+  const [renameValue, setRenameValue] = useState(model?.name ?? "");
 
   const isEdit = Boolean(model);
   const editLabel = model?.display_name || model?.name || "";
@@ -83,13 +93,68 @@ export function ModelForm({
         }
       >
         <LibraryFormSection title="Identity" subtitle="Checkpoint filename and display info.">
-          <TextInput
-            label="Name"
-            hint={isEdit ? "filename — locked, used as primary key" : "filename without .safetensors"}
-            value={name}
-            onChange={(e) => setName(e.currentTarget.value)}
-            disabled={isEdit}
-          />
+          <div>
+            <TextInput
+              label="Name"
+              hint={isEdit ? "filename — locked, used as primary key" : "filename without .safetensors"}
+              value={name}
+              onChange={(e) => setName(e.currentTarget.value)}
+              disabled={isEdit}
+            />
+            {isEdit && onRename && !renameOpen && (
+              <button
+                type="button"
+                className={libForm.renameToggle}
+                onClick={() => {
+                  setRenameValue(model?.name ?? "");
+                  setRenameOpen(true);
+                }}
+              >
+                Rename…
+              </button>
+            )}
+            {isEdit && onRename && renameOpen && (
+              <>
+                <div className={libForm.renameRow}>
+                  <TextInput
+                    label="New filename slug"
+                    value={renameValue}
+                    onChange={(e) => setRenameValue(e.currentTarget.value)}
+                    placeholder={model?.name ?? ""}
+                    autoFocus
+                  />
+                  <Button
+                    type="button"
+                    variant="primary"
+                    size="sm"
+                    disabled={
+                      isRenaming ||
+                      renameValue.trim() === "" ||
+                      renameValue.trim() === model?.name ||
+                      !SLUG_RE.test(renameValue.trim())
+                    }
+                    onClick={() => onRename(renameValue.trim())}
+                  >
+                    {isRenaming ? "Renaming…" : "Save"}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setRenameOpen(false)}
+                    disabled={isRenaming}
+                  >
+                    Cancel
+                  </Button>
+                </div>
+                {renameError && (
+                  <div role="alert" className={libForm.renameError}>
+                    {renameError}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
           <TextInput
             label="Display name"
             value={displayName}
