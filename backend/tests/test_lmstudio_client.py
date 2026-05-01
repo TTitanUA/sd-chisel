@@ -333,7 +333,13 @@ def test_chat_stream_with_tools_yields_tool_call():
     ))
     assert events == [
         {"type": "delta", "content": "Here is the guide."},
-        {"type": "tool_call", "name": "update_prompt_guide", "arguments": {"content": "the guide"}},
+        {
+            "type": "tool_call",
+            "id": "call_1",
+            "name": "update_prompt_guide",
+            "arguments": {"content": "the guide"},
+            "raw_arguments": '{"content": "the guide"}',
+        },
     ]
 
 

@@ -100,6 +100,47 @@ def test_generate_returns_persisted_response(conn, session_id, monkeypatch):
     assert rows[0]["positive"] == "moody girl, dramatic"
 
 
+def test_generate_with_brief_replaces_chat_history(conn, session_id, monkeypatch):
+    """When brief is provided, intent + composition payloads contain a
+    `# User brief` block sourced from the brief and *no* chat history block."""
+    session_repo.append_message(conn, session_id=session_id, role="user", content="ignored chat noise")
+    monkeypatch.setattr(
+        "app.services.retriever.embedder.embed",
+        lambda text: [0.001] * 1024,
+    )
+    captured: list[list[dict]] = []
+
+    def fake_complete(*, endpoint, model, messages, response_format=None, transport=None):
+        captured.append(messages)
+        if len(captured) == 1:
+            return json.dumps({"intents": [{"kind": "style", "query": "noir"}]})
+        return json.dumps({
+            "positive": "noir mood", "negative": "blurry",
+            "loras": [{"name": "lora-a", "weight": 0.6}],
+        })
+
+    monkeypatch.setattr(
+        "app.services.prompt_orchestrator.lmstudio_client.chat_complete",
+        fake_complete,
+    )
+
+    out = prompt_orchestrator.generate(
+        conn,
+        session_id=session_id,
+        endpoint={"base_url": "http://x/v1", "api_key": None},
+        prompt_model="m1",
+        brief="moody noir cinematic, low key lighting",
+    )
+    assert out["prompt"]["positive"] == "noir mood"
+    intent_user_msg = captured[0][1]["content"]
+    composition_system_msg = captured[1][0]["content"]
+    assert "# User brief\nmoody noir cinematic, low key lighting" in intent_user_msg
+    assert "# Recent conversation" not in intent_user_msg
+    assert "ignored chat noise" not in intent_user_msg
+    assert "# User brief\nmoody noir cinematic, low key lighting" in composition_system_msg
+    assert "# Conversation" not in composition_system_msg
+
+
 def test_generate_use_negative_false_forces_null(conn, session_id, monkeypatch):
     session_repo.update_session(
         conn, session_id, name="s", model_name="m1",

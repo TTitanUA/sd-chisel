@@ -169,3 +169,44 @@
   0%, 60%, 100% { transform: translateY(0); opacity: 0.5; }
   30% { transform: translateY(-3px); opacity: 1; }
 }
+
+.toolChip {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: var(--r-full);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  border: 1px solid var(--border);
+  background: var(--bg-raised);
+  color: var(--text);
+}
+
+.toolChipRunning {
+  border-color: color-mix(in oklab, var(--accent) 40%, var(--border));
+  background: color-mix(in oklab, var(--accent) 8%, var(--bg-raised));
+  color: var(--accent);
+}
+
+.toolChipOk {
+  border-color: color-mix(in oklab, #2a9d56 35%, var(--border));
+  background: color-mix(in oklab, #2a9d56 8%, var(--bg-raised));
+  color: #2a9d56;
+}
+
+.toolChipFail {
+  border-color: color-mix(in oklab, var(--danger, #c33) 35%, var(--border));
+  background: color-mix(in oklab, var(--danger, #c33) 8%, var(--bg-raised));
+  color: var(--danger, #c33);
+}
+
+.toolChipBrief {
+  color: var(--text-subtle);
+  font-style: italic;
+  max-width: 32ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

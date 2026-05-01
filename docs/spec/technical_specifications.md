@@ -207,14 +207,45 @@ analysis yet are silently skipped.
 ### 4.2. `chat` (SSE)
 
 Streaming chat for discussing the desired changes. History is append-only
-in `messages`. It **does not** trigger generate-prompt: generation is
-launched explicitly by the user with a button. A tool-calling agent is
-post-MVP.
+in `messages`. The endpoint speaks Server-Sent Events with these payload
+types: `delta` (assistant text chunks), `done` (final message id),
+`error`, plus `tool_call` and `tool_result` when the agent invokes the
+regenerate tool.
+
+When the session's `prompt_model_name` resolves to an `lm_models` row
+with `tool_use = 1`, the assistant is given access to a single function
+tool, `regenerate_prompt(brief: string)`. The system prompt instructs the
+agent to discuss freely and invoke the tool **only after the user gives
+an explicit go-ahead** ("go", "generate", "погнали", "давай" or any
+clear equivalent). The `brief` is a self-contained summary of the
+agreed direction; it becomes the primary input to §4.3 and replaces
+chat history for that pipeline run.
+
+Server-side the tool call is executed in-process by routing into the
+existing prompt orchestrator (no HTTP self-call): `tool_call` is emitted
+when the tool invocation is parsed off the stream, the orchestrator runs
+end-to-end, `tool_result` carries the resulting `prompt_id` (or an
+`error`), and the assistant is fed the tool result back so it can stream
+a closing reply as ordinary `delta` events. The new prompt is persisted
+to `prompts` exactly as a manual `/generate-prompt` call would do.
+
+When the chat model is **not** tool-capable, the endpoint stays purely
+conversational — no tool spec is sent and behavior matches the pre-tool
+state. Generation is then only triggered by the explicit Regenerate
+button on the prompt panel (`POST /api/sessions/{s}/generate-prompt`),
+which remains available regardless of capability.
 
 ### 4.3. `generate-prompt` — two-stage flow
 
+The orchestrator accepts an optional `brief` input. When set (the chat
+tool path passes it; the manual Regenerate button does not), the brief
+**replaces** chat history in both the intent and the composition LLM
+payloads as a dedicated `# User brief` block. Without a brief, the
+orchestrator falls back to the last N chat messages as before.
+
 **Step 1 — intent rewriting.** The LLM gets the VL summary, the last N
-chat messages, and an aggregated list of known tags from `loras.tags`. It
+chat messages (or the brief, when provided), and an aggregated list of
+known tags from `loras.tags`. It
 returns a structured list of intents: `[{kind, query}]`, where:
 
 - `kind` is a free-form string. The backend asks the LLM to reuse an
@@ -244,7 +275,8 @@ returns a structured list of intents: `[{kind, query}]`, where:
   `# Mode: <i2i|t2i>` header so the LLM sees the mode unambiguously.
 - `model.description` (when not null).
 - Full `description` for every candidate (retrieved + pinned).
-- The VL summary and the last N chat messages.
+- The VL summary, plus either the last N chat messages or the
+  `# User brief` block when the orchestrator was invoked with a brief.
 - The instruction to return JSON conforming to a fixed schema.
 
 It returns `GeneratedPrompt`:
@@ -585,11 +617,15 @@ public API for importing LoRA metadata.
 - Civitai import for LoRAs (parser + metadata fetch + UI button).
 - Library assistants (family prompt guide + LoRA metadata) on top of the
   task registry.
+- Tool-calling chat agent: when the session's chat model has the
+  `tool_use` capability, the assistant can invoke a single
+  `regenerate_prompt(brief)` tool that runs the orchestrator and
+  refreshes the prompt panel inline (gracefully degrades to plain text
+  chat for non-capable models).
 
 **Out of scope (architectural placeholders):**
 
 - VL critique of the result (step 6) — UI placeholder, endpoint stub.
-- Tool-calling agent — possibly on `langgraph`.
 - Importing LoRAs from a local `.md` folder (CLI).
 - Auto-export of the DB to a markdown dump or git-friendly snapshots.
 - Sharing descriptions (DB export/import) as a UI feature.

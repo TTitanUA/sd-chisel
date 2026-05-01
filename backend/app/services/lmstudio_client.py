@@ -272,6 +272,7 @@ def chat_stream_with_tools(
         "stream": True,
     }
     tool_name = ""
+    tool_id = ""
     tool_args_buf: list[str] = []
     try:
         with httpx.Client(transport=transport, timeout=CHAT_TIMEOUT) as client:
@@ -302,6 +303,8 @@ def chat_stream_with_tools(
                     tool_calls = delta.get("tool_calls")
                     if tool_calls:
                         tc = tool_calls[0]
+                        if tc.get("id"):
+                            tool_id = tc["id"]
                         fn = tc.get("function") or {}
                         if fn.get("name"):
                             tool_name = fn["name"]
@@ -313,7 +316,13 @@ def chat_stream_with_tools(
                 parsed = json.loads(raw_args)
             except ValueError:
                 raise LmError("shape", f"invalid tool call JSON: {raw_args[:200]}")
-            yield {"type": "tool_call", "name": tool_name, "arguments": parsed}
+            yield {
+                "type": "tool_call",
+                "id": tool_id or f"call_{tool_name}",
+                "name": tool_name,
+                "arguments": parsed,
+                "raw_arguments": raw_args,
+            }
     except httpx.TimeoutException as exc:
         raise LmError("timeout", str(exc)) from exc
     except httpx.HTTPError as exc:

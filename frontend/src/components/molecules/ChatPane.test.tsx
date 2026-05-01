@@ -57,7 +57,7 @@ afterEach(() => {
 });
 
 describe("ChatPane", () => {
-  it("renders empty state and the disabled Generate button", async () => {
+  it("renders empty state with Send button only — no in-pane Generate button", async () => {
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo) => {
       const url = typeof input === "string" ? input : input.url;
       if (url.endsWith("/messages")) return jsonResponse({ messages: [] });
@@ -66,9 +66,11 @@ describe("ChatPane", () => {
 
     render(withClient(<ChatPane session={SESSION} />));
     await waitFor(() => expect(screen.getByRole("textbox")).toBeInTheDocument());
-    const gen = screen.getByRole("button", { name: /generate prompt/i });
-    expect(gen).toBeDisabled();
-    expect(gen).toHaveAttribute("title", expect.stringMatching(/analyze/i));
+    expect(screen.getByRole("button", { name: /^send$/i })).toBeInTheDocument();
+    // The duplicate "Generate prompt" trigger that used to live in the
+    // composer row was removed — generation is launched either by the
+    // chat tool flow or by the Regenerate button in PromptPane.
+    expect(screen.queryByRole("button", { name: /generate prompt/i })).toBeNull();
   });
 
   it("streams assistant deltas and refetches history on done", async () => {

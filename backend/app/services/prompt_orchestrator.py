@@ -84,6 +84,7 @@ def generate(
     session_id: str,
     endpoint: dict[str, Any],
     prompt_model: str,
+    brief: str | None = None,
 ) -> dict[str, Any]:
     session = session_repo.get_session_with_pinned(conn, session_id)
     if session is None:
@@ -133,7 +134,12 @@ def generate(
             "concrete and concise. Use comma-separated tags."
         )
 
-    chat_messages = _last_n_messages(conn, session_id, CHAT_HISTORY_LIMIT)
+    # When a brief is provided (chat tool path), the converged user intent
+    # *is* the brief — chat history is intentionally skipped to avoid noise.
+    chat_messages = (
+        [] if (brief and brief.strip())
+        else _last_n_messages(conn, session_id, CHAT_HISTORY_LIMIT)
+    )
     distinct_tags = library_repo.list_distinct_tags(conn)
 
     # ---- Step 1: intents -------------------------------------------------
@@ -143,6 +149,7 @@ def generate(
         chat_messages=chat_messages,
         distinct_tags=distinct_tags,
         reference_summaries=reference_summaries,
+        brief=brief,
     )
     intent_raw = lmstudio_client.chat_complete(
         endpoint=endpoint,
@@ -180,6 +187,7 @@ def generate(
         chat_messages=chat_messages,
         use_negative=session["use_negative"],
         reference_summaries=reference_summaries,
+        brief=brief,
     )
     comp_raw = lmstudio_client.chat_complete(
         endpoint=endpoint,

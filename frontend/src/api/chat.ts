@@ -12,7 +12,10 @@ export type ChatMessage = {
 export type ChatStreamEvent =
   | { type: "delta"; content: string }
   | { type: "done"; message_id: number }
-  | { type: "error"; detail: string };
+  | { type: "error"; detail: string }
+  | { type: "tool_call"; name: string; brief: string }
+  | { type: "tool_result"; ok: true; prompt_id: number }
+  | { type: "tool_result"; ok: false; error: string };
 
 export const chatKeys = {
   messages: (sessionId: string) => ["sessions", sessionId, "messages"] as const,
@@ -43,6 +46,10 @@ export type StreamCallbacks = {
   onDelta: (chunk: string) => void;
   onDone: (messageId: number) => void;
   onError: (detail: string) => void;
+  onToolCall?: (name: string, brief: string) => void;
+  onToolResult?: (
+    result: { ok: true; promptId: number } | { ok: false; error: string },
+  ) => void;
 };
 
 /**
@@ -93,6 +100,14 @@ export async function streamChat(
       if (evt.type === "delta") cb.onDelta(evt.content);
       else if (evt.type === "done") cb.onDone(evt.message_id);
       else if (evt.type === "error") cb.onError(evt.detail);
+      else if (evt.type === "tool_call") cb.onToolCall?.(evt.name, evt.brief);
+      else if (evt.type === "tool_result") {
+        cb.onToolResult?.(
+          evt.ok
+            ? { ok: true, promptId: evt.prompt_id }
+            : { ok: false, error: evt.error },
+        );
+      }
     }
   }
 }

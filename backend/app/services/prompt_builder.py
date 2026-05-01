@@ -69,6 +69,7 @@ def build_intent_messages(
     chat_messages: list[dict[str, Any]],
     distinct_tags: list[str],
     reference_summaries: list[tuple[str, str]] | None = None,
+    brief: str | None = None,
 ) -> list[dict[str, str]]:
     if distinct_tags:
         tag_block = (
@@ -83,7 +84,10 @@ def build_intent_messages(
     refs_block = _format_references(reference_summaries)
     if refs_block:
         parts.append(refs_block)
-    parts.append(f"# Recent conversation\n{_format_history(chat_messages)}")
+    if brief and brief.strip():
+        parts.append(f"# User brief\n{brief.strip()}")
+    else:
+        parts.append(f"# Recent conversation\n{_format_history(chat_messages)}")
     parts.append(f"# {tag_block}")
     user_content = "\n\n".join(parts)
     system = INTENT_SYSTEM_T2I if mode == "t2i" else INTENT_SYSTEM_I2I
@@ -115,6 +119,7 @@ def build_composition_messages(
     chat_messages: list[dict[str, Any]],
     use_negative: bool,
     reference_summaries: list[tuple[str, str]] | None = None,
+    brief: str | None = None,
 ) -> list[dict[str, str]]:
     parts = [f"# Mode: {mode}", family_prompt_guide.strip()]
     if model_description and model_description.strip():
@@ -128,7 +133,10 @@ def build_composition_messages(
     refs_block = _format_references(reference_summaries)
     if refs_block:
         parts.append(refs_block)
-    parts.append(f"# Conversation\n{_format_history(chat_messages)}")
+    if brief and brief.strip():
+        parts.append(f"# User brief\n{brief.strip()}")
+    else:
+        parts.append(f"# Conversation\n{_format_history(chat_messages)}")
     parts.append("# Output\n" + GENERATED_PROMPT_SCHEMA_HINT)
     system = "\n\n".join(parts)
 

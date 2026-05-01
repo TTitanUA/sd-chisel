@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/atoms/Button";
 import { Icon } from "@/components/atoms/Icon";
 import {
@@ -8,31 +9,32 @@ import {
   type ChatMessage,
 } from "@/api/chat";
 import type { Session } from "@/api/sessions";
-import { useGeneratePrompt } from "@/api/prompts";
-import { useIsReindexing } from "@/api/tasks";
 import styles from "./ChatPane.module.css";
 
 const isMac = typeof navigator !== "undefined" && /Mac|iPhone|iPod|iPad/i.test(navigator.platform);
 const SEND_HINT = isMac ? "⌘↵ to send" : "Ctrl↵ to send";
 
+type ToolChipState =
+  | { phase: "running"; brief: string }
+  | { phase: "ok"; brief: string; promptId: number }
+  | { phase: "fail"; brief: string; error: string };
+
 export function ChatPane({ session }: { session: Session }) {
   const messages = useMessages(session.id);
-  const generate = useGeneratePrompt(session.id);
   const invalidate = useChatInvalidation();
-  const isReindexing = useIsReindexing();
+  const qc = useQueryClient();
   const [draft, setDraft] = useState("");
   const [pending, setPending] = useState(false);
   const [optimistic, setOptimistic] = useState<ChatMessage | null>(null);
   const [streaming, setStreaming] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [toolChip, setToolChip] = useState<ToolChipState | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const rows = messages.data ?? [];
   const hasAnySources = session.source_images.length > 0;
-  const mainAnalysis =
-    session.source_images.find((i) => i.is_main)?.analysis ?? null;
   const showOptimistic = optimistic && !rows.some((r) => r.id === optimistic.id);
-  const showStreamingThinking = pending && streaming.length === 0;
+  const showStreamingThinking = pending && streaming.length === 0 && !toolChip;
   const showStreamingBubble = pending && streaming.length > 0;
   const totalCount = rows.length + (showOptimistic ? 1 : 0);
 
@@ -41,7 +43,7 @@ export function ChatPane({ session }: { session: Session }) {
     if (el && typeof el.scrollTo === "function") {
       el.scrollTo({ top: el.scrollHeight });
     }
-  }, [rows.length, streaming, optimistic?.id, showStreamingThinking]);
+  }, [rows.length, streaming, optimistic?.id, showStreamingThinking, toolChip]);
 
   async function send() {
     const content = draft.trim();
@@ -57,6 +59,7 @@ export function ChatPane({ session }: { session: Session }) {
     setStreaming("");
     setDraft("");
     setError(null);
+    setToolChip(null);
     setPending(true);
     try {
       await streamChat(session.id, content, {
@@ -65,6 +68,21 @@ export function ChatPane({ session }: { session: Session }) {
           invalidate.messages(session.id);
         },
         onError: (detail) => setError(detail),
+        onToolCall: (_name, brief) => {
+          setToolChip({ phase: "running", brief });
+        },
+        onToolResult: (result) => {
+          if (result.ok) {
+            setToolChip((cur) =>
+              cur ? { phase: "ok", brief: cur.brief, promptId: result.promptId } : cur,
+            );
+            void qc.invalidateQueries({ queryKey: ["prompts", session.id] });
+          } else {
+            setToolChip((cur) =>
+              cur ? { phase: "fail", brief: cur.brief, error: result.error } : cur,
+            );
+          }
+        },
       });
     } catch (err) {
       setError(String(err));
@@ -72,6 +90,8 @@ export function ChatPane({ session }: { session: Session }) {
       setPending(false);
       setStreaming("");
       setOptimistic(null);
+      // Tool chip stays visible after the turn ends — it is part of the
+      // history of this in-session interaction. Cleared on the next send.
     }
   }
 
@@ -113,6 +133,7 @@ export function ChatPane({ session }: { session: Session }) {
           {showStreamingBubble && (
             <Bubble role="assistant" content={streaming} createdAt={Math.floor(Date.now() / 1000)} streaming />
           )}
+          {toolChip && <ToolChip state={toolChip} />}
           {showStreamingThinking && <ThinkingBubble />}
         </div>
         {error && <div className={styles.error} role="alert">{error}</div>}
@@ -132,21 +153,6 @@ export function ChatPane({ session }: { session: Session }) {
           <div className={styles.composerRow}>
             <span className={styles.hint}>{SEND_HINT}</span>
             <div className={styles.spacer} />
-            <Button
-              size="sm"
-              icon={<Icon name="Sparkles" size={12} />}
-              onClick={() => generate.mutate()}
-              disabled={generate.isPending || !mainAnalysis || isReindexing}
-              title={
-                !mainAnalysis
-                  ? "Run Analyze on the main source image first"
-                  : isReindexing
-                    ? "LoRA index is updating — try again in a moment"
-                    : "Generate prompt"
-              }
-            >
-              {generate.isPending ? "Generating…" : "Generate prompt"}
-            </Button>
             <Button
               size="sm"
               variant="primary"
@@ -217,6 +223,44 @@ function ThinkingBubble() {
           <span /><span /><span />
         </div>
       </div>
+    </div>
+  );
+}
+
+function ToolChip({ state }: { state: ToolChipState }) {
+  if (state.phase === "running") {
+    return (
+      <div
+        className={`${styles.toolChip} ${styles.toolChipRunning}`}
+        role="status"
+        aria-live="polite"
+      >
+        <Icon name="Sparkles" size={12} />
+        <span>Regenerating prompt…</span>
+        <span className={styles.toolChipBrief} title={state.brief}>
+          {state.brief}
+        </span>
+      </div>
+    );
+  }
+  if (state.phase === "ok") {
+    return (
+      <div className={`${styles.toolChip} ${styles.toolChipOk}`} role="status">
+        <Icon name="Check" size={12} />
+        <span>Prompt regenerated</span>
+        <span className={styles.toolChipBrief} title={state.brief}>
+          {state.brief}
+        </span>
+      </div>
+    );
+  }
+  return (
+    <div
+      className={`${styles.toolChip} ${styles.toolChipFail}`}
+      role="alert"
+    >
+      <Icon name="X" size={12} />
+      <span>Generation failed: {state.error}</span>
     </div>
   );
 }
