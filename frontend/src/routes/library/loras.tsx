@@ -14,6 +14,7 @@ import {
 import { LibraryCrud, type CrudMode } from "@/components/organisms/LibraryCrud";
 import { LibraryDetailBlock, LibraryDetailMeta } from "@/components/molecules/LibraryV2Detail";
 import detailStyles from "@/components/molecules/LibraryV2Detail.module.css";
+import { MarkdownView } from "@/components/molecules/MarkdownField";
 import { LoraForm } from "@/components/organisms/LoraForm";
 import { formatUpdated } from "@/lib/formatUpdated";
 import { ModelFilterControls } from "./ModelFilterControls";
@@ -58,6 +59,11 @@ export default function LorasRoute() {
     mutationFn: ({ name, body }: { name: string; body: LoraUpdate }) => libraryApi.updateLora(name, body),
     onSuccess: invalidate,
   });
+  const rename = useMutation({
+    mutationFn: ({ name, new_name }: { name: string; new_name: string }) =>
+      libraryApi.renameLora(name, new_name),
+    onSuccess: invalidate,
+  });
   const remove = useMutation({ mutationFn: libraryApi.deleteLora, onSuccess: invalidate });
 
   function goDetail(name: string) {
@@ -92,6 +98,17 @@ export default function LorasRoute() {
     }
   }
 
+  function handleRename(newName: string) {
+    if (!selected) return;
+    rename.mutate(
+      { name: selected.name, new_name: newName },
+      {
+        onSuccess: (lora: Lora) =>
+          navigate(`${BASE}/${encodeURIComponent(lora.name)}/edit`, { replace: true }),
+      },
+    );
+  }
+
   const rows = filteredLoras.map((lora) => ({
     id: lora.name,
     primary: lora.display_name || lora.name,
@@ -100,7 +117,7 @@ export default function LorasRoute() {
     tags: lora.tags.slice(0, 2),
   }));
   const familyRows = families.data ?? [];
-  const error = create.error ?? update.error ?? remove.error ?? loras.error ?? families.error;
+  const error = create.error ?? update.error ?? remove.error ?? rename.error ?? loras.error ?? families.error;
   const total = loras.data?.length ?? 0;
 
   void location.pathname;
@@ -137,6 +154,9 @@ export default function LorasRoute() {
           onCancel={cancelForm}
           onSubmit={submit}
           isSaving={update.isPending}
+          onRename={handleRename}
+          isRenaming={rename.isPending}
+          renameError={rename.error ? String(rename.error) : null}
         />
       </>
     );
@@ -243,7 +263,9 @@ export default function LorasRoute() {
             </div>
           </LibraryDetailBlock>
           <LibraryDetailBlock label="Description" isLast>
-            <p className={detailStyles.desc}>{selected.description || "—"}</p>
+            {selected.description.trim()
+              ? <MarkdownView value={selected.description} />
+              : <p className={detailStyles.desc}>—</p>}
           </LibraryDetailBlock>
         </>
       )}
