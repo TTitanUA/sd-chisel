@@ -115,3 +115,55 @@ class AssistRequest(StrictModel):
     message: str = Field(min_length=1)
     previous_response_id: str | None = None
     current_state: AssistFieldsSnapshot = Field(default_factory=AssistFieldsSnapshot)
+
+
+class FamilyOption(StrictModel):
+    id: str
+    display_name: str
+
+
+class LoraAssistFieldsSnapshot(StrictModel):
+    name: str = ""
+    display_name: str = ""
+    description: str = ""
+    tags: list[str] = Field(default_factory=list)
+    trigger_words: list[str] = Field(default_factory=list)
+    family_id: str = ""
+    recommended_weight: float | None = None
+    author: str = ""
+    version: str = ""
+    source_url: str = ""
+    available_families: list[FamilyOption] = Field(default_factory=list)
+    is_edit_mode: bool = False
+
+
+class CivitaiImportResult(StrictModel):
+    name: str = ""
+    display_name: str = ""
+    description: str = ""
+    tags: list[str] = Field(default_factory=list)
+    trigger_words: list[str] = Field(default_factory=list)
+    recommended_weight: float | None = None
+    author: str = ""
+    version: str = ""
+    source_url: str = ""
+    base_model: str = ""
+    model_type: str = ""
+    air: str = ""
+
+
+class LoraAssistRequest(StrictModel):
+    model: str = Field(min_length=1)
+    message: str = Field(min_length=1)
+    previous_response_id: str | None = None
+    current_state: LoraAssistFieldsSnapshot = Field(
+        default_factory=LoraAssistFieldsSnapshot,
+    )
+
+
+class RenameRequest(StrictModel):
+    new_name: str = Field(
+        min_length=1,
+        max_length=120,
+        pattern=r"^[a-zA-Z0-9_.-]+$",
+    )
