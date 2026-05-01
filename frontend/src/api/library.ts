@@ -48,6 +48,21 @@ export type Lora = {
 export type LoraCreate = Omit<Lora, "created_at" | "updated_at" | "is_indexed">;
 export type LoraUpdate = Omit<LoraCreate, "name">;
 
+export type CivitaiImport = {
+  name: string;
+  display_name: string;
+  description: string;
+  tags: string[];
+  trigger_words: string[];
+  recommended_weight: number | null;
+  author: string;
+  version: string;
+  source_url: string;
+  base_model: string;
+  model_type: string;
+  air: string;
+};
+
 export const libraryKeys = {
   families: (q = "") => ["library", "families", q] as const,
   models: (familyId = "", q = "") => ["library", "models", familyId, q] as const,
@@ -84,6 +99,11 @@ export const libraryApi = {
       method: "PUT",
       body: JSON.stringify(body),
     }),
+  renameModel: (name: string, new_name: string) =>
+    apiFetch<Model>(`/api/library/models/${encodeURIComponent(name)}/rename`, {
+      method: "POST",
+      body: JSON.stringify({ new_name }),
+    }),
   deleteModel: (name: string) =>
     apiFetch<void>(`/api/library/models/${encodeURIComponent(name)}`, { method: "DELETE" }),
 
@@ -96,8 +116,16 @@ export const libraryApi = {
       method: "PUT",
       body: JSON.stringify(body),
     }),
+  renameLora: (name: string, new_name: string) =>
+    apiFetch<Lora>(`/api/library/loras/${encodeURIComponent(name)}/rename`, {
+      method: "POST",
+      body: JSON.stringify({ new_name }),
+    }),
   deleteLora: (name: string) =>
     apiFetch<void>(`/api/library/loras/${encodeURIComponent(name)}`, { method: "DELETE" }),
+
+  importLoraFromCivitai: (ref: string) =>
+    apiFetch<CivitaiImport>(`/api/library/loras/civitai-import?ref=${encodeURIComponent(ref)}`),
 };
 
 export function useFamilies(q = "") {
