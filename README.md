@@ -4,13 +4,10 @@ Local prompt writer for ComfyUI. It manages a local library of model families, c
 
 See:
 - [Technical spec](docs/spec/technical_specifications.md)
-- [Roadmap](docs/superpowers/specs/2026-04-23-mvp-roadmap-design.md)
-- [LMStudio capabilities design](docs/superpowers/specs/2026-04-30-lmstudio-capabilities-design.md)
-- [Prompt guide assistant design](docs/superpowers/specs/2026-04-30-prompt-guide-assistant-design.md)
 
 ## Status
 
-- Slice 6 (generate-prompt) shipped — full MVP loop is complete: source → analyze → chat → generate → copy structured prompt into ComfyUI. See [roadmap §4 Slice 6](docs/superpowers/specs/2026-04-23-mvp-roadmap-design.md).
+- Slice 6 (generate-prompt) shipped — full MVP loop is complete: source → analyze → chat → generate → copy structured prompt into ComfyUI.
 - Post-MVP work in this tree includes LMStudio model capability detection (`vision`, `tool_use`, `reasoning`), library assistants for prompt guides and LoRA metadata, Civitai import helpers, SSE-backed background tasks, and startup sweep/reindex scheduling for LoRAs that were not indexed cleanly.
 
 ## Prerequisites

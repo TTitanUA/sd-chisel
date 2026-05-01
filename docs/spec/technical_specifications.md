@@ -1,561 +1,518 @@
 # sd-chisel — technical specifications
 
-**Статус:** брейнсторм-спека, фиксирует решения, принятые на стадии дизайна.
-Supersedes технические разделы `doc/concept.md` (концепт оставлен как исходная
-мотивация и prose-обоснование).
+**Status:** living specification of the application's current state. Describes
+behavior, not code. Updated after every completed task (see `CLAUDE.md` at
+the repo root).
+
+Supersedes the technical sections of `doc/concept.md` (the concept doc is
+kept as the original motivation and prose rationale).
 
 ---
 
-## 1. Цель и scope
+## 1. Goal and scope
 
-Локальное Windows-приложение — помощник для написания промптов под i2i
-генерацию в Stable Diffusion / ComfyUI. Берёт на себя:
+A local Windows app — a prompt-writing assistant for i2i / t2i generation in
+Stable Diffusion / ComfyUI. It owns:
 
-1. Описание исходника VL-моделью в терминах, полезных для генерации.
-2. Хранение *моей* библиотеки LoRA и моделей (чекпоинтов) с правилами
-   промптинга.
-3. Чат, в ходе которого агент сам подбирает подходящие LoRA из библиотеки и
-   выдаёт готовые positive / negative / LoRA-строку.
+1. Describing source images via a VL model in terms useful for generation.
+2. Storing the user's library of LoRAs, checkpoints, and model families
+   together with prompting rules (including mode-specific guidance for i2i
+   and t2i).
+3. A chat in which the agent picks suitable LoRAs from the library and
+   produces ready-to-use positive / negative / LoRA strings.
+4. AI assistants that help populate the library: they write a prompt guide
+   for a family and metadata for a LoRA, including imports from Civitai.
 
-**Не в MVP:** прямая интеграция с ComfyUI, VL-критика результата (шаг 6 —
-задел в архитектуре, UI-плейсхолдер есть).
+Heavy work (indexing, assistants, imports) runs in the background through a
+task registry, with live status updates pushed to the UI over SSE.
+
+**MVP** (Slice 6) is shipped — the full loop `source → analyze → chat →
+generate → copy structured prompt` works. Post-MVP work already in the tree:
+LMStudio model capability detection, library assistants, Civitai import,
+background tasks, privacy flags, rename flow for models and LoRAs.
+
+**Out of MVP:** direct ComfyUI integration, VL critique of the result
+(step 6 — only an architectural placeholder).
 
 ---
 
-## 2. Архитектура (верхний уровень)
+## 2. Architecture (high level)
 
-```
-┌────────────────────────────────────────────────────────────────────┐
-│ Windows host                                                       │
-│                                                                    │
-│  ┌─────────────────┐   HTTP    ┌────────────────────────────────┐  │
-│  │ React (Vite)    │  + SSE    │ FastAPI backend                │  │
-│  │ 4-panel UI      │◄─────────►│  - sessions / projects         │  │
-│  │ + chat stream   │           │  - library CRUD (sqlite)       │  │
-│  │ + library CRUD  │           │  - indexer (embed → sqlite-vec)│  │
-│  └─────────────────┘           │  - retriever (top-K per intent)│  │
-│                                │  - LLM client (OpenAI compat.) │  │
-│                                │  - VL client                   │  │
-│                                └───────┬────────────────────────┘  │
-│                                        │                           │
-│                                        ▼                           │
-│                                ┌──────────────────┐                │
-│                                │ LMStudio         │                │
-│                                │ (VL + text LLM)  │                │
-│                                └──────────────────┘                │
-│                                                                    │
-│ Data on disk (./data/, git-ignored):                               │
-│   data/app.db                      (sqlite: всё метаданные —       │
-│                                     library + projects/sessions/   │
-│                                     messages/prompts/pins)         │
-│   data/images/<session_id>/source.<ext>, result.<ext>              │
-└────────────────────────────────────────────────────────────────────┘
-```
-
-- Фронт ↔ бэк: REST для CRUD, SSE для стриминга чата.
-- Бэк ↔ LMStudio: OpenAI-совместимый HTTP. Endpoint и модель настраиваются
-  **per-session** независимо для VL и prompt-writer.
-- Путь данных — `./data/` относительно корня репо, фиксированно, без env-переменных.
-  Бэк резолвит путь детерминированно (walk up от `app/main.py`). Папка `data/`
-  в `.gitignore` целиком.
+- **Frontend:** Vite + React 18 + TypeScript SPA. Talks to the backend over
+  REST for CRUD and over SSE for chat streaming and background tasks.
+- **Backend:** FastAPI + uvicorn, single process. All LLM/VL calls go to a
+  local LMStudio over OpenAI-compatible HTTP (via a direct `httpx` client,
+  not the `openai` SDK).
+- **LMStudio:** hosts LLM/VL models. Configured globally (base URL +
+  optional API key); the models used for VL and prompt-writer calls are
+  picked **per-session** by name from a cached list.
+- **Storage:** a single `data/app.db` file (SQLite + sqlite-vec, foreign
+  keys enabled, WAL mode for concurrent read/write during chat streaming
+  and background tasks). Binary files (source images and optional results)
+  live on disk separately.
+- **Data path** — `./data/` relative to the repo root, fixed, no env vars.
+  The backend resolves the path deterministically (walk up from the entry
+  point). The whole `data/` folder is in `.gitignore`.
 
 ---
 
 ## 3. Data model
 
-Весь структурированный стейт — в одном файле `data/app.db` (sqlite +
-sqlite-vec). Foreign keys включены (`PRAGMA foreign_keys = ON`), WAL-mode —
-для конкурентных read/write во время стриминга чата.
+All structured state lives in `data/app.db`. Outside the DB, only image
+binaries remain on disk under `data/images/<session_id>/`. The schema is
+versioned by SQL migrations in `backend/migrations/`; the `db-init` command
+applies them to an empty or existing DB.
 
-На диске вне БД остаются только бинарники (картинки) в `data/images/`.
+### 3.1. Library: families, models, LoRAs
 
-### 3.1. Справочник / библиотека: семейства, модели, LoRA
+- **`families`** — a closed reference list of model families (sdxl, pony,
+  illustrious, flux, etc.). Holds `display_name` and three prompt-guide
+  fields: `prompt_guide` (general, required), `prompt_i2i` and `prompt_t2i`
+  (optional, mode-specific). The LLM sees the relevant guide verbatim
+  during prompt composition.
+- **`models`** — checkpoints. PK is the file name without `.safetensors`.
+  Stores `display_name`, a reference to the family (`ON DELETE RESTRICT`),
+  optional `description` (delta rules on top of `family.prompt_guide`),
+  `author`, `version`, `source_url`.
+- **`loras`** — LoRAs. PK is the name used inside `<lora:name:weight>`.
+  Stores `display_name`, a required markdown `description` (the LLM sees it
+  verbatim), `tags` and `trigger_words` as JSON arrays,
+  `recommended_weight`, a reference to the family (`ON DELETE RESTRICT`),
+  plus optional `author` / `version` / `source_url`.
+- **`vec_loras`** — sqlite-vec virtual table with embeddings of
+  `description + tags + trigger_words`. The dimension is fixed by the chosen
+  embedding model (`BAAI/bge-m3`, 1024-dim). Changing the embedding model =
+  the `reindex-all` CLI: DROP + CREATE with the new dimension and a full
+  reindex of all LoRAs.
+- **`lora_vec_map`** — explicit `lora_name ↔ rowid` mapping for `vec_loras`
+  (sqlite-vec does not allow FKs from a virtual table). `ON DELETE CASCADE`
+  from `loras`.
 
-```sql
--- Справочник семейств (закрытый, переиспользуется)
-CREATE TABLE families (
-  id            TEXT PRIMARY KEY,        -- 'sdxl', 'pony', 'illustrious', 'flux'
-  display_name  TEXT NOT NULL,
-  prompt_guide  TEXT NOT NULL,           -- базовый doc промптинга, LLM видит дословно
-  created_at    INTEGER NOT NULL,
-  updated_at    INTEGER NOT NULL
-);
+**Conventions:**
 
--- Чекпоинты
-CREATE TABLE models (
-  name          TEXT PRIMARY KEY,        -- имя файла без .safetensors
-  display_name  TEXT NOT NULL,
-  family_id     TEXT NOT NULL REFERENCES families(id) ON DELETE RESTRICT,
-  description   TEXT,                    -- опц.; дельта-правила поверх family.prompt_guide
-  author        TEXT,
-  version       TEXT,
-  source_url    TEXT,
-  created_at    INTEGER NOT NULL,
-  updated_at    INTEGER NOT NULL
-);
+- `tags` and `trigger_words` are JSON arrays; filtering goes through
+  `json_each()`. Normalization into junction tables is deferred until there
+  is a real need.
+- Deleting a LoRA cascades into `lora_vec_map`; the row in `vec_loras` is
+  dropped explicitly in the same transaction.
+- Deleting a family is blocked by RESTRICT as long as models or LoRAs
+  reference it.
+- **Rename** for a model or LoRA is a dedicated flow (see §5.3): it changes
+  the PK and updates all FKs atomically; the LoRA embedding is preserved
+  (only `lora_vec_map.lora_name` is updated).
 
--- LoRA
-CREATE TABLE loras (
-  name                TEXT PRIMARY KEY,  -- имя для <lora:name:weight>
-  display_name        TEXT NOT NULL,
-  description         TEXT NOT NULL,     -- markdown, LLM видит дословно
-  tags                TEXT NOT NULL DEFAULT '[]',   -- JSON array
-  trigger_words       TEXT NOT NULL DEFAULT '[]',   -- JSON array
-  recommended_weight  REAL,
-  author              TEXT,
-  version             TEXT,
-  source_url          TEXT,
-  family_id           TEXT NOT NULL REFERENCES families(id) ON DELETE RESTRICT,
-  created_at          INTEGER NOT NULL,
-  updated_at          INTEGER NOT NULL
-);
+### 3.2. Projects, sessions, chat, prompt history
 
--- Вектор-индекс
--- Размерность зафиксирована под выбранную модель эмбеддинга (§7: BAAI/bge-m3 → 1024).
--- Смена модели эмбеддинга = `reindex-all` CLI: DROP + CREATE с новой размерностью
--- и полная переиндексация всех LoRA.
-CREATE VIRTUAL TABLE vec_loras USING vec0(
-  embedding FLOAT[1024]
-);
+- **`projects`** — slug + display name and timestamps.
+- **`sessions`** — belong to a project (`ON DELETE CASCADE`). Hold:
+  - `name` (optional), `model_name` (FK → `models`, `ON DELETE SET NULL`).
+  - `use_negative` (0/1) — a workflow property: when `0`, the LLM returns
+    `negative: null` and the frontend hides the block.
+  - `vl_model_name` and `prompt_model_name` — *names* of the LMStudio
+    models picked for the VL call and for the prompt-writer call. Base URL
+    and API key are global (see §3.3).
+  - `vl_summary` — cached VL analysis of the source image (reused by all
+    later calls; never recomputed).
+  - `source_image_path`, `result_image_path` — relative paths to the
+    binaries.
+- **`session_pinned_loras`** — required LoRAs for a session: always added
+  to the LLM context on top of the retrieved set. Optional `weight_override`
+  on top of `recommended_weight`.
+- **`messages`** — append-only chat, `role ∈ {user, assistant, system}`.
+- **`prompts`** — append-only history of final prompts: `positive`,
+  `negative` (NULL when `use_negative=0`), `loras_json` (what the LLM
+  actually returned, verbatim, with no filtering of unknowns), plus the
+  debug fields `intents_json` and `retrieved_loras_json` for retrospection.
 
--- Явная связка name ↔ rowid для vec_loras (sqlite-vec не даёт FK из virtual)
-CREATE TABLE lora_vec_map (
-  lora_name  TEXT PRIMARY KEY REFERENCES loras(name) ON DELETE CASCADE,
-  rowid      INTEGER NOT NULL UNIQUE
-);
-```
+**Session deletion** is transactional on both sides: cascade in the DB
+(messages, prompts, pins) plus an application-level hook removes
+`data/images/<session_id>/`.
 
-**Соглашения:**
+### 3.3. Global settings and LMStudio model cache
 
-- `tags` и `trigger_words` — JSON-массивы, фильтрация через `json_each()`.
-  Нормализация в junction-таблицы отложена до реальной потребности (статистика,
-  производительность на 10K+ LoRA).
-- Удаление LoRA → CASCADE в `lora_vec_map`; строку в
-  `vec_loras` дропаем явно в той же транзакции.
-- Удаление family блокируется RESTRICT, пока на него есть ссылки.
-- `author`, `version`, `source_url` — всё опционально.
+- **`app_settings`** — single-row table (`id=1`):
+  - `lmstudio_url`, `lmstudio_api_key` — the global LMStudio endpoint.
+  - `show_hidden` — UI flag: whether to show hidden items across all
+    lists.
+- **`lm_models`** — a cache of models known to LMStudio. Populated via a
+  manual refresh from the UI:
+  - `enabled` — hides the model from per-session dropdowns without
+    removing it from the cache.
+  - `last_seen` — when LMStudio last returned it from `/v1/models`.
+  - `vision`, `tool_use`, `reasoning` — capabilities, auto-detected from
+    the LMStudio metadata.
+  - `favorite` — UI preference (lifts the model to the top of the list).
 
-### 3.2. Проекты, сессии, чат, история промптов — в той же БД
+### 3.4. Privacy / hidden flags
 
-```sql
-CREATE TABLE projects (
-  id          TEXT PRIMARY KEY,       -- slug
-  name        TEXT NOT NULL,
-  created_at  INTEGER NOT NULL,
-  updated_at  INTEGER NOT NULL
-);
+Every entity that shows up in a list (projects, sessions, families, models,
+loras, lm_models) carries a `hidden` column (0/1). The UI filters records
+with `hidden=1` unless `app_settings.show_hidden` is set to `1`. A single
+toggle on the Privacy page flips visibility globally. The point is privacy
+for demo sessions and NSFW content in the library without deleting data.
 
-CREATE TABLE sessions (
-  id                 TEXT PRIMARY KEY,                   -- ulid/uuid
-  project_id         TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-  name               TEXT,                               -- опц., юзерское
-  model_name         TEXT REFERENCES models(name) ON DELETE SET NULL,
-  use_negative       INTEGER NOT NULL DEFAULT 1,         -- 0/1
-  vl_endpoint        TEXT,                               -- JSON {base_url, model, api_key}
-  prompt_endpoint    TEXT,                               -- JSON
-  vl_summary         TEXT,                               -- кешированный VL-анализ исходника
-  source_image_path  TEXT,                               -- относит. <data_root>
-  result_image_path  TEXT,                               -- опц., под шаг 6
-  created_at         INTEGER NOT NULL,
-  updated_at         INTEGER NOT NULL
-);
-CREATE INDEX idx_sessions_project ON sessions(project_id, updated_at DESC);
+### 3.5. Binaries
 
--- Pinned LoRAs per session (обязательные, всегда в контексте)
-CREATE TABLE session_pinned_loras (
-  session_id       TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-  lora_name        TEXT NOT NULL REFERENCES loras(name)  ON DELETE CASCADE,
-  weight_override  REAL,                                 -- опц., overrides recommended_weight
-  PRIMARY KEY (session_id, lora_name)
-);
-
--- Append-only чат
-CREATE TABLE messages (
-  id          INTEGER PRIMARY KEY AUTOINCREMENT,
-  session_id  TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-  role        TEXT NOT NULL CHECK (role IN ('user','assistant','system')),
-  content     TEXT NOT NULL,
-  created_at  INTEGER NOT NULL
-);
-CREATE INDEX idx_messages_session ON messages(session_id, created_at);
-
--- История финальных промптов (append-only)
-CREATE TABLE prompts (
-  id                    INTEGER PRIMARY KEY AUTOINCREMENT,
-  session_id            TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-  positive              TEXT NOT NULL,
-  negative              TEXT,                            -- NULL если use_negative = 0
-  loras_json            TEXT NOT NULL,                   -- JSON [{name, weight}]
-  intents_json          TEXT,                            -- debug: output шага intent rewriting
-  retrieved_loras_json  TEXT,                            -- debug: что вернул retriever
-  created_at            INTEGER NOT NULL
-);
-CREATE INDEX idx_prompts_session ON prompts(session_id, created_at);
-```
-
-**Соглашения:**
-
-- `sessions.use_negative` — свойство воркфлоу (не модели). Если `0`, LLM
-  возвращает `negative: null`.
-- `sessions.vl_endpoint` / `prompt_endpoint` — JSON, независимые настройки
-  для VL и prompt-writer вызовов (может быть разные base_url / модели).
-- `session_pinned_loras` — обязательные LoRA, всегда добавляются в контекст
-  LLM поверх retrieved. Мультивыбор в `SessionSettingsDrawer` пишет сюда.
-- `prompts.intents_json` / `retrieved_loras_json` — для debug-pane и
-  ретроспективы, ничего не блокируют.
-- `sessions.source_image_path` / `result_image_path` — относительные пути к
-  файлам на диске. Сами бинарники — отдельно.
-- **Удаление сессии** — транзакционное по обоим сторонам: (1) `DELETE FROM
-  sessions` каскадно чистит БД (messages, prompts, pins); (2) application-level
-  hook удаляет `data/images/<session_id>/`. Порядок: сначала ФС → потом БД
-  (если БД упадёт после удаления файлов, картинки уже нет, а запись в БД мы
-  откатим retry-ом; если наоборот — получим dangling-папку). Обёртка в
-  `session_repo.delete(...)` обеспечивает оба шага.
-
-### 3.3. Бинарники — на диске
-
-```
-data/images/<session_id>/
-  ├── source.<ext>         # исходник
-  └── result.<ext>          # результат (опц., под шаг 6)
-```
-
-Плоская структура по `session_id` (без вложения в проекты) — сессия сама по
-себе уникальна, проект — это логическая группировка в БД. Удаление сессии
-через API → каскадно чистит БД и удаляет папку `data/images/<session_id>/`.
+`data/images/<session_id>/source.<ext>` and optional `result.<ext>` (for
+step 6). Flat structure keyed by `session_id`, no nesting under projects.
+Deleting a session also clears the folder.
 
 ---
 
 ## 4. LLM flows
 
-### 4.1. `generate-prompt` — двухступенчатый
+### 4.1. `analyze-source`
 
-**Шаг 1 — intent rewriting.**
+A single VL call against an LMStudio model with the `vision` capability.
+The system prompt instructs the model to describe the image in terms useful
+for i2i (composition, style, lighting, objects, mood). The result is free
+text, stored in `sessions.vl_summary` and reused by every later call.
 
-Вход: VL-summary исходника + последние N сообщений чата + агрегированный
-список известных тегов (distinct `loras.tags`).
+### 4.2. `chat` (SSE)
 
-LLM выдаёт структурированный список интентов:
+Streaming chat for discussing the desired changes. History is append-only
+in `messages`. It **does not** trigger generate-prompt: generation is
+launched explicitly by the user with a button. A tool-calling agent is
+post-MVP.
 
-```json
-{
-  "intents": [
-    { "kind": "style",     "query": "dramatic moody anime lighting" },
-    { "kind": "detail",    "query": "fine detail enhancer" },
-    { "kind": "character", "query": "red hair long" }
-  ]
-}
-```
+### 4.3. `generate-prompt` — two-stage flow
 
-- `kind` — свободная строка. Бэк передаёт LLM агрегированный список известных
-  тегов (`SELECT DISTINCT json_each.value FROM loras, json_each(loras.tags)`)
-  и инструктирует "используй один из этих тегов, либо придумай новый, если
-  ничего не подходит". На cold-start (пустая/почти пустая библиотека) список
-  тегов пуст — LLM генерит `kind` свободно. Retriever использует `kind` как
-  дополнительный фильтр только если значение точно совпадает с существующим
-  тегом; иначе — игнорирует и ретривит по `query` без фильтра.
-- `query` — поисковая фраза в терминах *эффекта*, не описания картинки.
+**Step 1 — intent rewriting.** The LLM gets the VL summary, the last N
+chat messages, and an aggregated list of known tags from `loras.tags`. It
+returns a structured list of intents: `[{kind, query}]`, where:
 
-**Шаг 2 — retrieval.**
+- `kind` is a free-form string. The backend asks the LLM to reuse an
+  existing tag if it fits; otherwise to invent a new one. The retriever
+  uses `kind` as a pre-filter only when it matches an existing tag
+  exactly; otherwise it ignores `kind` and retrieves by `query` without a
+  filter. On cold start (empty library) the tag list is empty and the LLM
+  generates `kind` freely.
+- `query` is a search phrase in terms of *effect*, not a description of
+  the picture.
 
-Для каждого `intent` бэк:
+**Step 2 — retrieval.** For each `intent`:
 
-1. Эмбеддит `query` через `sentence-transformers` (модель мультиязычная, см.
-   §6).
-2. Делает top-K по `vec_loras` (K ≈ 10–15 per intent), с опциональным
-   pre-filter: `WHERE family_id = selected_model.family_id AND ... tag filter`.
-3. Объединяет результаты, дедуплицирует по `lora_name`.
+1. `query` is embedded (`BAAI/bge-m3`, multilingual).
+2. Top-K against `vec_loras` (K ≈ 10–15 per intent), with an optional
+   pre-filter by `family_id` of the chosen model and/or by a matching
+   `kind` tag.
+3. Results are merged and deduplicated by LoRA name.
+4. The session's `pinned_loras` are added to the set.
 
-К этому набору добавляются все `pinned_loras` из session.
+**Step 3 — prompt composition.** A second LLM call receives:
 
-**Шаг 3 — prompt composition.**
+- `family.prompt_guide` (+ `prompt_i2i` or `prompt_t2i`, depending on the
+  mode).
+- `model.description` (when not null).
+- Full `description` for every candidate (retrieved + pinned).
+- The VL summary and the last N chat messages.
+- The instruction to return JSON conforming to a fixed schema.
 
-Второй LLM-вызов. Получает:
+It returns `GeneratedPrompt`:
 
-- `family.prompt_guide` (базовые правила семейства).
-- `model.description` (дельта, если не null).
-- Полные `loras.description` для всех кандидатов (retrieved + pinned).
-- VL-summary.
-- Последние N сообщений чата.
-- Инструкцию: "верни JSON по schema GeneratedPrompt".
+- `positive` — required non-empty string.
+- `negative` — string or `null` (when `session.use_negative = 0`).
+- `loras` — array of `{name, weight}` with weight in `[-2.0, 2.0]`; may be
+  empty.
 
-Возвращает финальную схему (см. §4.4).
+**Conventions:**
 
-### 4.2. `analyze-source`
+- A LoRA whose `name` is missing from the `loras` table — the frontend
+  shows ⚠ but still assembles the `<lora:name:weight>` string (lenient
+  validation: the LLM may suggest a useful signal — a LoRA the user does
+  not have yet).
+- The backend writes `loras_json` into `prompts` verbatim, without
+  filtering unknowns. Validation is purely formal (schema, weight range).
+- Parameters (sampler / cfg / steps / denoise / size / seed) are **not**
+  part of the schema — that is the user's / ComfyUI's concern.
+- Explanations of "why this" go into a regular assistant chat message, not
+  into the JSON.
+- Conflicts between `family.prompt_guide` and a specific LoRA description
+  are resolved in favor of the LoRA (trigger words win over general rules)
+  — this is stated inside the prompt_guide itself.
 
-Единственный VL-вызов. На вход картинка + system-prompt "опиши изображение в
-терминах, полезных для i2i генерации (композиция, стиль, освещение, объекты,
-настроение)". Результат — свободный текст, сохраняется в session state и
-используется во всех последующих вызовах.
+### 4.4. Library assistants
 
-### 4.3. `chat` (SSE)
+Help populate the library without manual copy-paste. They run as background
+tasks (see §5.4) with live status streamed over SSE.
 
-Обычный стриминг-чат для обсуждения желаемых изменений. История кладётся в
-таблицу `messages` (INSERT на каждое завершённое сообщение). Этот endpoint
-**не вызывает** generate-prompt — генерация промпта инициируется отдельно
-пользователем (кнопкой) или модельным tool-call (пост-MVP).
-
-### 4.4. JSON schema финального промпта (`GeneratedPrompt`)
-
-```json
-{
-  "positive": "string, required, non-empty",
-  "negative": "string | null",
-  "loras": [
-    { "name": "string, required", "weight": "number, [-2.0, 2.0]" }
-  ]
-}
-```
-
-**Поведение:**
-
-- `negative: null` — когда `session.use_negative = false`. Фронт прячет блок.
-- LoRA с `name`, которого нет в таблице `loras`, — фронт показывает ⚠, но всё
-  равно собирает строку `<lora:name:weight>` (lenient validation — LLM может
-  предложить LoRA, которой у юзера нет, это полезный сигнал).
-- **Бэк сохраняет `loras_json` в `prompts` верабтим**, не фильтруя unknown —
-  история должна отражать то, что LLM реально предложила. Валидация только
-  формальная (schema, диапазон веса).
-- `loras: []` допустимо.
-- Параметры (sampler / cfg / steps / denoise / размеры / seed) в schema **не
-  входят** — это забота юзера/ComfyUI.
-- Пояснения "почему так" — обычным чат-сообщением ассистента, не в JSON.
-
-Реализация: Pydantic-модель, LLM получает `response_format={"type":
-"json_schema", "schema": ...}`. Фоллбэк — `instructor`-стиль парсинг
-свободного текста, если сервер не умеет strict JSON.
-
-### 4.5. Сборка системного промпта для `prompt composition`
-
-```
-{family.prompt_guide}
-
-{model.description if not null}
-
-# Available LoRAs
-{loras[i].description                  # полный markdown, для каждого кандидата
- — separated by "---"}
-
-# Source image analysis
-{vl_summary}
-
-# Conversation
-{last N chat messages}
-
-# Output
-Return JSON matching this schema: {GeneratedPrompt schema}.
-use_negative = {session.use_negative}  → если false, negative должен быть null.
-```
-
-Конфликты между `family.prompt_guide` и описанием конкретной LoRA разрешаются
-в пользу LoRA (trigger-слова важнее общих правил) — это формулируется в самом
-prompt_guide одной фразой.
+- **Family prompt guide assistant.** Takes the family name/description
+  plus optional links or hand-written notes, and returns filled-in
+  `prompt_guide`, `prompt_i2i`, `prompt_t2i`. Requires a `tool_use`-capable
+  model.
+- **LoRA metadata assistant.** Takes a Civitai URL or AIR (or manual
+  data) and returns a filled-out card: `description` (markdown), `tags`,
+  `trigger_words`, `recommended_weight`, `author`, `version`,
+  `source_url`, and a `family_id` suggestion. Uses the Civitai importer
+  (see §5.5) and the LLM to normalize the text.
 
 ---
 
 ## 5. Backend
 
-**Стек:** Python 3.11+, FastAPI + uvicorn, Pydantic v2, `openai` SDK (для
-LMStudio), `sentence-transformers`, `sqlite-vec`, `numpy`.
+**Stack:** Python 3.11+, FastAPI + uvicorn[standard], Pydantic v2, `httpx`
+(direct LMStudio calls, no `openai` SDK), `sentence-transformers`,
+`sqlite-vec`, `numpy`, `python-multipart`. Dev: `pytest`, `ruff`. There are
+**no** dependencies on `langchain`, `llamaindex`, `watchdog`, `chromadb`,
+`instructor` — see the concept doc for rationale; structured LLM output
+goes through LMStudio's native `response_format`.
 
-**Структура:**
+CLI commands (run via `uv run …` from `backend/`):
 
-```
-backend/
-├── pyproject.toml
-├── app/
-│   ├── main.py               # FastAPI entry
-│   ├── api/
-│   │   ├── projects.py
-│   │   ├── sessions.py
-│   │   ├── library.py        # CRUD families/models/loras
-│   │   ├── chat.py           # SSE
-│   │   └── prompt.py         # generate-prompt (двухступенчатый)
-│   ├── services/
-│   │   ├── llm_client.py     # OpenAI-compat обёртка
-│   │   ├── vl_client.py
-│   │   ├── embedder.py       # sentence-transformers
-│   │   ├── indexer.py        # upsert → embedding → sqlite-vec
-│   │   ├── retriever.py      # top-K per intent
-│   │   ├── prompt_builder.py # сборка system prompt'а
-│   │   └── sessions.py
-│   ├── storage/
-│   │   ├── db.py             # sqlite + sqlite-vec init, WAL, pool, migrations
-│   │   ├── library_repo.py   # families/models/loras CRUD
-│   │   ├── session_repo.py   # projects/sessions/messages/prompts CRUD
-│   │   └── images.py         # file I/O для картинок (<data_root>/images/...)
-│   └── models/               # Pydantic схемы (в т.ч. GeneratedPrompt, IntentList)
-└── tests/
-```
+- `db-init` — applies migrations to `data/app.db`.
+- `dev` — runs the API on `localhost:8000`.
+- `reindex-all` — rebuilds `vec_loras` for every LoRA (cold start or
+  embedding model change).
 
-**Endpoints:**
+### 5.1. API surface (REST + SSE)
 
-- `GET /api/projects`, `POST /api/projects`
-- `GET /api/projects/{p}/sessions`, `POST /api/projects/{p}/sessions`
-- `GET /api/sessions/{s}`, `PATCH /api/sessions/{s}`
-- `POST /api/sessions/{s}/source` (upload)
-- `POST /api/sessions/{s}/analyze-source` (VL → summary)
-- `POST /api/sessions/{s}/chat` (SSE)
-- `POST /api/sessions/{s}/generate-prompt` (двухступенчатый). Возвращает
-  объект:
-  ```json
-  {
-    "prompt_id": 123,
-    "prompt": { /* GeneratedPrompt: positive, negative, loras */ },
-    "intents": [ /* output шага intent rewriting */ ],
-    "retrieved": [ /* имена LoRA с scores по каждому intent */ ]
-  }
-  ```
-  Те же `intents` и `retrieved` персистятся в `prompts.intents_json` /
-  `retrieved_loras_json`. Фронт получает всё inline за один запрос; повторно
-  подтягивать из `prompts` не нужно (но можно — эндпоинт `GET
-  /api/sessions/{s}/prompts` отдаст историю с теми же полями).
-- `GET /api/library/families`, `POST`, `PUT /{id}`, `DELETE /{id}`
-- `GET /api/library/models`, `POST`, `PUT /{name}`, `DELETE /{name}`
-- `GET /api/library/loras` (с фильтрами по tag, family_id), `POST`,
-  `PUT /{name}`, `DELETE /{name}`
-- Под шаг 6 (пост-MVP): `POST /api/sessions/{s}/result`, `analyze-result`.
+Prefix is `/api/`. Endpoints are grouped by domain.
 
-**Индексер:**
+- **Projects:** list, create, partial update, delete, toggle `hidden`.
+- **Sessions:** list per project, create, read, partial update, delete,
+  toggle `hidden`. Source upload (`POST /sessions/{s}/source`). VL
+  analysis (`POST /sessions/{s}/analyze-source`). Chat (`POST
+  /sessions/{s}/chat`, SSE). Prompt generation (`POST
+  /sessions/{s}/generate-prompt`) — returns `prompt_id` +
+  `GeneratedPrompt` + `intents` + `retrieved` inline in a single response.
+- **Library / families:** list, read, create, replace, delete, toggle
+  `hidden`, `POST /families/assist` (kicks off the assistant, returns a
+  task id).
+- **Library / models:** list, read, create, replace, delete, toggle
+  `hidden`, `POST /models/{name}/rename` (atomic rename).
+- **Library / loras:** list with filters (tag, family), read, create,
+  replace, delete, toggle `hidden`, `POST /loras/{name}/rename`,
+  `GET /loras/civitai-import` (preview by AIR/URL), `POST /loras/assist`.
+- **Settings / LMStudio:** read/write `lmstudio_url` and `api_key`,
+  `POST /refresh` (pulls the current model list into `lm_models` and
+  refreshes capability flags), `POST /unload-all` (asks LMStudio to
+  unload every loaded instance — to free VRAM), the `lm_models` list,
+  partial updates of model flags (`enabled`, `favorite`, `hidden`,
+  manual capability overrides).
+- **Settings / Privacy:** read/write `show_hidden`.
+- **Tasks:** `GET /api/tasks` (snapshot of all known tasks),
+  `GET /api/tasks/stream` (SSE with deltas for creation / progress /
+  completion).
 
-- Срабатывает на любой `POST/PUT/DELETE` в `/api/library/loras`.
-- Пересчитывает эмбеддинг для `description + tags + trigger_words` (join через
-  разделитель), апсертит в `vec_loras` + `lora_vec_map` в одной транзакции.
-- Reindex-all CLI-команда для миграций (смена модели эмбеддинга,
-  пересборка).
+For step 6 (post-MVP): `POST /sessions/{s}/result`,
+`POST /sessions/{s}/analyze-result` — only an architectural placeholder
+with a frontend stub.
+
+### 5.2. LoRA indexer
+
+- Triggers on every write/delete through `/api/library/loras` and on
+  rename.
+- The embedded text is `description + tags + trigger_words` joined by a
+  separator.
+- Upsert into `vec_loras` + `lora_vec_map` happens in the same transaction
+  as the write to `loras`.
+- Application startup runs a sweep: it finds LoRAs without an entry in
+  `lora_vec_map` and queues them for reindex (as a background task). This
+  covers the case where indexing earlier failed because the embedder was
+  unavailable.
+- The `reindex-all` CLI hands the task runner a full reindex (DROP +
+  recreate the vec table when the dimension changes).
+
+### 5.3. Renaming a model or LoRA
+
+The name is the PK, so rename is non-trivial:
+
+- Single transaction: check that the new name is unique, write the row
+  with the new PK, update every FK (`models.name` → `sessions.model_name`;
+  `loras.name` → `session_pinned_loras.lora_name` +
+  `lora_vec_map.lora_name`), delete the old row.
+- The embedding is preserved: `vec_loras.rowid` stays the same and only
+  `lora_vec_map.lora_name` changes. There is no need to recompute the
+  embedding for a pure rename.
+
+### 5.4. Background task registry
+
+A general-purpose mechanism for long-running operations (reindex, Civitai
+import, assistants).
+
+- An in-process registry with a unique id, status (`pending` / `running` /
+  `done` / `error`), progress, last message, and an optional result.
+- A pub/sub channel that the SSE endpoint `/api/tasks/stream` relays to
+  the frontend.
+- On subscribe the client gets the current snapshot of all known tasks
+  plus deltas as events occur. The UI surfaces them in a global indicator
+  and embeds them into assistant forms (the parent task → status streamed
+  into the drawer).
+- Startup sweep: queues a reindex for LoRAs missing an embedding plus any
+  retry cases, so the user does not depend on running the CLI manually.
+
+### 5.5. LMStudio client and Civitai importer
+
+- **`lmstudio_client`** — a direct HTTP client over LMStudio's
+  OpenAI-compatible endpoints: `/v1/models`, `/v1/chat/completions`,
+  `/v1/completions` (for vision — chat completions with image content). It
+  also uses LMStudio-specific endpoints to list loaded instances and to
+  unload models (for the Unload all button). Capability detection is a
+  combination of LMStudio metadata and manual overrides from `lm_models`.
+- **`civitai`** — a parser for Civitai AIR identifiers and URLs, fetches
+  the public model/version through the Civitai API, converts the
+  description HTML to markdown, and normalizes `trigger_words` and `tags`.
+  Used by both the manual import button and the LoRA assistant.
 
 ---
 
 ## 6. Frontend
 
-**Стек:** Vite + React 18 + TypeScript + Radix UI (headless primitives:
-Dialog, DropdownMenu, Popover, Tooltip и т.д. — подключаем по мере надобности)
-+ CSS modules + `global.css` + PostCSS (autoprefixer + nested) +
-`lucide-react` (иконки) + Zustand (клиентский стейт) + TanStack Query
-(серверные данные) + `react-router` + `react-resizable-panels` +
-`@uiw/react-md-editor` (редактор для description/prompt_guide).
+**Stack:** Vite + React 18 + TypeScript, Radix UI (only the headless
+primitives we need — Dialog), `lucide-react` (icons), Zustand (client
+state), TanStack Query (server data, invalidation after mutations),
+`react-router-dom`, `react-resizable-panels`, `@uiw/react-md-editor`
+(markdown editor for description-like fields). CSS: PostCSS (autoprefixer
++ nested), per-component CSS modules + a shared `global.css` with design
+tokens. No Tailwind, no shadcn. Package manager: pnpm.
 
-**Без Tailwind/shadcn.** Дизайн-система уже отработана в прототипе
-(`mvp-ui-mock/app/ds/`) как набор CSS-переменных-токенов + `primitives.css` /
-`extended.css`. Портируем её как `global.css` + набор токенов; специфичные
-стили компонентов — в `.module.css` рядом с компонентом.
+### 6.1. Decomposition
 
-**Декомпозиция — атомарный дизайн:**
+Atomic design: `atoms/` (Button, Badge, Icon), `molecules/` (form blocks,
+SourceImagePane, SessionSettingsDrawer), `organisms/` (LibraryCrud,
+PromptPane, ChatPane, ProjectSidebar, CRUD forms, LmStudioSettings,
+TaskIndicator), `templates/` (WorkspaceLayout, LibraryLayout, AppShell).
+Pages (`routes/`) are assembled from templates + organisms; data flows in
+through TanStack Query hooks in `src/api/`.
 
-```
-frontend/src/components/
-├── atoms/        # Button, Icon, Badge, Input, Slider, ...
-├── molecules/    # FormField, LoraRow, TagChip, StatBadge, ...
-├── organisms/    # SourceImagePane, ChatPane, PromptPane, LibraryTable, ...
-└── templates/    # WorkspaceLayout, LibraryLayout, AppShell
-```
+### 6.2. Screens
 
-Страницы (`pages/`) собираются из templates + organisms, получают данные
-через TanStack Query хуки (`src/api/`).
+- **Workspace** (`/projects/:p/sessions/:s`) — the main four-pane area:
+  ProjectSidebar, SourceImagePane, ResultImagePane (placeholder for step
+  6), ChatPane, PromptPane.
+- **Project landing** (`/projects/:p`) — the project's session list.
+- **Library:** `/library/families`, `/library/models`, `/library/loras` —
+  CRUD tables with search and filters. Edit forms with markdown editors
+  for `description` / `prompt_guide`. An inline rename block under the
+  name field for models and LoRAs. Assistant launch buttons with an
+  embedded live indicator for the corresponding task.
+- **Settings / LMStudio** (`/settings/lmstudio`) — URL/API key config,
+  Refresh, Unload all, an `lm_models` table with `enabled`, `favorite`,
+  `hidden` toggles and manual capability overrides.
+- **Settings / Privacy** (`/settings/privacy`) — the `show_hidden`
+  toggle.
+- **SessionSettingsDrawer** — picks `model`, multi-checkbox/tag selector
+  for pinned LoRAs, picks `vl_model_name` and `prompt_model_name` (each
+  filtered by the relevant capability), `use_negative`.
 
-**Пакетный менеджер:** pnpm.
+### 6.3. PromptPane details
 
-**Экраны:**
+- Positive / Negative — two textareas with a character counter in the
+  caption.
+- LoRA list: one row per LoRA with a `pinned / retrieved / picked` badge,
+  a weight slider, and trigger words (when the `name` is known; otherwise
+  ⚠ and a weight editor without trigger words).
+- A **Copy LoRA string** button assembles `<lora:a:0.6> <lora:b:0.8> ...`.
+- Copy positive / Copy negative buttons — independent.
+- Debug pane (collapsed by default): intents → retrieved LoRAs → picked.
 
-- `/projects/:p/sessions/:s` — основная 4-панельная рабочая зона:
-  `ProjectSidebar`, `SourceImagePane`, `ResultImagePane`,
-  `ChatPane`, `PromptPane` (positive / negative / LoRA-строка — табы или
-  стэк).
-- `/library/families`, `/library/models`, `/library/loras` — CRUD-списки с
-  поиском/фильтрами, форма редактирования (все markdown-поля в
-  `react-md-editor`).
-- `SessionSettingsDrawer` — выбор model + pinned LoRAs
-  (мульти-чекбокс/тег-селектор) + endpoints (VL, prompt) + `use_negative`.
+### 6.4. Hidden indicators
 
-**PromptPane детали:**
+Anywhere an entity with `hidden` is rendered (sidebar, library tables, the
+LMStudio table), an eye / eye-off icon is shown as a control. Hidden
+entries appear in lists only when `show_hidden` is on.
 
-- Positive / negative — две textarea, caption с символьным счётчиком.
-- LoRA-список: строка на LoRA с бейджем `pinned / retrieved / picked`, слайдер
-  веса, trigger-words из `loras` таблицы (если `name` неизвестен — ⚠ бейдж и
-  вес-редактор без trigger-слов).
-- Отдельная кнопка **Copy LoRA string** — собирает
-  `<lora:a:0.6> <lora:b:0.8> ...`.
-- Кнопки Copy positive / Copy negative — независимые.
-- Debug-pane (опционально, свёрнут): intents → retrieved LoRAs → picked.
+### 6.5. Task indicator
 
----
-
-## 7. Внешние зависимости
-
-**Бэк:**
-- `fastapi`, `uvicorn[standard]`
-- `pydantic` v2
-- `openai` (для LMStudio OpenAI-compat)
-- `sentence-transformers` с моделью **`BAAI/bge-m3`** (multilingual, 1024-dim
-  — размерность `vec_loras` из §3.1 завязана на этот выбор). Первый запуск
-  тянет ~2GB весов. Смена модели = `reindex-all` CLI (см. §3.1). Альтернатива
-  для слабых машин — `intfloat/multilingual-e5-base` (768-dim), но потребует
-  синхронного изменения `CREATE VIRTUAL TABLE vec_loras` — не под флаг, а
-  миграцией.
-- `sqlite-vec` (PyPI, precompiled binaries для Windows)
-- `numpy`
-- `python-multipart` (upload картинок)
-
-**Без**: `langchain`, `llamaindex`, `watchdog`, `python-frontmatter`,
-`chromadb` — обоснования см. выше. При появлении полноценного tool-calling
-агента (пост-MVP) — рассмотрим `langgraph` точечно.
-
-**Фронт:**
-- `react`, `react-dom`, `vite`, `typescript`
-- `@radix-ui/react-*` (headless primitives, только нужные)
-- `lucide-react` (иконки)
-- `postcss`, `autoprefixer`, `postcss-nested` (CSS modules из коробки Vite)
-- `zustand`, `@tanstack/react-query`
-- `react-router-dom`
-- `react-resizable-panels`
-- `@uiw/react-md-editor`
+The subscription to `/api/tasks/stream` lives globally. A header-level
+indicator shows the count of active tasks; specific parent forms (LoRA
+assistant, family assistant, import) embed the live status of their own
+task into their own UI.
 
 ---
 
-## 8. Репо-структура
+## 7. External dependencies
 
-```
-sd-chisel/
-├── README.md
-├── .gitignore                  # /data/, прочее
-├── doc/
-│   └── concept.md              # исходный prose-концепт
-├── docs/
-│   └── spec/
-│       └── technical_specifications.md   # этот файл
-├── backend/
-│   ├── pyproject.toml
-│   └── app/ ... (см. §5)
-├── frontend/
-│   ├── package.json
-│   ├── vite.config.ts
-│   └── src/ ... (см. §6)
-└── data/                        # git-ignored, создаётся бэком при первом запуске
-    ├── app.db
-    └── images/<session_id>/source.*, result.*
-```
+**Backend (runtime):** `fastapi`, `uvicorn[standard]`, `pydantic` v2,
+`httpx`, `sentence-transformers` (`BAAI/bge-m3`, multilingual, 1024-dim —
+the `vec_loras` dimension is tied to this choice; the first run pulls
+~2 GB of weights into `~/.cache/huggingface/`), `sqlite-vec` (PyPI,
+precompiled binaries for Windows), `numpy`, `python-multipart`. Dev
+extras: `pytest`, `ruff`.
+
+**Backend (intentionally absent):** `langchain`, `llamaindex`, `watchdog`,
+`python-frontmatter`, `chromadb`, the `openai` SDK. A tool-calling agent
+(post-MVP) will be considered on top of `langgraph` only as needed.
+
+**Frontend:** `react`, `react-dom`, `vite`, `typescript`,
+`@radix-ui/react-dialog` (other primitives — added on demand),
+`lucide-react`, `postcss` + `autoprefixer` + `postcss-nested`, `zustand`,
+`@tanstack/react-query`, `react-router-dom`, `react-resizable-panels`,
+`@uiw/react-md-editor`. Tests: `vitest`, `@testing-library/*`, `jsdom`.
+
+**External services:** LMStudio locally (chat / completions; embeddings are
+done locally via `sentence-transformers`, not by LMStudio), the Civitai
+public API for importing LoRA metadata.
 
 ---
 
-## 9. MVP scope / вне MVP
+## 8. Repo layout
 
-**В MVP:**
-- Проекты + сессии (CRUD).
-- Upload исходника, VL-анализ.
+- `backend/` — Python backend.
+  - `pyproject.toml`, `migrations/*.sql` — DB schema versions.
+  - `app/main.py` — FastAPI entry.
+  - `app/api/` — REST/SSE endpoints (projects, sessions, chat, prompt,
+    library, settings, tasks).
+  - `app/services/` — embedder, indexer, retriever, prompt_builder,
+    prompt_orchestrator, lmstudio_client, civitai, lora_reindex,
+    task_runner, library_service.
+  - `app/storage/` — db init/migrations, library_repo, session_repo,
+    settings_repo, images.
+  - `app/models/` — Pydantic schemas (including `GeneratedPrompt` and
+    `IntentList`).
+  - `app/cli/` — `init_db`, `dev`, `reindex_all`.
+  - `tests/` — pytest, plus a fake-embedder fixture for hermetic tests.
+- `frontend/` — Vite SPA.
+  - `package.json`, `vite.config.ts`.
+  - `src/api/` — TanStack Query hooks over REST/SSE.
+  - `src/components/{atoms,molecules,organisms,templates}/`.
+  - `src/routes/` — workspace, library/{families,models,loras},
+    settings/{lmstudio,privacy}.
+  - `src/store/` — Zustand store for client state.
+  - `src/styles/`, `assets/`, `lib/`.
+- `scripts/` — `dev.sh` / `dev.ps1` / `dev.mjs` (raise backend + frontend
+  with one command, merging stdout with `[be]` / `[fe]` prefixes).
+- `docs/` — the specification (this file).
+- `doc/concept.md` — the original prose concept (historical).
+- `mvp-ui-mock/` — design-system prototype (CSS tokens, primitives —
+  ported into `frontend/src/styles/`).
+- `data/` — runtime state (git-ignored): `app.db` + `images/<session_id>/`.
+
+---
+
+## 9. MVP scope / out of MVP
+
+**Shipped (MVP, Slice 6):**
+
+- Projects + sessions (CRUD).
+- Source upload, VL analysis.
 - Chat (SSE).
-- Generate-prompt (двухступенчатый, intent rewriting + RAG retrieval +
-  композиция).
-- Library CRUD для families / models / loras (UI + REST).
-- Индексер LoRA (автоматический на upsert).
-- PromptPane с copy-кнопками.
-- Pinned LoRAs, use_negative как session-settings.
+- Generate-prompt (two-stage: intent rewriting + RAG retrieval +
+  composition).
+- Library CRUD for families / models / loras (UI + REST).
+- LoRA indexer (automatic on upsert, plus a startup sweep).
+- PromptPane with copy buttons.
+- Pinned LoRAs and `use_negative` as session settings.
 
-**Вне MVP (задел в архитектуре):**
-- VL-критика результата (шаг 6) — UI-плейсхолдер есть, endpoint-заглушка.
-- Tool-calling агент (variant D из брейнсторма) — потенциально `langgraph`.
-- Импорт LoRA из `.md`-папки (CLI) — отложен по решению на брейнсторме.
-- Автоэкспорт БД в markdown-dump или снапшоты для git-истории.
-- Шаринг описаний (export/import БД) как UI-фича.
-- Нормализация `tags` / `trigger_words` в junction-таблицы — только если
-  производительность/фичи потребуют.
-- Статистика использования LoRA, рейтинги, "last used" трекинг.
+**Shipped post-MVP, already in this tree:**
+
+- LMStudio settings + capability detection (`vision`, `tool_use`,
+  `reasoning`) + the `lm_models` cache + Unload all.
+- Mode-specific prompt guides (`prompt_i2i`, `prompt_t2i`).
+- Privacy/hidden flags on every list entity + a global `show_hidden`.
+- Rename flow for models and LoRAs that preserves embeddings.
+- Background task registry + SSE indicator.
+- Civitai import for LoRAs (parser + metadata fetch + UI button).
+- Library assistants (family prompt guide + LoRA metadata) on top of the
+  task registry.
+
+**Out of scope (architectural placeholders):**
+
+- VL critique of the result (step 6) — UI placeholder, endpoint stub.
+- Tool-calling agent — possibly on `langgraph`.
+- Importing LoRAs from a local `.md` folder (CLI).
+- Auto-export of the DB to a markdown dump or git-friendly snapshots.
+- Sharing descriptions (DB export/import) as a UI feature.
+- Normalizing `tags` / `trigger_words` into junction tables — only when
+  performance or features demand it.
+- LoRA usage stats, ratings, "last used" tracking.
