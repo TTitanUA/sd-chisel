@@ -28,6 +28,9 @@ export function ChatPane({ session }: { session: Session }) {
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const rows = messages.data ?? [];
+  const hasAnySources = session.source_images.length > 0;
+  const mainAnalysis =
+    session.source_images.find((i) => i.is_main)?.analysis ?? null;
   const showOptimistic = optimistic && !rows.some((r) => r.id === optimistic.id);
   const showStreamingThinking = pending && streaming.length === 0;
   const showStreamingBubble = pending && streaming.length > 0;
@@ -96,7 +99,7 @@ export function ChatPane({ session }: { session: Session }) {
         <div className={styles.scroll} ref={scrollRef}>
           {rows.length === 0 && !showOptimistic && !showStreamingThinking && !showStreamingBubble && (
             <div className={styles.empty}>
-              {session.source_image_path
+              {hasAnySources
                 ? <>Describe the change you want. I&rsquo;ll pick LoRAs from your library and assemble a prompt.</>
                 : <>Add a source image first &mdash; I need a VL summary to anchor the prompt.</>}
             </div>
@@ -117,7 +120,7 @@ export function ChatPane({ session }: { session: Session }) {
           <textarea
             className={styles.textarea}
             placeholder={
-              session.source_image_path
+              hasAnySources
                 ? "Describe the change…"
                 : "Add source image first"
             }
@@ -133,10 +136,10 @@ export function ChatPane({ session }: { session: Session }) {
               size="sm"
               icon={<Icon name="Sparkles" size={12} />}
               onClick={() => generate.mutate()}
-              disabled={generate.isPending || !session.vl_summary || isReindexing}
+              disabled={generate.isPending || !mainAnalysis || isReindexing}
               title={
-                !session.vl_summary
-                  ? "Run Analyze on the source image first"
+                !mainAnalysis
+                  ? "Run Analyze on the main source image first"
                   : isReindexing
                     ? "LoRA index is updating — try again in a moment"
                     : "Generate prompt"

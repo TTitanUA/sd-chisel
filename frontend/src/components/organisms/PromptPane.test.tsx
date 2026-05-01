@@ -16,9 +16,20 @@ const session: Session = {
   model_name: "m1",
   use_negative: true,
   pinned_loras: [{ lora_name: "pinned-x", weight_override: null }],
-  source_image_path: null,
-  source_image_url: null,
-  vl_summary: "summary",
+  source_images: [
+    {
+      id: "img1",
+      session_id: "ses1",
+      path: "images/ses1/sources/img1.png",
+      url: "/media/images/ses1/sources/img1.png",
+      original_filename: "main.png",
+      is_main: true,
+      analysis: "summary",
+      analysis_prompt: null,
+      created_at: 0,
+      updated_at: 0,
+    },
+  ],
   vl_model_name: null,
   prompt_model_name: "pm-1",
   hidden: false,
@@ -53,7 +64,7 @@ beforeEach(() => {
 });
 
 describe("PromptPane", () => {
-  it("renders empty state when no prompts and disables generate without vl_summary", () => {
+  it("renders empty state when no prompts and disables generate without main analysis", () => {
     vi.spyOn(promptsApi, "usePrompts").mockReturnValue({
       data: [],
     } as unknown as ReturnType<typeof promptsApi.usePrompts>);
@@ -63,7 +74,7 @@ describe("PromptPane", () => {
       error: null,
     } as unknown as ReturnType<typeof promptsApi.useGeneratePrompt>);
 
-    wrap(<PromptPane session={{ ...session, vl_summary: null }} />);
+    wrap(<PromptPane session={{ ...session, source_images: [] }} />);
     expect(screen.getByText(/No prompt yet/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Generate/i })).toBeDisabled();
   });

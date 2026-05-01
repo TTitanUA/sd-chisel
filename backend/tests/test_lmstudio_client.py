@@ -205,6 +205,27 @@ def test_analyze_image_sends_to_v1_chat_completions():
     assert any(p.get("type") == "image_url" for p in parts)
 
 
+def test_analyze_image_appends_refining_prompt_when_provided():
+    captured: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.content)
+        return _chat_response("ok")
+
+    lmstudio_client.analyze_image(
+        endpoint=ENDPOINT,
+        model="qwen-vl",
+        image_bytes=b"x",
+        content_type="image/png",
+        refining_prompt="focus on the cat",
+        transport=_make_transport(handler),
+    )
+    parts = captured["body"]["messages"][-1]["content"]
+    text_part = next(p for p in parts if p.get("type") == "text")
+    assert "focus on the cat" in text_part["text"]
+    assert "Additional guidance" in text_part["text"]
+
+
 # --- chat_complete ---
 
 def test_chat_complete_sends_to_v1_chat_completions():

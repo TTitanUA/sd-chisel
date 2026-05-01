@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFil
 from app import config as app_config
 from app.api.deps import get_conn
 from app.models.session import (
+    AnalyzeSourceRequest,
     HiddenPatch,
     ProjectCreate,
     ProjectOut,
@@ -15,9 +16,11 @@ from app.models.session import (
     SessionCreate,
     SessionOut,
     SessionUpdate,
+    SourceImageOut,
 )
 from app.services import lmstudio_client
-from app.storage import images, session_repo, settings_repo
+from app.storage import images, session_repo, settings_repo, source_image_repo
+from app.utils.ids import new_id
 
 Conn = Annotated[sqlite3.Connection, Depends(get_conn)]
 
@@ -34,11 +37,27 @@ def _not_found(kind: str, key: str) -> HTTPException:
     )
 
 
-def _session_url(path: str | None) -> str | None:
-    return f"/media/{path}" if path else None
+def _media_url(path: str) -> str:
+    return f"/media/{path}"
 
 
-def _session_to_api_dict(row: dict) -> dict:
+def _source_image_to_api_dict(row: dict) -> dict:
+    return {
+        "id": row["id"],
+        "session_id": row["session_id"],
+        "path": row["path"],
+        "url": _media_url(row["path"]),
+        "original_filename": row["original_filename"],
+        "is_main": bool(row["is_main"]),
+        "analysis": row.get("analysis"),
+        "analysis_prompt": row.get("analysis_prompt"),
+        "created_at": row["created_at"],
+        "updated_at": row["updated_at"],
+    }
+
+
+def _session_to_api_dict(conn: sqlite3.Connection, row: dict) -> dict:
+    sources = source_image_repo.list_for_session(conn, row["id"])
     return {
         "id": row["id"],
         "project_id": row["project_id"],
@@ -47,9 +66,7 @@ def _session_to_api_dict(row: dict) -> dict:
         "model_name": row["model_name"],
         "use_negative": row["use_negative"],
         "pinned_loras": row.get("pinned_loras", []),
-        "source_image_path": row.get("source_image_path"),
-        "source_image_url": _session_url(row.get("source_image_path")),
-        "vl_summary": row.get("vl_summary"),
+        "source_images": [_source_image_to_api_dict(s) for s in sources],
         "vl_model_name": row.get("vl_model_name"),
         "prompt_model_name": row.get("prompt_model_name"),
         "hidden": bool(row.get("hidden", False)),
@@ -62,7 +79,7 @@ def _session_payload(conn: sqlite3.Connection, session_id: str) -> dict:
     row = session_repo.get_session_with_pinned(conn, session_id)
     if row is None:
         raise _not_found("session", session_id)
-    return _session_to_api_dict(row)
+    return _session_to_api_dict(conn, row)
 
 
 # --- projects ---------------------------------------------------------------
@@ -121,7 +138,7 @@ def list_sessions(project_id: str, conn: Conn):
     for s in sessions:
         s2 = {**s}
         s2["pinned_loras"] = session_repo.list_pinned_loras(conn, s2["id"])
-        out.append(_session_to_api_dict(s2))
+        out.append(_session_to_api_dict(conn, s2))
     return out
 
 
@@ -199,6 +216,13 @@ _ALLOWED_EXT: dict[str, str] = {
     "image/webp": ".webp",
 }
 
+_EXT_TO_CT: dict[str, str] = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".webp": "image/webp",
+}
+
 
 def _resolve_ext(content_type: str | None) -> str:
     if content_type not in _ALLOWED_EXT:
@@ -207,46 +231,6 @@ def _resolve_ext(content_type: str | None) -> str:
             detail=f"unsupported content_type: {content_type!r}",
         )
     return _ALLOWED_EXT[content_type]
-
-
-@router.post("/api/sessions/{session_id}/source", response_model=SessionOut)
-async def upload_source(
-    session_id: str,
-    conn: Conn,
-    file: Annotated[UploadFile, File()],
-):
-    if session_repo.get_session(conn, session_id) is None:
-        raise _not_found("session", session_id)
-    ext = _resolve_ext(file.content_type)
-
-    target_dir = images.session_image_dir(session_id)
-    for previous in target_dir.glob("source.*"):
-        previous.unlink()
-    target = target_dir / f"source{ext}"
-    target.write_bytes(await file.read())
-
-    rel_path = f"images/{session_id}/source{ext}"
-    session_repo.set_source_image(conn, session_id, rel_path)
-    return _session_payload(conn, session_id)
-
-
-@router.delete("/api/sessions/{session_id}/source", response_model=SessionOut)
-def clear_source(session_id: str, conn: Conn):
-    if session_repo.get_session(conn, session_id) is None:
-        raise _not_found("session", session_id)
-    target_dir = images.session_image_dir(session_id)
-    for previous in target_dir.glob("source.*"):
-        previous.unlink()
-    session_repo.clear_source_image(conn, session_id)
-    return _session_payload(conn, session_id)
-
-
-_EXT_TO_CT: dict[str, str] = {
-    ".png": "image/png",
-    ".jpg": "image/jpeg",
-    ".jpeg": "image/jpeg",
-    ".webp": "image/webp",
-}
 
 
 def _content_type_from_ext(ext: str) -> str:
@@ -273,23 +257,125 @@ def _validated_vl_model(conn: sqlite3.Connection, name: str | None) -> str:
     return name
 
 
-@router.post("/api/sessions/{session_id}/analyze-source", response_model=SessionOut)
-def analyze_source(session_id: str, conn: Conn) -> dict:
-    row = session_repo.get_session_with_pinned(conn, session_id)
+def _require_session(conn: sqlite3.Connection, session_id: str) -> dict:
+    row = session_repo.get_session(conn, session_id)
     if row is None:
         raise _not_found("session", session_id)
-    if not row.get("source_image_path"):
-        raise HTTPException(status_code=409, detail="session has no source image")
+    return row
+
+
+def _require_source_image(
+    conn: sqlite3.Connection, session_id: str, image_id: str,
+) -> dict:
+    row = source_image_repo.get(conn, image_id)
+    if row is None or row["session_id"] != session_id:
+        raise _not_found("source image", image_id)
+    return row
+
+
+@router.get(
+    "/api/sessions/{session_id}/sources",
+    response_model=list[SourceImageOut],
+)
+def list_sources(session_id: str, conn: Conn):
+    _require_session(conn, session_id)
+    return [
+        _source_image_to_api_dict(s)
+        for s in source_image_repo.list_for_session(conn, session_id)
+    ]
+
+
+@router.post(
+    "/api/sessions/{session_id}/sources",
+    response_model=SourceImageOut,
+    status_code=201,
+)
+async def upload_source_image(
+    session_id: str,
+    conn: Conn,
+    file: Annotated[UploadFile, File()],
+):
+    _require_session(conn, session_id)
+    ext = _resolve_ext(file.content_type)
+
+    is_first = source_image_repo.count_for_session(conn, session_id) == 0
+    sources_dir = images.session_sources_dir(session_id)
+
+    image_id = new_id()
+    rel_path = f"images/{session_id}/sources/{image_id}{ext}"
+    target = sources_dir / f"{image_id}{ext}"
+    target.write_bytes(await file.read())
+    original_filename = (file.filename or f"image{ext}").strip() or f"image{ext}"
+    inserted = source_image_repo.insert(
+        conn,
+        session_id=session_id,
+        image_id=image_id,
+        path=rel_path,
+        original_filename=original_filename,
+        is_main=is_first,
+    )
+    return _source_image_to_api_dict(inserted)
+
+
+@router.delete(
+    "/api/sessions/{session_id}/sources/{image_id}",
+    status_code=204,
+)
+def delete_source_image(session_id: str, image_id: str, conn: Conn):
+    _require_session(conn, session_id)
+    existing = _require_source_image(conn, session_id, image_id)
+    deleted = source_image_repo.delete(conn, image_id)
+    if deleted is not None:
+        data_root = app_config.resolve_data_root()
+        target = (data_root / existing["path"]).resolve()
+        base = data_root.resolve()
+        if str(target).startswith(str(base)) and target.is_file():
+            try:
+                target.unlink()
+            except OSError:
+                pass
+    if existing["is_main"]:
+        source_image_repo.promote_first_remaining(conn, session_id)
+    return Response(status_code=204)
+
+
+@router.patch(
+    "/api/sessions/{session_id}/sources/{image_id}/main",
+    response_model=SourceImageOut,
+)
+def set_source_main(session_id: str, image_id: str, conn: Conn):
+    _require_session(conn, session_id)
+    _require_source_image(conn, session_id, image_id)
+    updated = source_image_repo.set_main(
+        conn, session_id=session_id, image_id=image_id,
+    )
+    if updated is None:
+        raise _not_found("source image", image_id)
+    return _source_image_to_api_dict(updated)
+
+
+@router.post(
+    "/api/sessions/{session_id}/sources/{image_id}/analyze",
+    response_model=SourceImageOut,
+)
+def analyze_source_image(
+    session_id: str,
+    image_id: str,
+    body: AnalyzeSourceRequest,
+    conn: Conn,
+) -> dict:
+    session_row = _require_session(conn, session_id)
+    image_row = _require_source_image(conn, session_id, image_id)
 
     cfg = settings_repo.get_lmstudio(conn)
     if not cfg["lmstudio_url"]:
         raise HTTPException(
             status_code=409, detail="LMStudio base_url is not configured",
         )
-    model = _validated_vl_model(conn, row.get("vl_model_name"))
+    model = _validated_vl_model(conn, session_row.get("vl_model_name"))
 
     data_root = app_config.resolve_data_root()
-    image_path = (data_root / row["source_image_path"]).resolve()
+    image_path = (data_root / image_row["path"]).resolve()
     base = data_root.resolve()
     if not str(image_path).startswith(str(base)) or not image_path.is_file():
         raise HTTPException(status_code=409, detail="source image is missing on disk")
@@ -306,11 +392,15 @@ def analyze_source(session_id: str, conn: Conn) -> dict:
             model=model,
             image_bytes=image_bytes,
             content_type=content_type,
+            refining_prompt=body.refining_prompt,
         )
     except lmstudio_client.LmError as exc:
         if exc.kind == "timeout":
             raise HTTPException(status_code=504, detail=str(exc)) from exc
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
-    session_repo.set_vl_summary(conn, session_id, summary)
-    return _session_payload(conn, session_id)
+    refining = body.refining_prompt.strip() if body.refining_prompt else None
+    updated = source_image_repo.set_analysis(
+        conn, image_id, analysis=summary, refining_prompt=refining or None,
+    )
+    return _source_image_to_api_dict(updated)  # type: ignore[arg-type]

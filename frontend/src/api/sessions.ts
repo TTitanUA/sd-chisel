@@ -14,6 +14,19 @@ export type PinnedLora = { lora_name: string; weight_override: number | null };
 
 export type SessionType = "i2i" | "t2i";
 
+export type SourceImage = {
+  id: string;
+  session_id: string;
+  path: string;
+  url: string;
+  original_filename: string;
+  is_main: boolean;
+  analysis: string | null;
+  analysis_prompt: string | null;
+  created_at: number;
+  updated_at: number;
+};
+
 export type Session = {
   id: string;
   project_id: string;
@@ -22,9 +35,7 @@ export type Session = {
   model_name: string | null;
   use_negative: boolean;
   pinned_loras: PinnedLora[];
-  source_image_path: string | null;
-  source_image_url: string | null;
-  vl_summary: string | null;
+  source_images: SourceImage[];
   vl_model_name: string | null;
   prompt_model_name: string | null;
   hidden: boolean;
@@ -83,20 +94,36 @@ export const sessionsApi = {
     }),
   deleteSession: (id: string) => apiFetch<void>(`/api/sessions/${id}`, { method: "DELETE" }),
 
-  uploadSource: async (id: string, file: File): Promise<Session> => {
+  listSources: (sessionId: string) =>
+    apiFetch<SourceImage[]>(`/api/sessions/${sessionId}/sources`),
+  uploadSource: async (sessionId: string, file: File): Promise<SourceImage> => {
     const fd = new FormData();
     fd.append("file", file);
-    const res = await fetch(`${API_BASE}/api/sessions/${id}/source`, {
+    const res = await fetch(`${API_BASE}/api/sessions/${sessionId}/sources`, {
       method: "POST",
       body: fd,
     });
     if (!res.ok) throw new Error(`upload failed: ${res.status} ${await res.text()}`);
-    return res.json() as Promise<Session>;
+    return res.json() as Promise<SourceImage>;
   },
-  clearSource: (id: string) =>
-    apiFetch<Session>(`/api/sessions/${id}/source`, { method: "DELETE" }),
-  analyzeSource: (id: string) =>
-    apiFetch<Session>(`/api/sessions/${id}/analyze-source`, { method: "POST" }),
+  deleteSource: (sessionId: string, imageId: string) =>
+    apiFetch<void>(`/api/sessions/${sessionId}/sources/${imageId}`, {
+      method: "DELETE",
+    }),
+  setMainSource: (sessionId: string, imageId: string) =>
+    apiFetch<SourceImage>(
+      `/api/sessions/${sessionId}/sources/${imageId}/main`,
+      { method: "PATCH" },
+    ),
+  analyzeSource: (
+    sessionId: string,
+    imageId: string,
+    refining_prompt: string | null,
+  ) =>
+    apiFetch<SourceImage>(
+      `/api/sessions/${sessionId}/sources/${imageId}/analyze`,
+      { method: "POST", body: JSON.stringify({ refining_prompt }) },
+    ),
 };
 
 export function useProjects() {
@@ -132,7 +159,7 @@ export function useSessionInvalidation() {
   };
 }
 
-export function buildSourceImageSrc(session: Pick<Session, "source_image_url"> | null | undefined) {
-  if (!session?.source_image_url) return null;
-  return `${API_BASE}${session.source_image_url}`;
+export function buildSourceImageSrc(image: Pick<SourceImage, "url"> | null | undefined) {
+  if (!image?.url) return null;
+  return `${API_BASE}${image.url}`;
 }

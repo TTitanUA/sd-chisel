@@ -38,6 +38,19 @@ class ProjectUpdate(StrictModel):
     name: str = Field(min_length=1, max_length=160)
 
 
+class SourceImageOut(StrictModel):
+    id: str
+    session_id: str
+    path: str
+    url: str
+    original_filename: str
+    is_main: bool
+    analysis: str | None
+    analysis_prompt: str | None
+    created_at: int
+    updated_at: int
+
+
 class SessionOut(StrictModel):
     id: str
     project_id: str
@@ -46,14 +59,16 @@ class SessionOut(StrictModel):
     model_name: str | None
     use_negative: bool
     pinned_loras: list[PinnedLoraOut]
-    source_image_path: str | None
-    source_image_url: str | None
-    vl_summary: str | None
+    source_images: list[SourceImageOut]
     vl_model_name: str | None
     prompt_model_name: str | None
     hidden: bool = False
     created_at: int
     updated_at: int
+
+
+class AnalyzeSourceRequest(StrictModel):
+    refining_prompt: str | None = Field(default=None, max_length=2000)
 
 
 class HiddenPatch(StrictModel):

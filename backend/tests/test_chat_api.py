@@ -10,7 +10,7 @@ from app.main import app
 from app.models.chat import ChatRequest, MessageOut
 from app.services import lmstudio_client
 from app.storage import db as db_mod
-from app.storage import session_repo
+from app.storage import session_repo, source_image_repo
 from app.storage.migrations import apply_pending
 
 
@@ -167,7 +167,14 @@ def test_chat_streams_deltas_and_persists_both_messages(client, monkeypatch):
 def test_chat_includes_vl_summary_and_recent_history(client, conn, monkeypatch):
     from app.storage import session_repo
     sid = _bootstrap_chat_session(client, monkeypatch)
-    session_repo.set_vl_summary(conn, sid, "moody portrait, soft rim light")
+    main_img = source_image_repo.insert(
+        conn, session_id=sid, path=f"images/{sid}/sources/main.png",
+        original_filename="main.png", is_main=True,
+    )
+    source_image_repo.set_analysis(
+        conn, main_img["id"],
+        analysis="moody portrait, soft rim light", refining_prompt=None,
+    )
     session_repo.append_message(conn, session_id=sid, role="user", content="prior-1")
     session_repo.append_message(conn, session_id=sid, role="assistant", content="prior-2")
 

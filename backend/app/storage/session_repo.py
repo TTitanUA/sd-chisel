@@ -205,13 +205,6 @@ def set_session_hidden(
     return get_session(conn, session_id)
 
 
-def set_vl_summary(conn: sqlite3.Connection, session_id: str, summary: str) -> None:
-    conn.execute(
-        "UPDATE sessions SET vl_summary = ?, updated_at = ? WHERE id = ?",
-        (summary, _now(), session_id),
-    )
-
-
 # --- pinned loras -----------------------------------------------------------
 
 
@@ -252,31 +245,16 @@ def set_pinned_loras(
         raise
 
 
-# --- source image path -----------------------------------------------------
-
-
-def set_source_image(
-    conn: sqlite3.Connection, session_id: str, rel_path: str,
-) -> None:
-    conn.execute(
-        "UPDATE sessions SET source_image_path = ?, updated_at = ? WHERE id = ?",
-        (rel_path, _now(), session_id),
-    )
-
-
-def clear_source_image(conn: sqlite3.Connection, session_id: str) -> None:
-    conn.execute(
-        "UPDATE sessions SET source_image_path = NULL, updated_at = ? WHERE id = ?",
-        (_now(), session_id),
-    )
-
-
 # --- full hydrated session -------------------------------------------------
 
 
 def get_session_with_pinned(
     conn: sqlite3.Connection, session_id: str,
 ) -> dict[str, Any] | None:
+    """Hydrate the session with pinned LoRAs only. Source images are loaded
+    separately by `app.storage.source_image_repo.list_for_session` — keeping
+    the two concerns split avoids dragging the source repo into every
+    consumer that just needs base session fields."""
     row = get_session(conn, session_id)
     if row is None:
         return None

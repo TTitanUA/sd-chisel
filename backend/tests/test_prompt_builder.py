@@ -78,6 +78,32 @@ def test_build_composition_messages_omits_model_description_when_none():
     assert "MODEL DELTA" not in sys
 
 
+def test_build_intent_messages_includes_reference_summaries():
+    msgs = prompt_builder.build_intent_messages(
+        vl_summary="main analysis",
+        chat_messages=[],
+        distinct_tags=[],
+        reference_summaries=[("ref-a.png", "warm palette"), ("ref-b.jpg", "tight crop")],
+    )
+    user = next(m for m in msgs if m["role"] == "user")
+    assert "main analysis" in user["content"]
+    assert "# Reference images" in user["content"]
+    assert "ref-a.png: warm palette" in user["content"]
+    assert "ref-b.jpg: tight crop" in user["content"]
+
+
+def test_build_composition_messages_includes_reference_summaries():
+    msgs = prompt_builder.build_composition_messages(
+        family_prompt_guide="GUIDE", model_description=None, candidates=[],
+        vl_summary="MAIN", chat_messages=[], use_negative=False,
+        reference_summaries=[("r.png", "blue tones")],
+    )
+    sys = msgs[0]["content"]
+    assert "MAIN" in sys
+    assert "# Reference images" in sys
+    assert "r.png: blue tones" in sys
+
+
 def test_build_composition_messages_use_negative_branch_in_user():
     msgs_on = prompt_builder.build_composition_messages(
         family_prompt_guide="g", model_description=None, candidates=[],

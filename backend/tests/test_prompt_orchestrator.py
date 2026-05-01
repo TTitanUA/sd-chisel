@@ -8,8 +8,22 @@ import pytest
 from app.services import prompt_orchestrator
 from app.services.lmstudio_client import LmError
 from app.storage import db as db_mod
-from app.storage import library_repo, session_repo
+from app.storage import library_repo, session_repo, source_image_repo
 from app.storage.migrations import apply_pending
+
+
+def _seed_main_image(conn, session_id: str, *, analysis: str = "moody girl, dramatic"):
+    img = source_image_repo.insert(
+        conn,
+        session_id=session_id,
+        path=f"images/{session_id}/sources/main.png",
+        original_filename="main.png",
+        is_main=True,
+    )
+    source_image_repo.set_analysis(
+        conn, img["id"], analysis=analysis, refining_prompt=None,
+    )
+    return img
 
 
 @pytest.fixture
@@ -38,7 +52,7 @@ def session_id(conn) -> str:
     sess = session_repo.create_session(
         conn, project_id=proj["id"], name="s", model_name="m1",
     )
-    session_repo.set_vl_summary(conn, sess["id"], "moody girl, dramatic")
+    _seed_main_image(conn, sess["id"])
     return sess["id"]
 
 
@@ -160,15 +174,65 @@ def test_generate_recovers_from_extra_prose_around_json(conn, session_id, monkey
     assert out["intents"][0]["query"] == "q"
 
 
-def test_generate_raises_when_session_missing_vl_summary(conn, session_id, monkeypatch):
-    conn.execute("UPDATE sessions SET vl_summary = NULL WHERE id = ?", (session_id,))
+def test_generate_raises_when_main_image_has_no_analysis(conn, session_id, monkeypatch):
+    conn.execute(
+        "UPDATE session_source_images SET analysis = NULL WHERE session_id = ?",
+        (session_id,),
+    )
     with pytest.raises(prompt_orchestrator.PreconditionError) as exc:
         prompt_orchestrator.generate(
             conn, session_id=session_id,
             endpoint={"base_url": "http://x/v1", "api_key": None},
             prompt_model="m1",
         )
-    assert "vl_summary" in str(exc.value)
+    assert "main source image" in str(exc.value) or "analysis" in str(exc.value)
+
+
+def test_generate_raises_when_session_has_no_source_images(conn, session_id, monkeypatch):
+    conn.execute(
+        "DELETE FROM session_source_images WHERE session_id = ?", (session_id,),
+    )
+    with pytest.raises(prompt_orchestrator.PreconditionError):
+        prompt_orchestrator.generate(
+            conn, session_id=session_id,
+            endpoint={"base_url": "http://x/v1", "api_key": None},
+            prompt_model="m1",
+        )
+
+
+def test_generate_includes_reference_summaries_in_composition(
+    conn, session_id, monkeypatch,
+):
+    ref = source_image_repo.insert(
+        conn, session_id=session_id, path=f"images/{session_id}/sources/ref.png",
+        original_filename="ref-pose.png", is_main=False,
+    )
+    source_image_repo.set_analysis(
+        conn, ref["id"], analysis="dynamic action pose", refining_prompt=None,
+    )
+    monkeypatch.setattr(
+        "app.services.retriever.embedder.embed",
+        lambda text: [0.001] * 1024,
+    )
+    captured: dict = {"calls": []}
+
+    def fake_complete(*, endpoint, model, messages, response_format=None, transport=None):
+        captured["calls"].append(messages)
+        if len(captured["calls"]) == 1:
+            return json.dumps({"intents": [{"kind": "k", "query": "q"}]})
+        return json.dumps({"positive": "p", "negative": "n", "loras": []})
+
+    monkeypatch.setattr(
+        "app.services.prompt_orchestrator.lmstudio_client.chat_complete", fake_complete,
+    )
+    prompt_orchestrator.generate(
+        conn, session_id=session_id,
+        endpoint={"base_url": "http://x/v1", "api_key": None},
+        prompt_model="m1",
+    )
+    composition_system = captured["calls"][1][0]["content"]
+    assert "ref-pose.png" in composition_system
+    assert "dynamic action pose" in composition_system
 
 
 def test_generate_raises_for_unknown_session(conn):

@@ -115,10 +115,17 @@ applies them to an empty or existing DB.
   - `vl_model_name` and `prompt_model_name` — *names* of the LMStudio
     models picked for the VL call and for the prompt-writer call. Base URL
     and API key are global (see §3.3).
-  - `vl_summary` — cached VL analysis of the source image (reused by all
-    later calls; never recomputed). Only populated for `i2i` sessions.
-  - `source_image_path`, `result_image_path` — relative paths to the
-    binaries.
+  - `result_image_path` — relative path to the rendered result binary
+    (placeholder for step 6).
+- **`session_source_images`** — child rows under a session (`ON DELETE
+  CASCADE`). Each row is one uploaded source image with its own VL analysis.
+  Fields: `id` (random hex), `session_id`, `path` (relative to `data/`),
+  `original_filename` (display only), `is_main` (0/1; exactly one row per
+  session is main, enforced by a unique partial index), `analysis` (free
+  VL text, NULL until analyzed; overwritten by every re-analysis), and
+  `analysis_prompt` (the optional refining instruction the user typed for
+  the last run, NULL when none was provided). Only `i2i` sessions hold
+  rows here.
 - **`session_pinned_loras`** — required LoRAs for a session: always added
   to the LLM context on top of the retrieved set. Optional `weight_override`
   on top of `recommended_weight`.
@@ -157,9 +164,13 @@ for demo sessions and NSFW content in the library without deleting data.
 
 ### 3.5. Binaries
 
-`data/images/<session_id>/source.<ext>` and optional `result.<ext>` (for
-step 6). Flat structure keyed by `session_id`, no nesting under projects.
-Deleting a session also clears the folder.
+Per-session image directory: `data/images/<session_id>/`. Inside it,
+source images live in `data/images/<session_id>/sources/<image_id>.<ext>`
+(one file per `session_source_images` row, named after its random id).
+The optional `result.<ext>` for step 6 still sits at the session-dir
+root. Flat structure keyed by `session_id`, no nesting under projects.
+Deleting a session removes the entire folder; deleting a single source
+image only unlinks its own file.
 
 ---
 
@@ -167,11 +178,23 @@ Deleting a session also clears the folder.
 
 ### 4.1. `analyze-source`
 
-A single VL call against an LMStudio model with the `vision` capability.
-The system prompt instructs the model to describe the image in terms useful
-for i2i (composition, style, lighting, objects, mood). The result is free
-text, stored in `sessions.vl_summary` and reused by every later call. Only
-applicable to `i2i` sessions — `t2i` sessions have no source image.
+A single VL call against an LMStudio model with the `vision` capability,
+run **per source image**. The system prompt instructs the model to
+describe the image in terms useful for i2i (composition, style, lighting,
+objects, mood). The user message is the standard "Describe this image for
+i2i prompt building" plus an optional refining instruction the user typed
+when launching the analysis (appended verbatim under "Additional
+guidance from the user"). The result is free text, stored on the row in
+`session_source_images.analysis`. The refining instruction is also
+persisted in `analysis_prompt` so the next re-analysis dialog can pre-fill
+it. Re-running overwrites both fields. Only applicable to `i2i` sessions
+— `t2i` sessions have no source images.
+
+Prompt and chat composition consume the analyses as: the **main** row's
+text is the primary "Source image analysis"; every reference row that has
+its own completed analysis is appended under a "Reference images" block
+as `- <original_filename>: <analysis>` lines. References with no
+analysis yet are silently skipped.
 
 ### 4.2. `chat` (SSE)
 
@@ -280,14 +303,23 @@ Prefix is `/api/`. Endpoints are grouped by domain.
 - **Sessions:** list per project, create, read, partial update, delete,
   toggle `hidden`. The create payload requires `session_type`
   (`"i2i"` | `"t2i"`); it is not accepted on PATCH and cannot be
-  changed after creation. Source upload (`POST /sessions/{s}/source`).
-  VL analysis (`POST /sessions/{s}/analyze-source`). Chat (`POST
-  /sessions/{s}/chat`, SSE). Prompt generation (`POST
-  /sessions/{s}/generate-prompt`) — returns `prompt_id` +
-  `GeneratedPrompt` + `intents` + `retrieved` inline in a single
-  response. For a `t2i` session the endpoint currently returns 409
-  ("t2i prompt generation is not yet implemented") — the t2i flow is
-  scoped to creation + display in this slice; full wiring is deferred.
+  changed after creation. Source images form a sub-resource at
+  `/sessions/{s}/sources`: `GET` lists them (also embedded in the
+  session payload), `POST` accepts a multipart upload (PNG/JPEG/WEBP)
+  and creates one row — the first uploaded image is automatically
+  marked `main`, later uploads are references; per-image `DELETE`
+  removes the row plus its file (and promotes the oldest remaining row
+  to `main` if the deleted one was main); `PATCH /sources/{id}/main`
+  flips the main flag to that row; `POST /sources/{id}/analyze` accepts
+  a JSON body `{ "refining_prompt": string | null }` and runs the VL
+  call against that row's image. Chat (`POST /sessions/{s}/chat`, SSE).
+  Prompt generation (`POST /sessions/{s}/generate-prompt`) — returns
+  `prompt_id` + `GeneratedPrompt` + `intents` + `retrieved` inline in a
+  single response. For a `t2i` session the endpoint currently returns
+  409 ("t2i prompt generation is not yet implemented") — the t2i flow
+  is scoped to creation + display in this slice; full wiring is
+  deferred. Generation also returns 409 when the session has no main
+  image with a completed analysis.
 - **Library / families:** list, read, create, replace, delete, toggle
   `hidden`, `POST /families/assist` (kicks off the assistant, returns a
   task id).
@@ -382,7 +414,8 @@ tokens. No Tailwind, no shadcn. Package manager: pnpm.
 ### 6.1. Decomposition
 
 Atomic design: `atoms/` (Button, Badge, Icon), `molecules/` (form blocks,
-SourceImagePane, SessionSettingsDrawer), `organisms/` (LibraryCrud,
+SourceImageCard, AnalyzeImageModal, AnalysisDetailModal,
+SessionSettingsDrawer), `organisms/` (LibraryCrud, SourceImagesPane,
 PromptPane, ChatPane, ProjectSidebar, CRUD forms, LmStudioSettings,
 TaskIndicator), `templates/` (WorkspaceLayout, LibraryLayout, AppShell).
 Pages (`routes/`) are assembled from templates + organisms; data flows in
@@ -391,10 +424,20 @@ through TanStack Query hooks in `src/api/`.
 ### 6.2. Screens
 
 - **Workspace** (`/projects/:p/sessions/:s`) — the main four-pane area:
-  ProjectSidebar, SourceImagePane, ResultImagePane (placeholder for step
-  6), ChatPane, PromptPane. The header carries a session-type badge
-  (`i2i` / `t2i`) next to the model and pinned-loras chips. For `t2i`
-  sessions the body grid is replaced with a "T2I workflow not yet
+  ProjectSidebar, SourceImagesPane, ResultImagePane (placeholder for
+  step 6), ChatPane, PromptPane. The Sources pane shows a drag-drop
+  zone (multi-file) plus a list of cards — one per uploaded image.
+  Each card has the image preview on the left (with a star toggle that
+  flips the `main` flag and a `main` badge on whichever row is main),
+  the original filename and a 3-line clamped excerpt of the analysis
+  in the centre (clicking the excerpt opens a modal with the full
+  text), and per-row Analyze / Re-analyze + Delete buttons on the
+  right. Analyze opens a modal with an optional refining-instruction
+  textarea; the modal disables itself while the request is in flight
+  and auto-closes on success (errors keep it open for retry). The
+  header carries a session-type badge (`i2i` / `t2i`) next to the
+  model and pinned-loras chips. For `t2i` sessions the body grid is
+  replaced with a "T2I workflow not yet
   implemented" placeholder; the header and SessionSettingsDrawer still
   render normally.
 - **New session** (`/projects/:p/sessions/new`) — a small form: pick

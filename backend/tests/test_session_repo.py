@@ -103,15 +103,6 @@ def test_pinned_loras_replace_semantics(conn):
     assert rows[0]["weight_override"] == 0.9
 
 
-def test_source_image_set_and_clear(conn):
-    p = session_repo.create_project(conn, name="P")
-    s = session_repo.create_session(conn, project_id=p["id"])
-    session_repo.set_source_image(conn, s["id"], "images/xyz/source.png")
-    assert session_repo.get_session(conn, s["id"])["source_image_path"] == "images/xyz/source.png"
-    session_repo.clear_source_image(conn, s["id"])
-    assert session_repo.get_session(conn, s["id"])["source_image_path"] is None
-
-
 def test_get_session_with_pinned_hydrates_list(conn):
     library_repo.create_lora(
         conn, name="a", display_name="A", description="x",
@@ -183,12 +174,3 @@ def test_update_session_can_clear_model_picks(conn):
     assert after["prompt_model_name"] is None
 
 
-def test_set_vl_summary_persists_and_bumps_updated_at(conn):
-    pid = session_repo.create_project(conn, name="P")["id"]
-    created = session_repo.create_session(conn, project_id=pid)
-    sid = created["id"]
-
-    session_repo.set_vl_summary(conn, sid, "moody portrait")
-    after = session_repo.get_session_with_pinned(conn, sid)
-    assert after["vl_summary"] == "moody portrait"
-    assert after["updated_at"] >= created["updated_at"]

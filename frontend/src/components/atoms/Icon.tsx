@@ -20,6 +20,7 @@ import {
   Settings,
   Shield,
   Sparkles,
+  Star,
   Trash2,
   X,
   type LucideIcon,
@@ -47,6 +48,7 @@ const ICONS = {
   Settings,
   Shield,
   Sparkles,
+  Star,
   Trash2,
   X,
 } as const satisfies Record<string, LucideIcon>;

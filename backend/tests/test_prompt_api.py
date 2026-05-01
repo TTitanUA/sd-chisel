@@ -10,7 +10,7 @@ from app.main import app
 from app.services import prompt_orchestrator
 from app.services.lmstudio_client import LmError
 from app.storage import db as db_mod
-from app.storage import library_repo, session_repo, settings_repo
+from app.storage import library_repo, session_repo, settings_repo, source_image_repo
 from app.storage.migrations import apply_pending
 
 
@@ -58,7 +58,14 @@ def _bootstrap(client, conn) -> str:
         conn, sess["id"], name="s", model_name="m1",
         use_negative=True, prompt_model_name="pm-1",
     )
-    session_repo.set_vl_summary(conn, sess["id"], "summary text")
+    img = source_image_repo.insert(
+        conn, session_id=sess["id"],
+        path=f"images/{sess['id']}/sources/main.png",
+        original_filename="main.png", is_main=True,
+    )
+    source_image_repo.set_analysis(
+        conn, img["id"], analysis="summary text", refining_prompt=None,
+    )
     return sess["id"]
 
 
@@ -136,11 +143,13 @@ def test_generate_prompt_409_when_prompt_model_not_set(client, conn):
 def test_generate_prompt_409_for_precondition(client, conn, monkeypatch):
     sid = _bootstrap(client, conn)
     def boom(*a, **kw):
-        raise prompt_orchestrator.PreconditionError("session has no vl_summary")
+        raise prompt_orchestrator.PreconditionError(
+            "session has no main source image with a completed analysis yet",
+        )
     monkeypatch.setattr(prompt_orchestrator, "generate", boom)
     resp = client.post(f"/api/sessions/{sid}/generate-prompt")
     assert resp.status_code == 409
-    assert "vl_summary" in resp.json()["detail"]
+    assert "main source image" in resp.json()["detail"]
 
 
 def test_generate_prompt_502_for_lm_error(client, conn, monkeypatch):

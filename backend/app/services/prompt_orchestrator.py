@@ -14,7 +14,7 @@ from pydantic import BaseModel, ValidationError
 
 from app.models.prompts import GeneratedPrompt, IntentList
 from app.services import lmstudio_client, prompt_builder, retriever
-from app.storage import library_repo, session_repo
+from app.storage import library_repo, session_repo, source_image_repo
 
 _M = TypeVar("_M", bound=BaseModel)
 
@@ -94,10 +94,19 @@ def generate(
         raise PreconditionError(
             "t2i prompt generation is not yet implemented",
         )
-    if not session.get("vl_summary"):
+
+    sources = source_image_repo.list_for_session(conn, session_id)
+    main_image = next((s for s in sources if s["is_main"]), None)
+    if main_image is None or not (main_image.get("analysis") or "").strip():
         raise PreconditionError(
-            "session has no source image analysis (vl_summary) yet",
+            "session has no main source image with a completed analysis yet",
         )
+    main_summary = main_image["analysis"]
+    reference_summaries = [
+        (s["original_filename"], s["analysis"])
+        for s in sources
+        if not s["is_main"] and (s.get("analysis") or "").strip()
+    ]
 
     family_id: str | None = None
     family_prompt_guide = ""
@@ -130,9 +139,10 @@ def generate(
     # ---- Step 1: intents -------------------------------------------------
     intent_messages = prompt_builder.build_intent_messages(
         mode=mode,
-        vl_summary=session["vl_summary"],
+        vl_summary=main_summary,
         chat_messages=chat_messages,
         distinct_tags=distinct_tags,
+        reference_summaries=reference_summaries,
     )
     intent_raw = lmstudio_client.chat_complete(
         endpoint=endpoint,
@@ -166,9 +176,10 @@ def generate(
         family_prompt_guide=family_prompt_guide,
         model_description=model_description,
         candidates=bundle["candidates"],
-        vl_summary=session["vl_summary"],
+        vl_summary=main_summary,
         chat_messages=chat_messages,
         use_negative=session["use_negative"],
+        reference_summaries=reference_summaries,
     )
     comp_raw = lmstudio_client.chat_complete(
         endpoint=endpoint,

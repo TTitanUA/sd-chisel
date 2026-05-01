@@ -10,7 +10,7 @@ from starlette.responses import StreamingResponse
 from app.api.deps import get_conn
 from app.models.chat import ChatRequest, MessageOut, MessagesResponse
 from app.services import lmstudio_client
-from app.storage import session_repo, settings_repo
+from app.storage import session_repo, settings_repo, source_image_repo
 
 Conn = Annotated[sqlite3.Connection, Depends(get_conn)]
 
@@ -49,11 +49,19 @@ def _build_payload_messages(
     conn: sqlite3.Connection, session_row: dict, user_content: str,
 ) -> list[dict]:
     msgs: list[dict] = [{"role": "system", "content": CHAT_SYSTEM_PROMPT}]
-    if session_row.get("vl_summary"):
-        msgs.append({
-            "role": "system",
-            "content": f"# Source image analysis\n{session_row['vl_summary']}",
-        })
+    sources = source_image_repo.list_for_session(conn, session_row["id"])
+    main_image = next((s for s in sources if s["is_main"]), None)
+    if main_image is not None and (main_image.get("analysis") or "").strip():
+        block = f"# Source image analysis\n{main_image['analysis']}"
+        ref_lines = []
+        for s in sources:
+            if s["is_main"] or not (s.get("analysis") or "").strip():
+                continue
+            text = s["analysis"].strip().replace("\n", " ")
+            ref_lines.append(f"- {s['original_filename']}: {text}")
+        if ref_lines:
+            block += "\n\n# Reference images\n" + "\n".join(ref_lines)
+        msgs.append({"role": "system", "content": block})
     history = session_repo.list_messages(conn, session_id=session_row["id"])
     history = history[-CHAT_HISTORY_LIMIT:]
     for h in history:

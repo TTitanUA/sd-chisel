@@ -12,9 +12,18 @@ const FAKE_SESSION = {
   model_name: null,
   use_negative: true,
   pinned_loras: [] as { lora_name: string; weight_override: number | null }[],
-  source_image_path: null,
-  source_image_url: null,
-  vl_summary: null,
+  source_images: [] as Array<{
+    id: string;
+    session_id: string;
+    path: string;
+    url: string;
+    original_filename: string;
+    is_main: boolean;
+    analysis: string | null;
+    analysis_prompt: string | null;
+    created_at: number;
+    updated_at: number;
+  }>,
   vl_model_name: null,
   prompt_model_name: null,
   hidden: false,
@@ -60,7 +69,7 @@ describe("workspace route", () => {
     );
 
     await waitFor(() => expect(screen.getByText("test session")).toBeInTheDocument());
-    expect(screen.getByText(/Drop source image/)).toBeInTheDocument();
+    expect(screen.getByText(/Drop source images/)).toBeInTheDocument();
     expect(screen.getByRole("textbox")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /generate prompt/i })).toBeInTheDocument();
     expect(screen.getByLabelText(/prompt pane/i)).toBeInTheDocument();

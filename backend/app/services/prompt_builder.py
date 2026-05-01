@@ -50,12 +50,25 @@ def _format_history(chat_messages: list[dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
+def _format_references(
+    reference_summaries: list[tuple[str, str]] | None,
+) -> str:
+    if not reference_summaries:
+        return ""
+    lines = ["# Reference images"]
+    for filename, analysis in reference_summaries:
+        text = (analysis or "").strip().replace("\n", " ")
+        lines.append(f"- {filename}: {text}")
+    return "\n".join(lines)
+
+
 def build_intent_messages(
     *,
     mode: str = "i2i",
     vl_summary: str,
     chat_messages: list[dict[str, Any]],
     distinct_tags: list[str],
+    reference_summaries: list[tuple[str, str]] | None = None,
 ) -> list[dict[str, str]]:
     if distinct_tags:
         tag_block = (
@@ -66,11 +79,13 @@ def build_intent_messages(
         tag_block = (
             "We have no tags yet (cold start) — choose any short `kind` you like."
         )
-    user_content = (
-        f"# Source image analysis\n{vl_summary}\n\n"
-        f"# Recent conversation\n{_format_history(chat_messages)}\n\n"
-        f"# {tag_block}"
-    )
+    parts = [f"# Source image analysis\n{vl_summary}"]
+    refs_block = _format_references(reference_summaries)
+    if refs_block:
+        parts.append(refs_block)
+    parts.append(f"# Recent conversation\n{_format_history(chat_messages)}")
+    parts.append(f"# {tag_block}")
+    user_content = "\n\n".join(parts)
     system = INTENT_SYSTEM_T2I if mode == "t2i" else INTENT_SYSTEM_I2I
     return [
         {"role": "system", "content": system},
@@ -99,6 +114,7 @@ def build_composition_messages(
     vl_summary: str,
     chat_messages: list[dict[str, Any]],
     use_negative: bool,
+    reference_summaries: list[tuple[str, str]] | None = None,
 ) -> list[dict[str, str]]:
     parts = [f"# Mode: {mode}", family_prompt_guide.strip()]
     if model_description and model_description.strip():
@@ -109,6 +125,9 @@ def build_composition_messages(
         loras_section = "(no candidate LoRAs)"
     parts.append("# Available LoRAs\n" + loras_section)
     parts.append(f"# Source image analysis\n{vl_summary}")
+    refs_block = _format_references(reference_summaries)
+    if refs_block:
+        parts.append(refs_block)
     parts.append(f"# Conversation\n{_format_history(chat_messages)}")
     parts.append("# Output\n" + GENERATED_PROMPT_SCHEMA_HINT)
     system = "\n\n".join(parts)

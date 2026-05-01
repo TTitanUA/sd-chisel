@@ -22,6 +22,13 @@ def session_image_dir(session_id: str, *, data_root: Path | None = None) -> Path
     return d
 
 
+def session_sources_dir(session_id: str, *, data_root: Path | None = None) -> Path:
+    """Per-session subdirectory that holds source images (main + references)."""
+    d = session_image_dir(session_id, data_root=data_root) / "sources"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
 def remove_session_images(session_id: str, *, data_root: Path | None = None) -> None:
     _validate_session_id(session_id)
     root = data_root or resolve_data_root()

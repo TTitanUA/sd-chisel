@@ -5,9 +5,9 @@ import { Badge } from "@/components/atoms/Badge";
 import { Button } from "@/components/atoms/Button";
 import { Icon } from "@/components/atoms/Icon";
 import { ChatPane } from "@/components/molecules/ChatPane";
-import { SourceImagePane } from "@/components/molecules/SourceImagePane";
 import { PromptPane } from "@/components/organisms/PromptPane";
 import { SessionSettingsDrawer } from "@/components/organisms/SessionSettingsDrawer";
+import { SourceImagesPane } from "@/components/organisms/SourceImagesPane";
 import styles from "@/components/templates/WorkspaceLayout.module.css";
 
 export function ProjectLanding() {
@@ -73,7 +73,7 @@ export default function WorkspaceRoute() {
         </div>
       ) : (
         <div className={styles.grid}>
-          <SourceImagePane session={s} />
+          <SourceImagesPane session={s} />
           <ChatPane session={s} />
           <PromptPane session={s} />
         </div>

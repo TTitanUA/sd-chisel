@@ -185,7 +185,7 @@ function ProjectRow({
                   className={[
                     styles.sessionRow,
                     isActive ? styles.sessionRowActive : "",
-                    s.source_image_path ? styles.sessionRowHasResult : "",
+                    s.source_images.length > 0 ? styles.sessionRowHasResult : "",
                   ]
                     .filter(Boolean)
                     .join(" ")}

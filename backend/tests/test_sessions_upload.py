@@ -20,6 +20,7 @@ def data_root(tmp_path, monkeypatch):
     (root / "images").mkdir(parents=True)
     monkeypatch.setattr("app.config.resolve_data_root", lambda *a, **kw: root)
     monkeypatch.setattr("app.storage.images.resolve_data_root", lambda *a, **kw: root)
+    monkeypatch.setattr("app.api.sessions.app_config.resolve_data_root", lambda *a, **kw: root)
     return root
 
 
@@ -48,65 +49,137 @@ def _make_session(client) -> str:
     ).json()["id"]
 
 
-def test_upload_source_writes_file_and_updates_session(client, data_root):
+def test_first_upload_becomes_main_and_creates_file(client, data_root):
     sid = _make_session(client)
 
     resp = client.post(
-        f"/api/sessions/{sid}/source",
-        files={"file": ("source.png", _PNG_1x1, "image/png")},
+        f"/api/sessions/{sid}/sources",
+        files={"file": ("kitten.png", _PNG_1x1, "image/png")},
     )
-    assert resp.status_code == 200
+    assert resp.status_code == 201
     body = resp.json()
-    assert body["source_image_path"] == f"images/{sid}/source.png"
-    assert body["source_image_url"] == f"/media/images/{sid}/source.png"
+    assert body["is_main"] is True
+    assert body["original_filename"] == "kitten.png"
+    assert body["analysis"] is None
+    assert body["path"].startswith(f"images/{sid}/sources/")
+    assert body["path"].endswith(".png")
+    assert body["url"] == f"/media/{body['path']}"
 
-    stored = data_root / "images" / sid / "source.png"
+    stored = data_root / body["path"]
     assert stored.exists() and stored.read_bytes() == _PNG_1x1
 
 
-def test_reupload_replaces_previous_extension(client, data_root):
+def test_second_upload_is_reference(client):
     sid = _make_session(client)
     client.post(
-        f"/api/sessions/{sid}/source",
-        files={"file": ("source.png", _PNG_1x1, "image/png")},
+        f"/api/sessions/{sid}/sources",
+        files={"file": ("first.png", _PNG_1x1, "image/png")},
     )
-    resp = client.post(
-        f"/api/sessions/{sid}/source",
-        files={"file": ("source.jpg", _PNG_1x1, "image/jpeg")},
-    )
+    second = client.post(
+        f"/api/sessions/{sid}/sources",
+        files={"file": ("second.jpg", _PNG_1x1, "image/jpeg")},
+    ).json()
+    assert second["is_main"] is False
+    assert second["original_filename"] == "second.jpg"
+
+    listing = client.get(f"/api/sessions/{sid}/sources").json()
+    assert len(listing) == 2
+    assert listing[0]["is_main"] is True
+    assert listing[1]["is_main"] is False
+
+
+def test_set_main_flips_flags(client):
+    sid = _make_session(client)
+    a = client.post(
+        f"/api/sessions/{sid}/sources",
+        files={"file": ("a.png", _PNG_1x1, "image/png")},
+    ).json()
+    b = client.post(
+        f"/api/sessions/{sid}/sources",
+        files={"file": ("b.png", _PNG_1x1, "image/png")},
+    ).json()
+
+    resp = client.patch(f"/api/sessions/{sid}/sources/{b['id']}/main")
     assert resp.status_code == 200
-    assert resp.json()["source_image_path"].endswith("source.jpg")
-    d = data_root / "images" / sid
-    assert {p.name for p in d.iterdir()} == {"source.jpg"}
+    assert resp.json()["is_main"] is True
+
+    listing = client.get(f"/api/sessions/{sid}/sources").json()
+    by_id = {r["id"]: r for r in listing}
+    assert by_id[a["id"]]["is_main"] is False
+    assert by_id[b["id"]]["is_main"] is True
+
+
+def test_delete_main_promotes_oldest_remaining(client, data_root):
+    sid = _make_session(client)
+    a = client.post(
+        f"/api/sessions/{sid}/sources",
+        files={"file": ("a.png", _PNG_1x1, "image/png")},
+    ).json()
+    b = client.post(
+        f"/api/sessions/{sid}/sources",
+        files={"file": ("b.png", _PNG_1x1, "image/png")},
+    ).json()
+    c = client.post(
+        f"/api/sessions/{sid}/sources",
+        files={"file": ("c.png", _PNG_1x1, "image/png")},
+    ).json()
+
+    file_a = data_root / a["path"]
+    assert file_a.exists()
+
+    resp = client.delete(f"/api/sessions/{sid}/sources/{a['id']}")
+    assert resp.status_code == 204
+    assert not file_a.exists()
+
+    listing = client.get(f"/api/sessions/{sid}/sources").json()
+    by_id = {r["id"]: r for r in listing}
+    assert by_id[b["id"]]["is_main"] is True
+    assert by_id[c["id"]]["is_main"] is False
+
+
+def test_delete_reference_keeps_main(client):
+    sid = _make_session(client)
+    a = client.post(
+        f"/api/sessions/{sid}/sources",
+        files={"file": ("a.png", _PNG_1x1, "image/png")},
+    ).json()
+    b = client.post(
+        f"/api/sessions/{sid}/sources",
+        files={"file": ("b.png", _PNG_1x1, "image/png")},
+    ).json()
+    client.delete(f"/api/sessions/{sid}/sources/{b['id']}")
+    listing = client.get(f"/api/sessions/{sid}/sources").json()
+    assert len(listing) == 1
+    assert listing[0]["id"] == a["id"]
+    assert listing[0]["is_main"] is True
 
 
 def test_upload_rejects_unknown_content_type(client):
     sid = _make_session(client)
     resp = client.post(
-        f"/api/sessions/{sid}/source",
+        f"/api/sessions/{sid}/sources",
         files={"file": ("evil.exe", b"garbage", "application/octet-stream")},
     )
     assert resp.status_code == 422
 
 
-def test_clear_source(client, data_root):
+def test_session_payload_embeds_source_images(client):
     sid = _make_session(client)
     client.post(
-        f"/api/sessions/{sid}/source",
-        files={"file": ("source.png", _PNG_1x1, "image/png")},
+        f"/api/sessions/{sid}/sources",
+        files={"file": ("a.png", _PNG_1x1, "image/png")},
     )
-    d = data_root / "images" / sid
-
-    resp = client.delete(f"/api/sessions/{sid}/source")
-    assert resp.status_code == 200
-    assert resp.json()["source_image_path"] is None
-    assert not any(d.glob("source.*"))
+    body = client.get(f"/api/sessions/{sid}").json()
+    assert "source_image_path" not in body
+    assert "vl_summary" not in body
+    assert len(body["source_images"]) == 1
+    assert body["source_images"][0]["is_main"] is True
 
 
 def test_delete_session_removes_image_dir(client, data_root):
     sid = _make_session(client)
     client.post(
-        f"/api/sessions/{sid}/source",
+        f"/api/sessions/{sid}/sources",
         files={"file": ("source.png", _PNG_1x1, "image/png")},
     )
     d = data_root / "images" / sid
@@ -128,7 +201,7 @@ def test_delete_project_cleans_all_session_dirs(client, data_root):
         json={"session_type": "i2i", "name": "b", "model_name": None, "use_negative": True},
     ).json()["id"]
     client.post(
-        f"/api/sessions/{s1}/source",
+        f"/api/sessions/{s1}/sources",
         files={"file": ("source.png", _PNG_1x1, "image/png")},
     )
 
@@ -139,10 +212,10 @@ def test_delete_project_cleans_all_session_dirs(client, data_root):
 
 def test_static_mount_serves_uploaded_file(client, data_root):
     sid = _make_session(client)
-    client.post(
-        f"/api/sessions/{sid}/source",
+    body = client.post(
+        f"/api/sessions/{sid}/sources",
         files={"file": ("source.png", _PNG_1x1, "image/png")},
-    )
-    resp = client.get(f"/media/images/{sid}/source.png")
+    ).json()
+    resp = client.get(f"/media/{body['path']}")
     assert resp.status_code == 200
     assert resp.content == _PNG_1x1

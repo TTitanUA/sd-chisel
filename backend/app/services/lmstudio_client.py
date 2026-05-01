@@ -165,12 +165,19 @@ def analyze_image(
     model: str,
     image_bytes: bytes,
     content_type: str,
+    refining_prompt: str | None = None,
     transport: httpx.BaseTransport | None = None,
 ) -> str:
     if not model.strip():
         raise LmError("config", "model is required")
     server_root, headers = _resolve(endpoint)
     b64 = base64.b64encode(image_bytes).decode("ascii")
+    user_text = "Describe this image for i2i prompt building."
+    if refining_prompt and refining_prompt.strip():
+        user_text = (
+            f"{user_text}\n\nAdditional guidance from the user:\n"
+            f"{refining_prompt.strip()}"
+        )
     payload = {
         "model": model,
         "messages": [
@@ -178,7 +185,7 @@ def analyze_image(
             {
                 "role": "user",
                 "content": [
-                    {"type": "text", "text": "Describe this image for i2i prompt building."},
+                    {"type": "text", "text": user_text},
                     {"type": "image_url", "image_url": {"url": f"data:{content_type};base64,{b64}"}},
                 ],
             },

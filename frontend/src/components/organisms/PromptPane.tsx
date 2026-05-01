@@ -25,6 +25,8 @@ export function PromptPane({ session }: { session: Session }) {
   const [debugOpen, setDebugOpen] = useState(false);
 
   const isReindexing = useIsReindexing();
+  const mainSourceAnalysis =
+    session.source_images.find((i) => i.is_main)?.analysis ?? null;
   const list = prompts.data ?? [];
   const head: Prompt | null = list[0] ?? null;
   const visible: Prompt | null =
@@ -89,10 +91,10 @@ export function PromptPane({ session }: { session: Session }) {
           variant="primary"
           icon={<Icon name="Sparkles" size={12} />}
           onClick={() => generate.mutate()}
-          disabled={generate.isPending || !session.vl_summary || isReindexing}
+          disabled={generate.isPending || !mainSourceAnalysis || isReindexing}
           title={
-            !session.vl_summary
-              ? "Run Analyze on the source image first"
+            !mainSourceAnalysis
+              ? "Run Analyze on the main source image first"
               : isReindexing
                 ? "LoRA index is updating — try again in a moment"
                 : visible
