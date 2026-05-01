@@ -205,7 +205,7 @@ def test_analyze_image_sends_to_v1_chat_completions():
     assert any(p.get("type") == "image_url" for p in parts)
 
 
-def test_analyze_image_appends_refining_prompt_when_provided():
+def test_analyze_image_uses_refining_prompt_verbatim():
     captured: dict[str, Any] = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -217,13 +217,36 @@ def test_analyze_image_appends_refining_prompt_when_provided():
         model="qwen-vl",
         image_bytes=b"x",
         content_type="image/png",
-        refining_prompt="focus on the cat",
+        refining_prompt="  focus on the cat  ",
         transport=_make_transport(handler),
     )
-    parts = captured["body"]["messages"][-1]["content"]
+    messages = captured["body"]["messages"]
+    assert messages[0]["role"] == "system"
+    parts = messages[-1]["content"]
     text_part = next(p for p in parts if p.get("type") == "text")
-    assert "focus on the cat" in text_part["text"]
-    assert "Additional guidance" in text_part["text"]
+    assert text_part["text"] == "focus on the cat"
+
+
+def test_analyze_image_uses_default_user_text_when_no_refining_prompt():
+    captured: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.content)
+        return _chat_response("ok")
+
+    lmstudio_client.analyze_image(
+        endpoint=ENDPOINT,
+        model="qwen-vl",
+        image_bytes=b"x",
+        content_type="image/png",
+        transport=_make_transport(handler),
+    )
+    messages = captured["body"]["messages"]
+    assert messages[0]["role"] == "system"
+    assert "image-to-image" in messages[0]["content"].lower()
+    parts = messages[-1]["content"]
+    text_part = next(p for p in parts if p.get("type") == "text")
+    assert text_part["text"] == "Describe this image for i2i prompt building."
 
 
 # --- chat_complete ---

@@ -92,8 +92,9 @@ export function AnalyzeImageModal({
               />
             </label>
             <div className={styles.help}>
-              The VL model will use its standard system prompt. Anything you type
-              here is appended as additional guidance for this run.
+              The VL model always uses its standard i2i system prompt. Leave
+              this empty to use the default user-side ask, or type your own —
+              it is sent verbatim, replacing the default.
             </div>
             {blockReason && (
               <div className={styles.warn} role="alert">{blockReason}</div>

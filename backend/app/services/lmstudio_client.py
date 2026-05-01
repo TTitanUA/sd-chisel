@@ -172,24 +172,23 @@ def analyze_image(
         raise LmError("config", "model is required")
     server_root, headers = _resolve(endpoint)
     b64 = base64.b64encode(image_bytes).decode("ascii")
-    user_text = "Describe this image for i2i prompt building."
-    if refining_prompt and refining_prompt.strip():
-        user_text = (
-            f"{user_text}\n\nAdditional guidance from the user:\n"
-            f"{refining_prompt.strip()}"
-        )
+    has_user_prompt = bool(refining_prompt and refining_prompt.strip())
+    if has_user_prompt:
+        user_text = refining_prompt.strip()
+    else:
+        user_text = "Describe this image for i2i prompt building."
+    messages: list[dict[str, Any]] = []
+    messages.append({"role": "system", "content": VL_SYSTEM_PROMPT})
+    messages.append({
+        "role": "user",
+        "content": [
+            {"type": "text", "text": user_text},
+            {"type": "image_url", "image_url": {"url": f"data:{content_type};base64,{b64}"}},
+        ],
+    })
     payload = {
         "model": model,
-        "messages": [
-            {"role": "system", "content": VL_SYSTEM_PROMPT},
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": user_text},
-                    {"type": "image_url", "image_url": {"url": f"data:{content_type};base64,{b64}"}},
-                ],
-            },
-        ],
+        "messages": messages,
         "stream": False,
     }
     resp = _request(

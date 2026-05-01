@@ -179,12 +179,20 @@ image only unlinks its own file.
 ### 4.1. `analyze-source`
 
 A single VL call against an LMStudio model with the `vision` capability,
-run **per source image**. The system prompt instructs the model to
-describe the image in terms useful for i2i (composition, style, lighting,
-objects, mood). The user message is the standard "Describe this image for
-i2i prompt building" plus an optional refining instruction the user typed
-when launching the analysis (appended verbatim under "Additional
-guidance from the user"). The result is free text, stored on the row in
+run **per source image**. The system message is always present and
+instructs the model to describe the image in terms useful for i2i
+(composition, style, lighting, objects, mood). The user message depends
+on whether the user typed a refining instruction when launching the
+analysis:
+
+- **No user instruction.** The user message is the standard "Describe
+  this image for i2i prompt building."
+- **User instruction provided.** The user message is the user's
+  instruction sent verbatim — no default framing, no "additional
+  guidance" wrapper. The user fully controls the user-side ask while the
+  i2i-oriented system framing still applies.
+
+The result is free text, stored on the row in
 `session_source_images.analysis`. The refining instruction is also
 persisted in `analysis_prompt` so the next re-analysis dialog can pre-fill
 it. Re-running overwrites both fields. Only applicable to `i2i` sessions
