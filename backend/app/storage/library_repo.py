@@ -163,6 +163,40 @@ def delete_model(conn: sqlite3.Connection, name: str) -> bool:
     return cur.rowcount > 0
 
 
+def rename_model(
+    conn: sqlite3.Connection, old_name: str, new_name: str,
+) -> dict[str, Any] | None:
+    """Rename a Model's primary key and update sessions.model_name.
+
+    Wraps both updates in a single transaction with ``defer_foreign_keys``
+    so the parent UPDATE can land before sessions are rewritten.
+    """
+    if old_name == new_name:
+        return get_model(conn, old_name)
+    conn.execute("BEGIN")
+    try:
+        conn.execute("PRAGMA defer_foreign_keys = ON")
+        cur = conn.execute(
+            "UPDATE models SET name = ?, updated_at = ? WHERE name = ?",
+            (new_name, _now(), old_name),
+        )
+        if cur.rowcount == 0:
+            conn.execute("COMMIT")
+            return None
+        conn.execute(
+            "UPDATE sessions SET model_name = ? WHERE model_name = ?",
+            (new_name, old_name),
+        )
+        conn.execute("COMMIT")
+    except Exception:
+        try:
+            conn.execute("ROLLBACK")
+        except sqlite3.OperationalError:
+            pass
+        raise
+    return get_model(conn, new_name)
+
+
 # --- loras ------------------------------------------------------------------
 
 

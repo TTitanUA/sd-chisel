@@ -294,6 +294,51 @@ def test_rename_lora_returns_none_when_missing(conn):
     assert library_repo.rename_lora(conn, "ghost", "still_ghost") is None
 
 
+def test_rename_model_updates_pk_and_session_fk(conn):
+    library_repo.create_model(
+        conn, name="old_ckpt", display_name="Old", family_id="sdxl",
+    )
+    conn.execute(
+        "INSERT INTO projects(id, name, created_at, updated_at) "
+        "VALUES ('p1', 'P', 1, 1)",
+    )
+    conn.execute(
+        "INSERT INTO sessions(id, project_id, model_name, created_at, updated_at) "
+        "VALUES ('s1', 'p1', 'old_ckpt', 1, 1)",
+    )
+
+    out = library_repo.rename_model(conn, "old_ckpt", "new_ckpt")
+
+    assert out is not None
+    assert out["name"] == "new_ckpt"
+    assert library_repo.get_model(conn, "old_ckpt") is None
+
+    sessions = list(conn.execute(
+        "SELECT model_name FROM sessions WHERE id = 's1'",
+    ))
+    assert sessions[0]["model_name"] == "new_ckpt"
+
+
+def test_rename_model_noop_when_same_name(conn):
+    library_repo.create_model(
+        conn, name="same_ckpt", display_name="S", family_id="sdxl",
+    )
+    out = library_repo.rename_model(conn, "same_ckpt", "same_ckpt")
+    assert out is not None
+    assert out["name"] == "same_ckpt"
+
+
+def test_rename_model_returns_none_when_missing(conn):
+    assert library_repo.rename_model(conn, "ghost", "still_ghost") is None
+
+
+def test_rename_model_collision_raises(conn):
+    library_repo.create_model(conn, name="a_ckpt", display_name="A", family_id="sdxl")
+    library_repo.create_model(conn, name="b_ckpt", display_name="B", family_id="sdxl")
+    with pytest.raises(sqlite3.IntegrityError):
+        library_repo.rename_model(conn, "a_ckpt", "b_ckpt")
+
+
 def test_rename_lora_collision_raises(conn):
     library_repo.create_lora(
         conn, name="a", display_name="A", description="d",
