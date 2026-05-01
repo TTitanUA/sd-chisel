@@ -185,3 +185,37 @@
     gap: 16px;
   }
 }
+
+.renameRow {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.renameRow > :first-child {
+  flex: 1;
+  min-width: 0;
+}
+
+.renameToggle {
+  align-self: flex-start;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--accent);
+  cursor: pointer;
+  font-family: var(--font-ui);
+}
+
+.renameToggle:hover {
+  text-decoration: underline;
+}
+
+.renameError {
+  color: var(--danger);
+  font-size: 11px;
+  margin-top: 6px;
+}
