@@ -1,21 +1,25 @@
 # sd-chisel
 
-Local Windows prompt-writer for Stable Diffusion i2i via ComfyUI. Library of LoRAs and models, VL image analysis, chat-driven prompt generation.
+Local prompt writer for ComfyUI. It manages a local library of model families, checkpoints, and LoRAs, analyzes source images with a VL model, supports chat-driven prompt iteration, generates structured positive / negative / LoRA-string output you can paste into your workflow, and provides AI assistants for writing family prompt guides and LoRA metadata. LoRA indexing, Civitai metadata import, and other long-running work run through a background task registry with live UI updates.
 
 See:
 - [Technical spec](docs/spec/technical_specifications.md)
 - [Roadmap](docs/superpowers/specs/2026-04-23-mvp-roadmap-design.md)
+- [LMStudio capabilities design](docs/superpowers/specs/2026-04-30-lmstudio-capabilities-design.md)
+- [Prompt guide assistant design](docs/superpowers/specs/2026-04-30-prompt-guide-assistant-design.md)
 
 ## Status
 
 - Slice 6 (generate-prompt) shipped — full MVP loop is complete: source → analyze → chat → generate → copy structured prompt into ComfyUI. See [roadmap §4 Slice 6](docs/superpowers/specs/2026-04-23-mvp-roadmap-design.md).
+- Post-MVP work in this tree includes LMStudio model capability detection (`vision`, `tool_use`, `reasoning`), library assistants for prompt guides and LoRA metadata, Civitai import helpers, SSE-backed background tasks, and startup sweep/reindex scheduling for LoRAs that were not indexed cleanly.
 
 ## Prerequisites
 
 - Python 3.11+
 - Node.js 20+ with pnpm (`npm i -g pnpm`)
 - `uv` for backend environment and commands
-- LMStudio (or any OpenAI-compatible endpoint) running locally — required in Slice 3+, not for foundation
+- LMStudio (or a compatible local server) running locally for VL analysis, chat, prompt generation, and library assistants. Configure the server root URL in Settings, e.g. `http://localhost:1234` (not `/v1`).
+- LMStudio models with the capabilities you plan to use: `vision` for source-image analysis, prompt/chat-capable text models for session chat and generation, and `tool_use` for the Library assistants.
 
 ## First-time setup
 
