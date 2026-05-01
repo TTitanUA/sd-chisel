@@ -57,6 +57,11 @@ export default function ModelsRoute() {
     mutationFn: ({ name, body }: { name: string; body: ModelUpdate }) => libraryApi.updateModel(name, body),
     onSuccess: invalidate,
   });
+  const rename = useMutation({
+    mutationFn: ({ name, new_name }: { name: string; new_name: string }) =>
+      libraryApi.renameModel(name, new_name),
+    onSuccess: invalidate,
+  });
   const remove = useMutation({ mutationFn: libraryApi.deleteModel, onSuccess: invalidate });
 
   function goDetail(name: string) {
@@ -91,6 +96,17 @@ export default function ModelsRoute() {
     }
   }
 
+  function handleRename(newName: string) {
+    if (!selected) return;
+    rename.mutate(
+      { name: selected.name, new_name: newName },
+      {
+        onSuccess: (model: Model) =>
+          navigate(`${BASE}/${encodeURIComponent(model.name)}/edit`, { replace: true }),
+      },
+    );
+  }
+
   const rows = filteredModels.map((model) => ({
     id: model.name,
     primary: model.display_name || model.name,
@@ -99,7 +115,7 @@ export default function ModelsRoute() {
     tags: [model.author, model.version].filter(Boolean) as string[],
   }));
   const familyRows = families.data ?? [];
-  const error = create.error ?? update.error ?? remove.error ?? models.error ?? families.error;
+  const error = create.error ?? update.error ?? remove.error ?? rename.error ?? models.error ?? families.error;
   const total = models.data?.length ?? 0;
 
   // Avoid unused-warning when location is referenced only for re-renders
@@ -137,6 +153,9 @@ export default function ModelsRoute() {
           onCancel={cancelForm}
           onSubmit={submit}
           isSaving={update.isPending}
+          onRename={handleRename}
+          isRenaming={rename.isPending}
+          renameError={rename.error ? String(rename.error) : null}
         />
       </>
     );
