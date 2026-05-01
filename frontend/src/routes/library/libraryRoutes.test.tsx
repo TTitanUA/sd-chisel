@@ -191,4 +191,63 @@ describe("library routes", () => {
     renderRoute(<LorasRoute />, "/library/loras");
     expect(await screen.findByText(/indexed/i)).toBeInTheDocument();
   });
+
+  it("renames a LoRA from the edit page and navigates to the new URL", async () => {
+    const fetchMock = vi.fn((url: string, init?: RequestInit) => {
+      if (url.includes("/families")) {
+        return json([{ id: "sdxl", display_name: "SDXL", prompt_guide: "G", prompt_i2i: "", prompt_t2i: "", created_at: 1, updated_at: 1 }]);
+      }
+      if (url.includes("/rename") && init?.method === "POST") {
+        return json({
+          name: "cinematic_light_v2",
+          display_name: "Cinematic Light",
+          description: "Rim light",
+          tags: ["light"],
+          trigger_words: ["cinematic light"],
+          family_id: "sdxl",
+          recommended_weight: 0.75,
+          author: null, version: null, source_url: null,
+          created_at: 1, updated_at: 2, is_indexed: true,
+        });
+      }
+      // GET /loras
+      return json([
+        {
+          name: "cinematic_light",
+          display_name: "Cinematic Light",
+          description: "Rim light",
+          tags: ["light"],
+          trigger_words: ["cinematic light"],
+          family_id: "sdxl",
+          recommended_weight: 0.75,
+          author: null, version: null, source_url: null,
+          created_at: 1, updated_at: 1, is_indexed: true,
+        },
+      ]);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderRoute(<LorasRoute />, "/library/loras/cinematic_light/edit");
+
+    const renameToggle = await screen.findByRole("button", { name: /rename…/i });
+    fireEvent.click(renameToggle);
+
+    const slugInput = await screen.findByLabelText(/new filename slug/i);
+    fireEvent.change(slugInput, { target: { value: "cinematic_light_v2" } });
+
+    const saveBtn = screen.getByRole("button", { name: /^save$/i });
+    fireEvent.click(saveBtn);
+
+    await waitFor(() => {
+      const renameCalls = fetchMock.mock.calls.filter(
+        ([url, init]) =>
+          typeof url === "string" &&
+          url.includes("/api/library/loras/cinematic_light/rename") &&
+          (init as RequestInit | undefined)?.method === "POST",
+      );
+      expect(renameCalls.length).toBe(1);
+      const body = JSON.parse((renameCalls[0][1] as RequestInit).body as string);
+      expect(body).toEqual({ new_name: "cinematic_light_v2" });
+    });
+  });
 });
