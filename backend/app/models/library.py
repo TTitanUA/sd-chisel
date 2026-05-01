@@ -13,6 +13,7 @@ class FamilyOut(StrictModel):
     prompt_guide: str
     prompt_i2i: str
     prompt_t2i: str
+    hidden: bool = False
     created_at: int
     updated_at: int
 
@@ -40,6 +41,7 @@ class ModelOut(StrictModel):
     author: str | None
     version: str | None
     source_url: str | None
+    hidden: bool = False
     created_at: int
     updated_at: int
 
@@ -74,9 +76,14 @@ class LoraOut(StrictModel):
     author: str | None
     version: str | None
     source_url: str | None
+    hidden: bool = False
     created_at: int
     updated_at: int
     is_indexed: bool = False
+
+
+class HiddenPatch(StrictModel):
+    hidden: bool
 
 
 class LoraCreate(StrictModel):

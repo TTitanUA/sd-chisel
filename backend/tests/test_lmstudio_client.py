@@ -142,6 +142,45 @@ def test_unload_model_hits_correct_endpoint():
     assert captured["body"] == {"instance_id": "inst-1"}
 
 
+# --- list_loaded_instance_ids ---
+
+def test_list_loaded_instance_ids_extracts_from_loaded_instances():
+    items = [
+        {
+            "id": "qwen", "type": "llm",
+            "loaded_instances": [{"id": "inst-1"}, {"id": "inst-2"}],
+        },
+        {"id": "mistral", "type": "llm", "loaded_instances": []},
+        {"id": "embed", "type": "embedding"},
+    ]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=_models_body(items))
+
+    ids = lmstudio_client.list_loaded_instance_ids(
+        endpoint=ENDPOINT, transport=_make_transport(handler),
+    )
+    assert ids == ["inst-1", "inst-2"]
+
+
+def test_list_loaded_instance_ids_returns_empty_when_none_loaded():
+    items = [{"id": "m", "type": "llm"}]
+
+    def handler(r: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=_models_body(items))
+
+    assert lmstudio_client.list_loaded_instance_ids(
+        endpoint=ENDPOINT, transport=_make_transport(handler),
+    ) == []
+
+
+def test_list_loaded_instance_ids_raises_on_non_2xx():
+    transport = _make_transport(lambda r: httpx.Response(503, text="busy"))
+    with pytest.raises(lmstudio_client.LmError) as exc:
+        lmstudio_client.list_loaded_instance_ids(endpoint=ENDPOINT, transport=transport)
+    assert exc.value.kind == "upstream"
+
+
 # --- analyze_image ---
 
 def test_analyze_image_sends_to_v1_chat_completions():

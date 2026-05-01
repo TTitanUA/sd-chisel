@@ -16,6 +16,7 @@ const FAKE_SESSION = {
   vl_summary: null,
   vl_model_name: null,
   prompt_model_name: null,
+  hidden: false,
   created_at: 1,
   updated_at: 1,
 };

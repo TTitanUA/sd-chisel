@@ -5,6 +5,7 @@ export type Project = {
   id: string;
   name: string;
   session_count: number;
+  hidden: boolean;
   created_at: number;
   updated_at: number;
 };
@@ -23,6 +24,7 @@ export type Session = {
   vl_summary: string | null;
   vl_model_name: string | null;
   prompt_model_name: string | null;
+  hidden: boolean;
   created_at: number;
   updated_at: number;
 };
@@ -54,6 +56,11 @@ export const sessionsApi = {
     apiFetch<Project>("/api/projects", { method: "POST", body: JSON.stringify(body) }),
   renameProject: (id: string, body: { name: string }) =>
     apiFetch<Project>(`/api/projects/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+  setProjectHidden: (id: string, hidden: boolean) =>
+    apiFetch<Project>(`/api/projects/${id}/hidden`, {
+      method: "PATCH",
+      body: JSON.stringify({ hidden }),
+    }),
   deleteProject: (id: string) => apiFetch<void>(`/api/projects/${id}`, { method: "DELETE" }),
 
   listSessions: (projectId: string) => apiFetch<Session[]>(`/api/projects/${projectId}/sessions`),
@@ -65,6 +72,11 @@ export const sessionsApi = {
   getSession: (id: string) => apiFetch<Session>(`/api/sessions/${id}`),
   updateSession: (id: string, body: SessionUpdate) =>
     apiFetch<Session>(`/api/sessions/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+  setSessionHidden: (id: string, hidden: boolean) =>
+    apiFetch<Session>(`/api/sessions/${id}/hidden`, {
+      method: "PATCH",
+      body: JSON.stringify({ hidden }),
+    }),
   deleteSession: (id: string) => apiFetch<void>(`/api/sessions/${id}`, { method: "DELETE" }),
 
   uploadSource: async (id: string, file: File): Promise<Session> => {

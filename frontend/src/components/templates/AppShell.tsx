@@ -1,7 +1,8 @@
 import { Link, Outlet, useLocation } from "react-router-dom";
 import { ProjectSidebar } from "@/components/organisms/ProjectSidebar";
 import { TaskListPopover } from "@/components/molecules/TaskListPopover";
-import { useLmStudioConfig } from "@/api/settings";
+import { Icon } from "@/components/atoms/Icon";
+import { useLmStudioConfig, useUnloadAllLmModels } from "@/api/settings";
 import { useTaskStream } from "@/api/tasks";
 import styles from "./AppShell.module.css";
 
@@ -10,6 +11,7 @@ export function AppShell() {
   const inLibrary = pathname.startsWith("/library");
   const inSettings = pathname.startsWith("/settings");
   const cfg = useLmStudioConfig();
+  const unloadAll = useUnloadAllLmModels();
   useTaskStream();
 
   const host = cfg.data?.base_url
@@ -61,6 +63,16 @@ export function AppShell() {
             <span className={`${styles.endpointDot} ${dot}`} />
             {host}
           </Link>
+          <button
+            type="button"
+            className={styles.topbarIconButton}
+            onClick={() => unloadAll.mutate()}
+            disabled={!cfg.data?.configured || unloadAll.isPending}
+            aria-label="Unload all LMStudio models"
+            title="Unload all LMStudio models"
+          >
+            <Icon name="BrushCleaning" size={14} />
+          </button>
         </div>
       </header>
       <div className={styles.sidebar}>

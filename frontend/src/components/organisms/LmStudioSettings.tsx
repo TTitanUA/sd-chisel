@@ -10,6 +10,7 @@ import {
   useLmStudioConfig,
   useRefreshLmStudio,
   useSettingsInvalidation,
+  useShowHidden,
 } from "@/api/settings";
 import styles from "./LmStudioSettings.module.css";
 
@@ -20,6 +21,8 @@ export function LmStudioSettings() {
   const models = useLmModels();
   const refresh = useRefreshLmStudio();
   const invalidate = useSettingsInvalidation();
+  const showHidden = useShowHidden();
+  const visibleModels = (models.data ?? []).filter((m) => showHidden || !m.hidden);
 
   const [baseUrl, setBaseUrl] = useState("");
   const [apiKey, setApiKey] = useState("");
@@ -41,13 +44,14 @@ export function LmStudioSettings() {
   });
 
   const patch = useMutation({
-    mutationFn: (args: { name: string; vision?: boolean; tool_use?: boolean; reasoning?: boolean; enabled?: boolean; favorite?: boolean }) =>
+    mutationFn: (args: { name: string; vision?: boolean; tool_use?: boolean; reasoning?: boolean; enabled?: boolean; favorite?: boolean; hidden?: boolean }) =>
       settingsApi.patchModel(args.name, {
         ...(args.vision !== undefined ? { vision: args.vision } : {}),
         ...(args.tool_use !== undefined ? { tool_use: args.tool_use } : {}),
         ...(args.reasoning !== undefined ? { reasoning: args.reasoning } : {}),
         ...(args.enabled !== undefined ? { enabled: args.enabled } : {}),
         ...(args.favorite !== undefined ? { favorite: args.favorite } : {}),
+        ...(args.hidden !== undefined ? { hidden: args.hidden } : {}),
       }),
     onSuccess: () => invalidate.models(),
   });
@@ -126,16 +130,17 @@ export function LmStudioSettings() {
           </div>
         )}
 
-        {(models.data ?? []).length > 0 && (
+        {visibleModels.length > 0 && (
           <div className={styles.modelTable} role="table">
             <div className={styles.headCell}>Model</div>
             <div className={styles.headCell}>Capabilities</div>
             <div className={styles.headCell}>Favorite</div>
             <div className={styles.headCell}>Enabled</div>
+            <div className={styles.headCell}>Hidden</div>
             <div className={styles.headCell}>Last seen</div>
-            {(models.data ?? []).map((m) => (
+            {visibleModels.map((m) => (
               <Row key={m.name}>
-                <div title={m.name}>{m.name}</div>
+                <div title={m.name} style={m.hidden ? { opacity: 0.55 } : undefined}>{m.name}</div>
                 <div className={styles.capabilities}>
                   {(["vision", "tool_use", "reasoning"] as const).map((cap) => (
                     <label key={cap} className={styles.capLabel}>
@@ -171,6 +176,16 @@ export function LmStudioSettings() {
                     onChange={(e) =>
                       patch.mutate({ name: m.name, enabled: e.currentTarget.checked })
                     }
+                  />
+                </div>
+                <div>
+                  <input
+                    type="checkbox"
+                    checked={m.hidden}
+                    onChange={(e) =>
+                      patch.mutate({ name: m.name, hidden: e.currentTarget.checked })
+                    }
+                    aria-label="Hidden"
                   />
                 </div>
                 <div style={{ color: "var(--text-subtle)", fontSize: 12 }}>

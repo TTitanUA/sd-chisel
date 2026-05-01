@@ -26,6 +26,7 @@ class LmModelOut(StrictModel):
     reasoning: bool
     enabled: bool
     favorite: bool
+    hidden: bool = False
     last_seen: int
 
 
@@ -39,3 +40,13 @@ class LmModelPatch(StrictModel):
     reasoning: bool | None = None
     enabled: bool | None = None
     favorite: bool | None = None
+    hidden: bool | None = None
+
+
+class PrivacyOut(StrictModel):
+    show_hidden: bool
+    updated_at: int
+
+
+class PrivacyPatch(StrictModel):
+    show_hidden: bool

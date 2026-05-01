@@ -127,6 +127,39 @@ def test_patch_lm_model_404_for_unknown(client):
     assert resp.status_code == 404
 
 
+def test_unload_all_409_when_unconfigured(client):
+    assert client.post("/api/settings/lmstudio/unload-all").status_code == 409
+
+
+def test_unload_all_unloads_each_loaded_instance(client, monkeypatch):
+    client.put("/api/settings/lmstudio", json={"base_url": "http://h", "api_key": None})
+
+    monkeypatch.setattr(
+        lmstudio_client, "list_loaded_instance_ids", lambda **_: ["inst-a", "inst-b"],
+    )
+
+    unloaded: list[str] = []
+
+    def fake_unload(*, endpoint, instance_id, transport=None):
+        unloaded.append(instance_id)
+
+    monkeypatch.setattr(lmstudio_client, "unload_model", fake_unload)
+
+    body = client.post("/api/settings/lmstudio/unload-all").json()
+    assert body == {"unloaded": 2}
+    assert unloaded == ["inst-a", "inst-b"]
+
+
+def test_unload_all_502_on_upstream_error(client, monkeypatch):
+    client.put("/api/settings/lmstudio", json={"base_url": "http://h", "api_key": None})
+
+    def fake(**_):
+        raise lmstudio_client.LmError("upstream", "503: busy")
+
+    monkeypatch.setattr(lmstudio_client, "list_loaded_instance_ids", fake)
+    assert client.post("/api/settings/lmstudio/unload-all").status_code == 502
+
+
 def test_refresh_updates_capabilities_preserves_enabled(client, monkeypatch):
     client.put("/api/settings/lmstudio", json={"base_url": "http://h", "api_key": None})
     monkeypatch.setattr(lmstudio_client, "list_models", lambda **_: [_fake_model("m")])

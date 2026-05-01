@@ -19,6 +19,7 @@ import { LoraForm } from "@/components/organisms/LoraForm";
 import { formatUpdated } from "@/lib/formatUpdated";
 import { ModelFilterControls } from "./ModelFilterControls";
 import listStyles from "@/components/organisms/LibraryCrud.module.css";
+import { useShowHidden } from "@/api/settings";
 
 const BASE = "/library/loras";
 
@@ -40,13 +41,17 @@ export default function LorasRoute() {
   const isEdit = !isCreate && !!urlName && segments[1] === "edit";
   const mode: CrudMode = isCreate ? "create" : isEdit ? "edit" : "detail";
 
+  const showHidden = useShowHidden();
   const filteredLoras = useMemo(() => {
     let list = loras.data ?? [];
+    if (!showHidden) {
+      list = list.filter((l) => !l.hidden);
+    }
     if (familyIdFilter) {
       list = list.filter((l) => l.family_id === familyIdFilter);
     }
     return list;
-  }, [loras.data, familyIdFilter]);
+  }, [loras.data, familyIdFilter, showHidden]);
 
   const selected = useMemo(() => {
     const rows = loras.data ?? [];
@@ -65,6 +70,11 @@ export default function LorasRoute() {
     onSuccess: invalidate,
   });
   const remove = useMutation({ mutationFn: libraryApi.deleteLora, onSuccess: invalidate });
+  const toggleHidden = useMutation({
+    mutationFn: ({ name, hidden }: { name: string; hidden: boolean }) =>
+      libraryApi.setLoraHidden(name, hidden),
+    onSuccess: invalidate,
+  });
 
   function goDetail(name: string) {
     navigate(`${BASE}/${encodeURIComponent(name)}`);
@@ -183,6 +193,12 @@ export default function LorasRoute() {
           ? () => remove.mutate(selected.name, { onSuccess: () => goList() })
           : undefined
       }
+      onToggleHidden={
+        selected
+          ? () => toggleHidden.mutate({ name: selected.name, hidden: !selected.hidden })
+          : undefined
+      }
+      selectedHidden={selected?.hidden ?? false}
       filters={
         <ModelFilterControls
           families={familyRows}

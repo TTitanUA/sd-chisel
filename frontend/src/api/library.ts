@@ -7,6 +7,7 @@ export type Family = {
   prompt_guide: string;
   prompt_i2i: string;
   prompt_t2i: string;
+  hidden: boolean;
   created_at: number;
   updated_at: number;
 };
@@ -22,11 +23,12 @@ export type Model = {
   author: string | null;
   version: string | null;
   source_url: string | null;
+  hidden: boolean;
   created_at: number;
   updated_at: number;
 };
 
-export type ModelCreate = Omit<Model, "created_at" | "updated_at">;
+export type ModelCreate = Omit<Model, "created_at" | "updated_at" | "hidden">;
 export type ModelUpdate = Omit<ModelCreate, "name">;
 
 export type Lora = {
@@ -40,12 +42,13 @@ export type Lora = {
   author: string | null;
   version: string | null;
   source_url: string | null;
+  hidden: boolean;
   created_at: number;
   updated_at: number;
   is_indexed: boolean;
 };
 
-export type LoraCreate = Omit<Lora, "created_at" | "updated_at" | "is_indexed">;
+export type LoraCreate = Omit<Lora, "created_at" | "updated_at" | "is_indexed" | "hidden">;
 export type LoraUpdate = Omit<LoraCreate, "name">;
 
 export type CivitaiImport = {
@@ -89,6 +92,11 @@ export const libraryApi = {
     }),
   deleteFamily: (id: string) =>
     apiFetch<void>(`/api/library/families/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  setFamilyHidden: (id: string, hidden: boolean) =>
+    apiFetch<Family>(`/api/library/families/${encodeURIComponent(id)}/hidden`, {
+      method: "PATCH",
+      body: JSON.stringify({ hidden }),
+    }),
 
   listModels: (params: { family_id?: string; q?: string } = {}) =>
     apiFetch<Model[]>(`/api/library/models${qs(params)}`),
@@ -106,6 +114,11 @@ export const libraryApi = {
     }),
   deleteModel: (name: string) =>
     apiFetch<void>(`/api/library/models/${encodeURIComponent(name)}`, { method: "DELETE" }),
+  setModelHidden: (name: string, hidden: boolean) =>
+    apiFetch<Model>(`/api/library/models/${encodeURIComponent(name)}/hidden`, {
+      method: "PATCH",
+      body: JSON.stringify({ hidden }),
+    }),
 
   listLoras: (params: { family_id?: string; tag?: string; q?: string } = {}) =>
     apiFetch<Lora[]>(`/api/library/loras${qs(params)}`),
@@ -123,6 +136,11 @@ export const libraryApi = {
     }),
   deleteLora: (name: string) =>
     apiFetch<void>(`/api/library/loras/${encodeURIComponent(name)}`, { method: "DELETE" }),
+  setLoraHidden: (name: string, hidden: boolean) =>
+    apiFetch<Lora>(`/api/library/loras/${encodeURIComponent(name)}/hidden`, {
+      method: "PATCH",
+      body: JSON.stringify({ hidden }),
+    }),
 
   importLoraFromCivitai: (ref: string) =>
     apiFetch<CivitaiImport>(`/api/library/loras/civitai-import?ref=${encodeURIComponent(ref)}`),

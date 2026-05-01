@@ -20,6 +20,7 @@ const session: Session = {
   vl_summary: "summary",
   vl_model_name: null,
   prompt_model_name: "pm-1",
+  hidden: false,
   created_at: 0,
   updated_at: 0,
 };
@@ -43,6 +44,7 @@ beforeEach(() => {
         family_id: "sdxl",
         recommended_weight: 0.5,
         author: null, version: null, source_url: null,
+        hidden: false,
         created_at: 0, updated_at: 0, is_indexed: true,
       },
     ] as libraryApi.Lora[],

@@ -18,6 +18,7 @@ const SESSION: Session = {
   vl_summary: null,
   vl_model_name: null,
   prompt_model_name: "mistral",
+  hidden: false,
   created_at: 0,
   updated_at: 0,
 };

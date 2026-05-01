@@ -33,6 +33,7 @@ def _project_payload(conn: sqlite3.Connection, row: sqlite3.Row | dict[str, Any]
         "SELECT COUNT(*) FROM sessions WHERE project_id = ?",
         (d["id"],),
     ).fetchone()[0]
+    d["hidden"] = bool(d.get("hidden", 0))
     return d
 
 
@@ -74,6 +75,18 @@ def delete_project(conn: sqlite3.Connection, project_id: str) -> bool:
     return cur.rowcount > 0
 
 
+def set_project_hidden(
+    conn: sqlite3.Connection, project_id: str, *, hidden: bool,
+) -> dict[str, Any] | None:
+    cur = conn.execute(
+        "UPDATE projects SET hidden = ?, updated_at = ? WHERE id = ?",
+        (1 if hidden else 0, _now(), project_id),
+    )
+    if cur.rowcount == 0:
+        return None
+    return get_project(conn, project_id)
+
+
 def delete_project_and_collect_sessions(
     conn: sqlite3.Connection, project_id: str,
 ) -> list[str] | None:
@@ -108,6 +121,7 @@ def list_sessions(conn: sqlite3.Connection, project_id: str) -> list[dict[str, A
 def _session_row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
     d = dict(row)
     d["use_negative"] = bool(d["use_negative"])
+    d["hidden"] = bool(d.get("hidden", 0))
     return d
 
 
@@ -172,6 +186,19 @@ def update_session(
 def delete_session(conn: sqlite3.Connection, session_id: str) -> bool:
     cur = conn.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
     return cur.rowcount > 0
+
+
+def set_session_hidden(
+    conn: sqlite3.Connection, session_id: str, *, hidden: bool,
+) -> dict[str, Any] | None:
+    now = _now()
+    cur = conn.execute(
+        "UPDATE sessions SET hidden = ?, updated_at = ? WHERE id = ?",
+        (1 if hidden else 0, now, session_id),
+    )
+    if cur.rowcount == 0:
+        return None
+    return get_session(conn, session_id)
 
 
 def set_vl_summary(conn: sqlite3.Connection, session_id: str, summary: str) -> None:

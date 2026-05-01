@@ -15,7 +15,12 @@ def _now() -> int:
 
 
 def _row_to_dict(row: sqlite3.Row | None) -> dict[str, Any] | None:
-    return dict(row) if row is not None else None
+    if row is None:
+        return None
+    d = dict(row)
+    if "hidden" in d:
+        d["hidden"] = bool(d["hidden"])
+    return d
 
 
 def _like(value: str) -> str:
@@ -36,7 +41,7 @@ def list_families(conn: sqlite3.Connection, q: str | None = None) -> list[dict[s
         like = _like(q)
         params.extend([like, like, like, like, like])
     sql += " ORDER BY id"
-    return [dict(r) for r in conn.execute(sql, params)]
+    return [_row_to_dict(r) for r in conn.execute(sql, params)]  # type: ignore[misc]
 
 
 def get_family(conn: sqlite3.Connection, family_id: str) -> dict[str, Any] | None:
@@ -86,6 +91,18 @@ def delete_family(conn: sqlite3.Connection, family_id: str) -> bool:
     return cur.rowcount > 0
 
 
+def set_family_hidden(
+    conn: sqlite3.Connection, family_id: str, *, hidden: bool,
+) -> dict[str, Any] | None:
+    cur = conn.execute(
+        "UPDATE families SET hidden = ?, updated_at = ? WHERE id = ?",
+        (1 if hidden else 0, _now(), family_id),
+    )
+    if cur.rowcount == 0:
+        return None
+    return get_family(conn, family_id)
+
+
 # --- models -----------------------------------------------------------------
 
 
@@ -109,7 +126,7 @@ def list_models(
     if clauses:
         sql += " WHERE " + " AND ".join(clauses)
     sql += " ORDER BY name"
-    return [dict(r) for r in conn.execute(sql, params)]
+    return [_row_to_dict(r) for r in conn.execute(sql, params)]  # type: ignore[misc]
 
 
 def get_model(conn: sqlite3.Connection, name: str) -> dict[str, Any] | None:
@@ -163,6 +180,18 @@ def delete_model(conn: sqlite3.Connection, name: str) -> bool:
     return cur.rowcount > 0
 
 
+def set_model_hidden(
+    conn: sqlite3.Connection, name: str, *, hidden: bool,
+) -> dict[str, Any] | None:
+    cur = conn.execute(
+        "UPDATE models SET hidden = ?, updated_at = ? WHERE name = ?",
+        (1 if hidden else 0, _now(), name),
+    )
+    if cur.rowcount == 0:
+        return None
+    return get_model(conn, name)
+
+
 def rename_model(
     conn: sqlite3.Connection, old_name: str, new_name: str,
 ) -> dict[str, Any] | None:
@@ -204,6 +233,8 @@ def _hydrate_lora(conn: sqlite3.Connection, row: sqlite3.Row) -> dict[str, Any]:
     d = dict(row)
     d["tags"] = json.loads(d.get("tags") or "[]")
     d["trigger_words"] = json.loads(d.get("trigger_words") or "[]")
+    if "hidden" in d:
+        d["hidden"] = bool(d["hidden"])
     return d
 
 
@@ -319,6 +350,18 @@ def update_lora(
 def delete_lora(conn: sqlite3.Connection, name: str) -> bool:
     cur = conn.execute("DELETE FROM loras WHERE name = ?", (name,))
     return cur.rowcount > 0
+
+
+def set_lora_hidden(
+    conn: sqlite3.Connection, name: str, *, hidden: bool,
+) -> dict[str, Any] | None:
+    cur = conn.execute(
+        "UPDATE loras SET hidden = ?, updated_at = ? WHERE name = ?",
+        (1 if hidden else 0, _now(), name),
+    )
+    if cur.rowcount == 0:
+        return None
+    return get_lora(conn, name)
 
 
 def rename_lora(

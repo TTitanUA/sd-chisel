@@ -12,6 +12,8 @@ from app.models.settings import (
     LmModelsOut,
     LmStudioConfig,
     LmStudioConfigOut,
+    PrivacyOut,
+    PrivacyPatch,
 )
 from app.services import lmstudio_client
 from app.storage import settings_repo
@@ -55,6 +57,21 @@ def put_lmstudio(body: LmStudioConfig, conn: Conn) -> dict:
     )
 
 
+@router.post("/api/settings/lmstudio/unload-all")
+def unload_all_lmstudio_models(conn: Conn) -> dict:
+    cfg = settings_repo.get_lmstudio(conn)
+    if not cfg["lmstudio_url"]:
+        raise HTTPException(status_code=409, detail="LMStudio URL is not configured")
+    endpoint = _endpoint_from_row(cfg)
+    try:
+        ids = lmstudio_client.list_loaded_instance_ids(endpoint=endpoint)
+        for iid in ids:
+            lmstudio_client.unload_model(endpoint=endpoint, instance_id=iid)
+    except lmstudio_client.LmError as exc:
+        raise _lm_error_to_http(exc) from exc
+    return {"unloaded": len(ids)}
+
+
 @router.post("/api/settings/lmstudio/refresh", response_model=LmModelsOut)
 def refresh_lmstudio_models(conn: Conn) -> dict:
     cfg = settings_repo.get_lmstudio(conn)
@@ -81,14 +98,25 @@ def list_lm_models(conn: Conn) -> dict:
 
 @router.patch("/api/settings/lmstudio/models/{name}", response_model=LmModelOut)
 def patch_lm_model(name: str, body: LmModelPatch, conn: Conn) -> dict:
-    if all(v is None for v in [body.vision, body.tool_use, body.reasoning, body.enabled, body.favorite]):
+    fields = [body.vision, body.tool_use, body.reasoning, body.enabled, body.favorite, body.hidden]
+    if all(v is None for v in fields):
         raise HTTPException(status_code=422, detail="provide at least one field")
     row = settings_repo.patch_lm_model(
         conn, name=name,
         vision=body.vision, tool_use=body.tool_use,
         reasoning=body.reasoning, enabled=body.enabled,
-        favorite=body.favorite,
+        favorite=body.favorite, hidden=body.hidden,
     )
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"unknown model: {name}")
     return row
+
+
+@router.get("/api/settings/privacy", response_model=PrivacyOut)
+def get_privacy(conn: Conn) -> dict:
+    return settings_repo.get_privacy(conn)
+
+
+@router.put("/api/settings/privacy", response_model=PrivacyOut)
+def put_privacy(body: PrivacyPatch, conn: Conn) -> dict:
+    return settings_repo.set_privacy(conn, show_hidden=body.show_hidden)

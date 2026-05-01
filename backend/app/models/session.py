@@ -21,6 +21,7 @@ class ProjectOut(StrictModel):
     id: str
     name: str
     session_count: int
+    hidden: bool = False
     created_at: int
     updated_at: int
 
@@ -45,8 +46,13 @@ class SessionOut(StrictModel):
     vl_summary: str | None
     vl_model_name: str | None
     prompt_model_name: str | None
+    hidden: bool = False
     created_at: int
     updated_at: int
+
+
+class HiddenPatch(StrictModel):
+    hidden: bool
 
 
 class SessionCreate(StrictModel):

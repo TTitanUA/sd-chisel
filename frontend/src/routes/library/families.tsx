@@ -16,6 +16,7 @@ import { MarkdownView } from "@/components/molecules/MarkdownField";
 import detailStyles from "@/components/molecules/LibraryV2Detail.module.css";
 import { formatUpdated } from "@/lib/formatUpdated";
 import listStyles from "@/components/organisms/LibraryCrud.module.css";
+import { useShowHidden } from "@/api/settings";
 
 const BASE = "/library/families";
 
@@ -35,7 +36,11 @@ export default function FamiliesRoute() {
   const isEdit = !isCreate && !!urlId && segments[1] === "edit";
   const mode: CrudMode = isCreate ? "create" : isEdit ? "edit" : "detail";
 
-  const list = useMemo(() => families.data ?? [], [families.data]);
+  const showHidden = useShowHidden();
+  const list = useMemo(() => {
+    const all = families.data ?? [];
+    return showHidden ? all : all.filter((f) => !f.hidden);
+  }, [families.data, showHidden]);
   const total = list.length;
 
   const selected = useMemo(() => {
@@ -49,6 +54,11 @@ export default function FamiliesRoute() {
     onSuccess: invalidate,
   });
   const remove = useMutation({ mutationFn: libraryApi.deleteFamily, onSuccess: invalidate });
+  const toggleHidden = useMutation({
+    mutationFn: ({ id, hidden }: { id: string; hidden: boolean }) =>
+      libraryApi.setFamilyHidden(id, hidden),
+    onSuccess: invalidate,
+  });
 
   const rows = list.map((family) => ({
     id: family.id,
@@ -142,6 +152,12 @@ export default function FamiliesRoute() {
           ? () => remove.mutate(selected.id, { onSuccess: () => goList() })
           : undefined
       }
+      onToggleHidden={
+        selected
+          ? () => toggleHidden.mutate({ id: selected.id, hidden: !selected.hidden })
+          : undefined
+      }
+      selectedHidden={selected?.hidden ?? false}
       emptySelection={!selected}
       emptySelectionMessage="Select a family to see details"
     >

@@ -15,6 +15,7 @@ from app.models.library import (
     FamilyCreate,
     FamilyOut,
     FamilyUpdate,
+    HiddenPatch,
     LoraAssistFieldsSnapshot,
     LoraAssistRequest,
     LoraCreate,
@@ -319,6 +320,14 @@ def update_family(family_id: str, body: FamilyUpdate, conn: Conn):
     return row
 
 
+@router.patch("/families/{family_id}/hidden", response_model=FamilyOut)
+def patch_family_hidden(family_id: str, body: HiddenPatch, conn: Conn):
+    row = library_repo.set_family_hidden(conn, family_id, hidden=body.hidden)
+    if row is None:
+        raise _not_found("family", family_id)
+    return row
+
+
 @router.delete("/families/{family_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_family(family_id: str, conn: Conn):
     try:
@@ -368,6 +377,14 @@ def rename_model(name: str, body: RenameRequest, conn: Conn):
         row = library_repo.rename_model(conn, name, body.new_name)
     except sqlite3.IntegrityError as exc:
         raise _conflict(exc) from exc
+    if row is None:
+        raise _not_found("model", name)
+    return row
+
+
+@router.patch("/models/{name}/hidden", response_model=ModelOut)
+def patch_model_hidden(name: str, body: HiddenPatch, conn: Conn):
+    row = library_repo.set_model_hidden(conn, name, hidden=body.hidden)
     if row is None:
         raise _not_found("model", name)
     return row
@@ -642,6 +659,14 @@ def rename_lora(name: str, body: RenameRequest, conn: Conn):
     if row is None:
         raise _not_found("lora", name)
     return row
+
+
+@router.patch("/loras/{name}/hidden", response_model=LoraOut)
+def patch_lora_hidden(name: str, body: HiddenPatch, conn: Conn):
+    row = library_repo.set_lora_hidden(conn, name, hidden=body.hidden)
+    if row is None:
+        raise _not_found("lora", name)
+    return library_service.get_lora(conn, name)
 
 
 @router.delete("/loras/{name}", status_code=status.HTTP_204_NO_CONTENT)

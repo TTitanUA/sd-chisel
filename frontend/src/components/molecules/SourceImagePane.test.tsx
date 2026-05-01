@@ -18,6 +18,7 @@ const baseSession: Session = {
   vl_summary: null,
   vl_model_name: "qwen2-vl-7b-instruct",
   prompt_model_name: null,
+  hidden: false,
   created_at: 0,
   updated_at: 0,
 };

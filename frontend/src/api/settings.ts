@@ -15,12 +15,19 @@ export type LmModel = {
   reasoning: boolean;
   enabled: boolean;
   favorite: boolean;
+  hidden: boolean;
   last_seen: number;
+};
+
+export type Privacy = {
+  show_hidden: boolean;
+  updated_at: number;
 };
 
 export const settingsKeys = {
   lmstudio: () => ["settings", "lmstudio"] as const,
   lmModels: () => ["settings", "lmstudio", "models"] as const,
+  privacy: () => ["settings", "privacy"] as const,
 };
 
 export const settingsApi = {
@@ -34,15 +41,25 @@ export const settingsApi = {
     apiFetch<{ models: LmModel[] }>("/api/settings/lmstudio/refresh", {
       method: "POST",
     }),
+  unloadAll: () =>
+    apiFetch<{ unloaded: number }>("/api/settings/lmstudio/unload-all", {
+      method: "POST",
+    }),
   listModels: () =>
     apiFetch<{ models: LmModel[] }>("/api/settings/lmstudio/models"),
   patchModel: (
     name: string,
-    patch: { vision?: boolean; tool_use?: boolean; reasoning?: boolean; enabled?: boolean; favorite?: boolean },
+    patch: { vision?: boolean; tool_use?: boolean; reasoning?: boolean; enabled?: boolean; favorite?: boolean; hidden?: boolean },
   ) =>
     apiFetch<LmModel>(`/api/settings/lmstudio/models/${encodeURIComponent(name)}`, {
       method: "PATCH",
       body: JSON.stringify(patch),
+    }),
+  getPrivacy: () => apiFetch<Privacy>("/api/settings/privacy"),
+  putPrivacy: (body: { show_hidden: boolean }) =>
+    apiFetch<Privacy>("/api/settings/privacy", {
+      method: "PUT",
+      body: JSON.stringify(body),
     }),
 };
 
@@ -82,6 +99,34 @@ export function useRefreshLmStudio() {
     onSuccess: () => {
       invalidate.models();
       invalidate.config();
+    },
+  });
+}
+
+export function useUnloadAllLmModels() {
+  return useMutation({
+    mutationFn: () => settingsApi.unloadAll(),
+  });
+}
+
+export function usePrivacy() {
+  return useQuery({
+    queryKey: settingsKeys.privacy(),
+    queryFn: settingsApi.getPrivacy,
+  });
+}
+
+export function useShowHidden(): boolean {
+  const q = usePrivacy();
+  return q.data?.show_hidden ?? false;
+}
+
+export function useSetPrivacy() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { show_hidden: boolean }) => settingsApi.putPrivacy(body),
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: settingsKeys.privacy() });
     },
   });
 }

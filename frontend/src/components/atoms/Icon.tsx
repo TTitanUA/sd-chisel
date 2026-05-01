@@ -1,9 +1,12 @@
 import {
+  BrushCleaning,
   Check,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
   Copy,
+  Eye,
+  EyeOff,
   Folder,
   Link,
   MessageSquare,
@@ -15,6 +18,7 @@ import {
   Send,
   Server,
   Settings,
+  Shield,
   Sparkles,
   Trash2,
   X,
@@ -22,11 +26,14 @@ import {
 } from "lucide-react";
 
 const ICONS = {
+  BrushCleaning,
   Check,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
   Copy,
+  Eye,
+  EyeOff,
   Folder,
   Link,
   MessageSquare,
@@ -38,6 +45,7 @@ const ICONS = {
   Send,
   Server,
   Settings,
+  Shield,
   Sparkles,
   Trash2,
   X,

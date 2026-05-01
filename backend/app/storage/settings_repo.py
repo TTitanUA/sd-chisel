@@ -17,7 +17,7 @@ def _normalize_url(value: str | None) -> str | None:
     return stripped or None
 
 
-_MODEL_COLS = "name, enabled, last_seen, vision, tool_use, reasoning, favorite"
+_MODEL_COLS = "name, enabled, last_seen, vision, tool_use, reasoning, favorite, hidden"
 
 
 def _model_row(r: sqlite3.Row) -> dict[str, Any]:
@@ -27,6 +27,7 @@ def _model_row(r: sqlite3.Row) -> dict[str, Any]:
     d["tool_use"] = bool(d["tool_use"])
     d["reasoning"] = bool(d["reasoning"])
     d["favorite"] = bool(d["favorite"])
+    d["hidden"] = bool(d.get("hidden", 0))
     return d
 
 
@@ -58,6 +59,25 @@ def set_lmstudio(
         (_normalize_url(url), (api_key or None), now),
     )
     return get_lmstudio(conn)
+
+
+def get_privacy(conn: sqlite3.Connection) -> dict[str, Any]:
+    row = conn.execute(
+        "SELECT show_hidden, updated_at FROM app_settings WHERE id = 1",
+    ).fetchone()
+    if row is None:
+        return {"show_hidden": False, "updated_at": 0}
+    return {"show_hidden": bool(row["show_hidden"]), "updated_at": row["updated_at"]}
+
+
+def set_privacy(
+    conn: sqlite3.Connection, *, show_hidden: bool,
+) -> dict[str, Any]:
+    conn.execute(
+        "UPDATE app_settings SET show_hidden = ?, updated_at = ? WHERE id = 1",
+        (1 if show_hidden else 0, _now()),
+    )
+    return get_privacy(conn)
 
 
 # --- lm_models ------------------------------------------------------------
@@ -115,6 +135,7 @@ def patch_lm_model(
     reasoning: bool | None = None,
     enabled: bool | None = None,
     favorite: bool | None = None,
+    hidden: bool | None = None,
 ) -> dict[str, Any] | None:
     # favorite is exclusive — setting one clears the others.
     if favorite is True:
@@ -135,6 +156,8 @@ def patch_lm_model(
         sets.append("enabled = ?"); params.append(1 if enabled else 0)
     if favorite is False:
         sets.append("favorite = ?"); params.append(0)
+    if hidden is not None:
+        sets.append("hidden = ?"); params.append(1 if hidden else 0)
     if not sets:
         return get_lm_model(conn, name)
     params.append(name)

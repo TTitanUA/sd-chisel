@@ -11,6 +11,7 @@ import FamiliesRoute from "./routes/library/families";
 import ModelsRoute from "./routes/library/models";
 import LorasRoute from "./routes/library/loras";
 import LmStudioRoute from "./routes/settings/lmstudio";
+import PrivacyRoute from "./routes/settings/privacy";
 
 function RootRedirect() {
   const projects = useProjects();
@@ -82,6 +83,14 @@ export function App() {
               element={
                 <SettingsLayout>
                   <LmStudioRoute />
+                </SettingsLayout>
+              }
+            />
+            <Route
+              path="/settings/privacy"
+              element={
+                <SettingsLayout>
+                  <PrivacyRoute />
                 </SettingsLayout>
               }
             />

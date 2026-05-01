@@ -17,6 +17,7 @@ import detailStyles from "@/components/molecules/LibraryV2Detail.module.css";
 import { ModelForm } from "@/components/organisms/ModelForm";
 import { ModelFilterControls } from "./ModelFilterControls";
 import listStyles from "@/components/organisms/LibraryCrud.module.css";
+import { useShowHidden } from "@/api/settings";
 
 const BASE = "/library/models";
 
@@ -38,13 +39,17 @@ export default function ModelsRoute() {
   const isEdit = !isCreate && !!urlName && segments[1] === "edit";
   const mode: CrudMode = isCreate ? "create" : isEdit ? "edit" : "detail";
 
+  const showHidden = useShowHidden();
   const filteredModels = useMemo(() => {
     let list = models.data ?? [];
+    if (!showHidden) {
+      list = list.filter((m) => !m.hidden);
+    }
     if (familyIdFilter) {
       list = list.filter((m) => m.family_id === familyIdFilter);
     }
     return list;
-  }, [models.data, familyIdFilter]);
+  }, [models.data, familyIdFilter, showHidden]);
 
   const selected = useMemo(() => {
     const rows = models.data ?? [];
@@ -63,6 +68,11 @@ export default function ModelsRoute() {
     onSuccess: invalidate,
   });
   const remove = useMutation({ mutationFn: libraryApi.deleteModel, onSuccess: invalidate });
+  const toggleHidden = useMutation({
+    mutationFn: ({ name, hidden }: { name: string; hidden: boolean }) =>
+      libraryApi.setModelHidden(name, hidden),
+    onSuccess: invalidate,
+  });
 
   function goDetail(name: string) {
     navigate(`${BASE}/${encodeURIComponent(name)}`);
@@ -182,6 +192,12 @@ export default function ModelsRoute() {
           ? () => remove.mutate(selected.name, { onSuccess: () => goList() })
           : undefined
       }
+      onToggleHidden={
+        selected
+          ? () => toggleHidden.mutate({ name: selected.name, hidden: !selected.hidden })
+          : undefined
+      }
+      selectedHidden={selected?.hidden ?? false}
       filters={
         <ModelFilterControls
           families={familyRows}

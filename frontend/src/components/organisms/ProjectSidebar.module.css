@@ -23,6 +23,39 @@
   color: var(--text-subtle);
 }
 
+.searchWrap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 12px 8px;
+  padding: 0 8px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--r-xs, 4px);
+  flex-shrink: 0;
+}
+
+.searchIcon {
+  flex-shrink: 0;
+  color: var(--text-subtle);
+}
+
+.search {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  padding: 5px 0;
+  font-family: var(--font-ui, inherit);
+  font-size: 12px;
+  color: var(--text);
+  outline: none;
+}
+
+.search::placeholder {
+  color: var(--text-subtle);
+}
+
 .scroll {
   flex: 1;
   min-height: 0;
@@ -62,6 +95,70 @@
 
 .projGroup {
   margin-bottom: 4px;
+}
+
+.projGroup[data-hidden="true"] {
+  opacity: 0.55;
+}
+
+.sessionRowWrap[data-hidden="true"] .sessionRow {
+  opacity: 0.55;
+}
+
+.projRowWrap {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  position: relative;
+}
+
+.projRowWrap > .projRow {
+  flex: 1;
+  min-width: 0;
+}
+
+.sessionRowWrap {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  position: relative;
+}
+
+.sessionRowWrap > .sessionRow {
+  flex: 1;
+  min-width: 0;
+}
+
+.rowAction {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  margin-right: 2px;
+  border: 0;
+  background: transparent;
+  color: var(--text-subtle);
+  border-radius: var(--r-xs, 4px);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.1s;
+}
+
+.projRowWrap:hover .rowAction,
+.sessionRowWrap:hover .rowAction,
+.rowAction:focus-visible {
+  opacity: 1;
+}
+
+.projGroup[data-hidden="true"] .rowAction,
+.sessionRowWrap[data-hidden="true"] .rowAction {
+  opacity: 0.7;
+}
+
+.rowAction:hover {
+  background: var(--surface-alt, var(--surface));
+  color: var(--text);
 }
 
 .projRow {

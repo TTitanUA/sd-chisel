@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFil
 from app import config as app_config
 from app.api.deps import get_conn
 from app.models.session import (
+    HiddenPatch,
     ProjectCreate,
     ProjectOut,
     ProjectUpdate,
@@ -50,6 +51,7 @@ def _session_to_api_dict(row: dict) -> dict:
         "vl_summary": row.get("vl_summary"),
         "vl_model_name": row.get("vl_model_name"),
         "prompt_model_name": row.get("prompt_model_name"),
+        "hidden": bool(row.get("hidden", False)),
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
     }
@@ -81,6 +83,14 @@ def create_project(body: ProjectCreate, conn: Conn):
 @router.patch("/api/projects/{project_id}", response_model=ProjectOut)
 def update_project(project_id: str, body: ProjectUpdate, conn: Conn):
     row = session_repo.update_project(conn, project_id, name=body.name)
+    if row is None:
+        raise _not_found("project", project_id)
+    return row
+
+
+@router.patch("/api/projects/{project_id}/hidden", response_model=ProjectOut)
+def patch_project_hidden(project_id: str, body: HiddenPatch, conn: Conn):
+    row = session_repo.set_project_hidden(conn, project_id, hidden=body.hidden)
     if row is None:
         raise _not_found("project", project_id)
     return row
@@ -161,6 +171,14 @@ def update_session(session_id: str, body: SessionUpdate, conn: Conn):
         )
     except sqlite3.IntegrityError as exc:
         raise _conflict(exc) from exc
+    return _session_payload(conn, session_id)
+
+
+@router.patch("/api/sessions/{session_id}/hidden", response_model=SessionOut)
+def patch_session_hidden(session_id: str, body: HiddenPatch, conn: Conn):
+    row = session_repo.set_session_hidden(conn, session_id, hidden=body.hidden)
+    if row is None:
+        raise _not_found("session", session_id)
     return _session_payload(conn, session_id)
 
 

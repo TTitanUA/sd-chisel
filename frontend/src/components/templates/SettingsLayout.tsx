@@ -3,7 +3,10 @@ import type { ReactNode } from "react";
 import { Icon } from "@/components/atoms/Icon";
 import styles from "./SettingsLayout.module.css";
 
-const TABS = [{ to: "/settings/lmstudio", label: "LMStudio", icon: "Server" as const }];
+const TABS = [
+  { to: "/settings/lmstudio", label: "LMStudio", icon: "Server" as const },
+  { to: "/settings/privacy", label: "Privacy", icon: "Shield" as const },
+];
 
 export function SettingsLayout({ children }: { children: ReactNode }) {
   return (

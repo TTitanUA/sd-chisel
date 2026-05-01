@@ -22,6 +22,8 @@ export function LibraryCrud({
   detailEyebrow,
   onEdit,
   onDelete,
+  onToggleHidden,
+  selectedHidden,
   filters,
   emptySelection,
   emptySelectionMessage,
@@ -42,6 +44,8 @@ export function LibraryCrud({
   detailEyebrow: string;
   onEdit?: () => void;
   onDelete?: () => void;
+  onToggleHidden?: () => void;
+  selectedHidden?: boolean;
   filters?: ReactNode;
   emptySelection?: boolean;
   emptySelectionMessage?: string;
@@ -82,8 +86,19 @@ export function LibraryCrud({
                   <div className={styles.subtitleMono}>{detailSubtitle}</div>
                 )}
               </div>
-              {(onDelete || onEdit) && (
+              {(onDelete || onEdit || onToggleHidden) && (
                 <div className={styles.actions}>
+                  {onToggleHidden && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      type="button"
+                      icon={<Icon name={selectedHidden ? "Eye" : "EyeOff"} />}
+                      onClick={onToggleHidden}
+                      aria-label={selectedHidden ? "Unhide" : "Hide"}
+                      title={selectedHidden ? "Unhide" : "Hide"}
+                    />
+                  )}
                   {onDelete && (
                     <Button
                       size="sm"

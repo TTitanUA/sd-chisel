@@ -20,6 +20,7 @@ const baseSession: Session = {
   source_image_path: null,
   source_image_url: null,
   pinned_loras: [],
+  hidden: false,
   created_at: 0,
   updated_at: 0,
 };

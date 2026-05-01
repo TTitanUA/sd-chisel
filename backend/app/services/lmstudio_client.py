@@ -126,6 +126,35 @@ def unload_model(
         raise LmError("upstream", f"{resp.status_code}: {resp.text[:200]}")
 
 
+def list_loaded_instance_ids(
+    *,
+    endpoint: dict[str, Any],
+    transport: httpx.BaseTransport | None = None,
+) -> list[str]:
+    server_root, headers = _resolve(endpoint)
+    resp = _request(
+        "GET", f"{server_root}/api/v1/models",
+        headers=headers, json=None, transport=transport, timeout=LIST_TIMEOUT,
+    )
+    if resp.status_code >= 400:
+        raise LmError("upstream", f"{resp.status_code}: {resp.text[:200]}")
+    try:
+        body = resp.json()
+        items = body.get("data") or body.get("models") or []
+        if not isinstance(items, list):
+            raise ValueError(f"expected list, got {type(items)}")
+    except (ValueError, KeyError, TypeError) as exc:
+        raise LmError("shape", f"unexpected /api/v1/models body: {exc}") from exc
+
+    ids: list[str] = []
+    for item in items:
+        for inst in item.get("loaded_instances") or []:
+            iid = inst.get("id")
+            if isinstance(iid, str) and iid:
+                ids.append(iid)
+    return ids
+
+
 # ---------------------------------------------------------------------------
 # OpenAI-compat methods ({server_root}/v1/...)
 # ---------------------------------------------------------------------------
