@@ -250,6 +250,49 @@ def test_lora_create_rejects_is_indexed_in_body(client):
     assert resp.status_code == 422
 
 
+def test_rename_lora_http_success(client, conn):
+    client.post("/api/library/loras", json=_make_lora_payload())
+    resp = client.post(
+        "/api/library/loras/cinelight/rename",
+        json={"new_name": "cinelight_v2"},
+    )
+    assert resp.status_code == 200, resp.json()
+    assert resp.json()["name"] == "cinelight_v2"
+    assert resp.json()["is_indexed"] is True
+    assert client.get("/api/library/loras/cinelight").status_code == 404
+    assert client.get("/api/library/loras/cinelight_v2").status_code == 200
+    assert conn.execute(
+        "SELECT COUNT(*) FROM lora_vec_map WHERE lora_name = 'cinelight_v2'",
+    ).fetchone()[0] == 1
+
+
+def test_rename_lora_http_not_found(client):
+    resp = client.post(
+        "/api/library/loras/ghost/rename",
+        json={"new_name": "ghost2"},
+    )
+    assert resp.status_code == 404
+
+
+def test_rename_lora_http_conflict(client):
+    client.post("/api/library/loras", json=_make_lora_payload(name="a_lora"))
+    client.post("/api/library/loras", json=_make_lora_payload(name="b_lora"))
+    resp = client.post(
+        "/api/library/loras/a_lora/rename",
+        json={"new_name": "b_lora"},
+    )
+    assert resp.status_code == 409
+
+
+def test_rename_lora_http_bad_slug(client):
+    client.post("/api/library/loras", json=_make_lora_payload())
+    resp = client.post(
+        "/api/library/loras/cinelight/rename",
+        json={"new_name": "bad name with spaces"},
+    )
+    assert resp.status_code == 422
+
+
 import json
 
 from app.services import lmstudio_client
@@ -412,7 +455,7 @@ def test_assist_sends_function_call_output_on_followup(client, conn, monkeypatch
     assert second["user_input"][0]["call_id"] == "call_X"
 
 
-def test_assist_forwards_mcp_status(client, conn, monkeypatch):
+def test_assist_forwards_tool_status(client, conn, monkeypatch):
     from app.storage import settings_repo
     settings_repo.set_lmstudio(conn, url="http://localhost:1234", api_key=None)
     settings_repo.upsert_lm_models(conn, models=[
@@ -420,8 +463,8 @@ def test_assist_forwards_mcp_status(client, conn, monkeypatch):
     ])
 
     fake_events = [
-        {"type": "mcp_status", "tool": "browser_navigate", "status": "running"},
-        {"type": "mcp_status", "tool": "browser_navigate", "status": "done"},
+        {"type": "tool_status", "tool": "browser_navigate", "status": "running"},
+        {"type": "tool_status", "tool": "browser_navigate", "status": "done"},
         {"type": "delta", "content": "Done."},
         {"type": "completed", "response_id": "resp_X"},
     ]

@@ -11,17 +11,21 @@ from app.api.deps import get_conn
 from app.models.library import (
     AssistFieldsSnapshot,
     AssistRequest,
+    CivitaiImportResult,
     FamilyCreate,
     FamilyOut,
     FamilyUpdate,
+    LoraAssistFieldsSnapshot,
+    LoraAssistRequest,
     LoraCreate,
     LoraOut,
     LoraUpdate,
     ModelCreate,
     ModelOut,
     ModelUpdate,
+    RenameRequest,
 )
-from app.services import embedder, library_service, lmstudio_client
+from app.services import civitai, embedder, library_service, lmstudio_client
 from app.storage import library_repo, settings_repo
 
 Conn = Annotated[sqlite3.Connection, Depends(get_conn)]
@@ -182,37 +186,51 @@ def _format_snapshot(snap: AssistFieldsSnapshot) -> str:
     )
 
 
-@router.post("/families/assist")
-def assist(body: AssistRequest, conn: Conn) -> StreamingResponse:
+def _validate_assist_model(conn, model_name: str):
+    """Shared validation for assist endpoints."""
     cfg = settings_repo.get_lmstudio(conn)
     if not cfg["lmstudio_url"]:
         raise HTTPException(status_code=409, detail="LMStudio base_url is not configured")
-
-    row = settings_repo.get_lm_model(conn, body.model)
+    row = settings_repo.get_lm_model(conn, model_name)
     if row is None or not row["enabled"]:
-        raise HTTPException(status_code=409, detail=f"model {body.model!r} is not enabled")
+        raise HTTPException(status_code=409, detail=f"model {model_name!r} is not enabled")
     if not row["tool_use"]:
-        raise HTTPException(status_code=409, detail=f"model {body.model!r} does not support tool use")
-
-    endpoint = {
+        raise HTTPException(status_code=409, detail=f"model {model_name!r} does not support tool use")
+    return {
         "server_root": cfg["lmstudio_url"],
         "api_key": cfg["lmstudio_api_key"],
     }
 
+
+def _assist_stream_response(
+    *,
+    endpoint: dict,
+    model: str,
+    system_prompt: str,
+    tools: list[dict],
+    artifact_extractor,
+    user_text: str,
+    previous_response_id: str | None,
+) -> StreamingResponse:
+    """Build an SSE StreamingResponse for any assist endpoint.
+
+    ``artifact_extractor(tool_name, arguments) -> (field, content) | None``
+    maps a function-call event to an artifact SSE payload.
+    """
+
     def _stream_pass(user_input, prev_id):
-        """Run one /v1/responses pass and yield (sse_event, function_call_outputs, response_id)."""
         for event in lmstudio_client.chat_responses_stream(
             endpoint=endpoint,
-            model=body.model,
-            instructions=ASSIST_SYSTEM_PROMPT,
+            model=model,
+            instructions=system_prompt,
             user_input=user_input,
-            tools=ASSIST_TOOLS,
+            tools=tools,
             previous_response_id=prev_id,
         ):
             etype = event["type"]
             if etype == "delta":
                 yield ("sse", {"type": "delta", "content": event["content"]}, "")
-            elif etype == "mcp_status":
+            elif etype == "tool_status":
                 yield ("sse", {
                     "type": "tool_status",
                     "tool": event.get("tool", ""),
@@ -220,10 +238,10 @@ def assist(body: AssistRequest, conn: Conn) -> StreamingResponse:
                 }, "")
             elif etype == "function_call":
                 tool_name = event.get("name") or ""
-                field = ASSIST_FIELD_BY_TOOL.get(tool_name)
-                if field is not None:
-                    content = event.get("arguments", {}).get("content", "")
-                    yield ("sse", {"type": "artifact", "field": field, "content": content}, "")
+                args = event.get("arguments", {})
+                pair = artifact_extractor(tool_name, args)
+                if pair is not None:
+                    yield ("sse", {"type": "artifact", "field": pair[0], "content": pair[1]}, "")
                 yield ("call", {
                     "type": "function_call_output",
                     "call_id": event.get("call_id", ""),
@@ -233,11 +251,11 @@ def assist(body: AssistRequest, conn: Conn) -> StreamingResponse:
                 yield ("done", {}, event.get("response_id", ""))
 
     def gen():
-        user_input: Any = f"{_format_snapshot(body.current_state)}\n\n---\n{body.message}"
-        prev_id = body.previous_response_id
+        user_input: Any = user_text
+        prev_id = previous_response_id
         last_response_id = prev_id or ""
         try:
-            for _ in range(8):  # cap follow-up loops
+            for _ in range(8):
                 pending_outputs: list[dict] = []
                 had_call = False
                 completed = False
@@ -270,6 +288,27 @@ def assist(body: AssistRequest, conn: Conn) -> StreamingResponse:
             "X-Accel-Buffering": "no",
             "Connection": "keep-alive",
         },
+    )
+
+
+def _family_artifact(tool_name: str, args: dict):
+    field = ASSIST_FIELD_BY_TOOL.get(tool_name)
+    if field is None:
+        return None
+    return (field, args.get("content", ""))
+
+
+@router.post("/families/assist")
+def assist(body: AssistRequest, conn: Conn) -> StreamingResponse:
+    endpoint = _validate_assist_model(conn, body.model)
+    return _assist_stream_response(
+        endpoint=endpoint,
+        model=body.model,
+        system_prompt=ASSIST_SYSTEM_PROMPT,
+        tools=ASSIST_TOOLS,
+        artifact_extractor=_family_artifact,
+        user_text=f"{_format_snapshot(body.current_state)}\n\n---\n{body.message}",
+        previous_response_id=body.previous_response_id,
     )
 
 
@@ -338,6 +377,215 @@ def delete_model(name: str, conn: Conn):
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
+LORA_ASSIST_SYSTEM_PROMPT = (
+    "You are filling in metadata for a LoRA (Low-Rank Adaptation) model used "
+    "in image generation. The metadata is stored in a library and used by "
+    "ANOTHER LLM that selects and configures LoRAs for image prompts.\n\n"
+    "Fields you can update independently — one tool per field. Set as many "
+    "as you can confidently extract from the user's message or fetched docs. "
+    "Skip a field rather than guess.\n\n"
+    "[name] — filename slug, [a-zA-Z0-9_.-], no spaces, no extension. "
+    "Only valid in CREATE mode; in EDIT mode it is locked.\n"
+    "  Tool: update_name(content).\n\n"
+    "[display_name] — short human-readable name.\n"
+    "  Tool: update_display_name(content).\n\n"
+    "[description] — markdown describing what the LoRA does, when to use it, "
+    "incompatibilities, prompting tips. The downstream prompt LLM reads this "
+    "verbatim. Strict rules:\n"
+    "  - No marketing prose, download stats, or licensing notes.\n"
+    "  - No links, citations, or 'see docs at …' references.\n"
+    "  - No emojis.\n"
+    "  - No code examples or API snippets.\n"
+    "  - No filler — write the rule directly.\n"
+    "  Tool: update_description(content).\n\n"
+    "[tags] — short lowercase categorical labels (style, character, concept, "
+    "pose, clothing, background, lighting, etc.). Use hyphens not spaces.\n"
+    "  Tool: update_tags(tags).\n\n"
+    "[trigger_words] — exact tokens the LoRA was trained on. Required "
+    "keywords. Do not invent. Leave empty if not documented.\n"
+    "  Tool: update_trigger_words(trigger_words).\n\n"
+    "[family_id] — which base model family this LoRA is for. MUST be one of "
+    "the available family IDs listed in the editor state. Do not invent.\n"
+    "  Tool: update_family_id(content).\n\n"
+    "[recommended_weight] — typical weight, range -2.0 to 2.0. Most LoRAs "
+    "are 0.5–0.9.\n"
+    "  Tool: update_recommended_weight(weight).\n\n"
+    "[author], [version], [source_url] — provenance fields.\n"
+    "  Tools: update_author(content), update_version(content), "
+    "update_source_url(content).\n\n"
+    "When the user provides a documentation URL (Civitai, HuggingFace, etc.), "
+    "use your browser tools to fetch the page and extract: display name, "
+    "version, author, description, prompting tips, trigger words, "
+    "recommended weight. Also set source_url to the URL itself.\n\n"
+    "The user's message will be preceded by a block with the current editor "
+    "state, the list of available families, and the mode (CREATE or EDIT). "
+    "Call update_* tools with the FULL new value (not a diff)."
+)
+
+LORA_ASSIST_TOOLS_META: dict[str, dict[str, str]] = {
+    "update_name": {"field": "name", "arg": "content"},
+    "update_display_name": {"field": "display_name", "arg": "content"},
+    "update_description": {"field": "description", "arg": "content"},
+    "update_tags": {"field": "tags", "arg": "tags"},
+    "update_trigger_words": {"field": "trigger_words", "arg": "trigger_words"},
+    "update_family_id": {"field": "family_id", "arg": "content"},
+    "update_recommended_weight": {"field": "recommended_weight", "arg": "weight"},
+    "update_author": {"field": "author", "arg": "content"},
+    "update_version": {"field": "version", "arg": "content"},
+    "update_source_url": {"field": "source_url", "arg": "content"},
+}
+
+
+def _array_tool(name: str, description: str, param_name: str) -> dict:
+    return {
+        "type": "function",
+        "name": name,
+        "description": description,
+        "parameters": {
+            "type": "object",
+            "properties": {
+                param_name: {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": f"Complete list of {param_name}.",
+                },
+            },
+            "required": [param_name],
+            "additionalProperties": False,
+        },
+    }
+
+
+def _number_tool(
+    name: str, description: str, param_name: str, minimum: float, maximum: float,
+) -> dict:
+    return {
+        "type": "function",
+        "name": name,
+        "description": description,
+        "parameters": {
+            "type": "object",
+            "properties": {
+                param_name: {
+                    "type": "number",
+                    "minimum": minimum,
+                    "maximum": maximum,
+                },
+            },
+            "required": [param_name],
+            "additionalProperties": False,
+        },
+    }
+
+
+LORA_ASSIST_TOOLS = [
+    _function_tool(
+        "update_name",
+        "Set the LoRA filename slug (no extension). Only call in CREATE mode.",
+    ),
+    _function_tool("update_display_name", "Set the display name."),
+    _function_tool(
+        "update_description", "Update the LoRA description (markdown).",
+    ),
+    _array_tool("update_tags", "Replace the full tags list.", "tags"),
+    _array_tool(
+        "update_trigger_words",
+        "Replace the full trigger-words list.",
+        "trigger_words",
+    ),
+    _function_tool(
+        "update_family_id",
+        "Set the base family ID. Must match one of the available family IDs.",
+    ),
+    _number_tool(
+        "update_recommended_weight",
+        "Set the recommended weight (typical 0.5–0.9).",
+        "weight",
+        -2.0,
+        2.0,
+    ),
+    _function_tool("update_author", "Set the LoRA author."),
+    _function_tool("update_version", "Set the LoRA version string."),
+    _function_tool(
+        "update_source_url",
+        "Set the source URL (Civitai, HuggingFace, etc.).",
+    ),
+    {"type": "mcp", "server_label": "playwright"},
+]
+
+
+def _format_lora_snapshot(snap: LoraAssistFieldsSnapshot) -> str:
+    tags_str = ", ".join(snap.tags) if snap.tags else "(none)"
+    tw_str = ", ".join(snap.trigger_words) if snap.trigger_words else "(none)"
+    desc = snap.description.strip() or "(empty)"
+    weight_str = (
+        f"{snap.recommended_weight}" if snap.recommended_weight is not None else "(empty)"
+    )
+
+    fam_lines = "\n".join(
+        f"- {f.id}: {f.display_name}" for f in snap.available_families
+    ) or "(none)"
+
+    mode = "EDIT (the [name] field is locked, do not call update_name)" if snap.is_edit_mode else "CREATE"
+
+    return (
+        f"Mode: {mode}\n\n"
+        f"Available families:\n{fam_lines}\n\n"
+        "Current editor state:\n"
+        f"[name]\n{snap.name or '(empty)'}\n\n"
+        f"[display_name]\n{snap.display_name or '(empty)'}\n\n"
+        f"[description]\n{desc}\n\n"
+        f"[tags]\n{tags_str}\n\n"
+        f"[trigger_words]\n{tw_str}\n\n"
+        f"[family_id]\n{snap.family_id or '(empty)'}\n\n"
+        f"[recommended_weight]\n{weight_str}\n\n"
+        f"[author]\n{snap.author or '(empty)'}\n\n"
+        f"[version]\n{snap.version or '(empty)'}\n\n"
+        f"[source_url]\n{snap.source_url or '(empty)'}"
+    )
+
+
+def _lora_artifact(tool_name: str, args: dict):
+    meta = LORA_ASSIST_TOOLS_META.get(tool_name)
+    if meta is None:
+        return None
+    value = args.get(meta["arg"])
+    if value is None:
+        content = ""
+    elif isinstance(value, bool):
+        content = "true" if value else "false"
+    elif isinstance(value, (list, dict)):
+        content = json.dumps(value, ensure_ascii=False)
+    elif isinstance(value, (int, float)):
+        content = json.dumps(value)
+    else:
+        content = str(value)
+    return (meta["field"], content)
+
+
+@router.get("/loras/civitai-import", response_model=CivitaiImportResult)
+def civitai_import(ref: str):
+    try:
+        model_id, version_id = civitai.parse_civitai_ref(ref)
+        return civitai.fetch_lora_metadata(model_id, version_id)
+    except civitai.CivitaiError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/loras/assist")
+def lora_assist(body: LoraAssistRequest, conn: Conn) -> StreamingResponse:
+    endpoint = _validate_assist_model(conn, body.model)
+    return _assist_stream_response(
+        endpoint=endpoint,
+        model=body.model,
+        system_prompt=LORA_ASSIST_SYSTEM_PROMPT,
+        tools=LORA_ASSIST_TOOLS,
+        artifact_extractor=_lora_artifact,
+        user_text=f"{_format_lora_snapshot(body.current_state)}\n\n---\n{body.message}",
+        previous_response_id=body.previous_response_id,
+    )
+
+
 @router.get("/loras", response_model=list[LoraOut])
 def list_loras(
     conn: Conn,
@@ -374,6 +622,17 @@ def update_lora(name: str, body: LoraUpdate, conn: Conn):
         raise _conflict(exc) from exc
     except embedder.EmbedderError as exc:
         raise _embedder_failure(exc) from exc
+    if row is None:
+        raise _not_found("lora", name)
+    return row
+
+
+@router.post("/loras/{name}/rename", response_model=LoraOut)
+def rename_lora(name: str, body: RenameRequest, conn: Conn):
+    try:
+        row = library_service.rename_lora(conn, name, body.new_name)
+    except sqlite3.IntegrityError as exc:
+        raise _conflict(exc) from exc
     if row is None:
         raise _not_found("lora", name)
     return row
