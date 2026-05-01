@@ -236,3 +236,72 @@ def test_update_lora_inside_outer_transaction_does_not_nest(conn):
     )
     conn.execute("COMMIT")
     assert library_repo.get_lora(conn, "x")["display_name"] == "X2"
+
+
+def test_rename_lora_updates_pk_and_child_fks(conn):
+    library_repo.create_lora(
+        conn, name="old_slug", display_name="Old", description="d",
+        tags=[], trigger_words=[], family_id="sdxl",
+    )
+    conn.execute("INSERT INTO lora_vec_map(lora_name, rowid) VALUES (?, ?)",
+                 ("old_slug", 1))
+    conn.execute(
+        "INSERT INTO projects(id, name, created_at, updated_at) "
+        "VALUES ('p1', 'P', 1, 1)",
+    )
+    conn.execute(
+        "INSERT INTO sessions(id, project_id, created_at, updated_at) "
+        "VALUES ('s1', 'p1', 1, 1)",
+    )
+    conn.execute(
+        "INSERT INTO session_pinned_loras(session_id, lora_name, weight_override) "
+        "VALUES ('s1', 'old_slug', 0.7)",
+    )
+
+    out = library_repo.rename_lora(conn, "old_slug", "new_slug")
+
+    assert out is not None
+    assert out["name"] == "new_slug"
+    assert library_repo.get_lora(conn, "old_slug") is None
+    assert library_repo.get_lora(conn, "new_slug") is not None
+
+    vec_rows = list(conn.execute(
+        "SELECT lora_name FROM lora_vec_map WHERE lora_name = ?", ("new_slug",),
+    ))
+    assert len(vec_rows) == 1
+    assert list(conn.execute(
+        "SELECT lora_name FROM lora_vec_map WHERE lora_name = ?", ("old_slug",),
+    )) == []
+
+    pin_rows = list(conn.execute(
+        "SELECT lora_name FROM session_pinned_loras WHERE lora_name = ?",
+        ("new_slug",),
+    ))
+    assert len(pin_rows) == 1
+
+
+def test_rename_lora_noop_when_same_name(conn):
+    library_repo.create_lora(
+        conn, name="same", display_name="S", description="d",
+        tags=[], trigger_words=[], family_id="sdxl",
+    )
+    out = library_repo.rename_lora(conn, "same", "same")
+    assert out is not None
+    assert out["name"] == "same"
+
+
+def test_rename_lora_returns_none_when_missing(conn):
+    assert library_repo.rename_lora(conn, "ghost", "still_ghost") is None
+
+
+def test_rename_lora_collision_raises(conn):
+    library_repo.create_lora(
+        conn, name="a", display_name="A", description="d",
+        tags=[], trigger_words=[], family_id="sdxl",
+    )
+    library_repo.create_lora(
+        conn, name="b", display_name="B", description="d",
+        tags=[], trigger_words=[], family_id="sdxl",
+    )
+    with pytest.raises(sqlite3.IntegrityError):
+        library_repo.rename_lora(conn, "a", "b")

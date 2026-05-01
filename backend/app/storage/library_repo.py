@@ -287,6 +287,45 @@ def delete_lora(conn: sqlite3.Connection, name: str) -> bool:
     return cur.rowcount > 0
 
 
+def rename_lora(
+    conn: sqlite3.Connection, old_name: str, new_name: str,
+) -> dict[str, Any] | None:
+    """Rename a LoRA's primary key and update FK child columns.
+
+    Wraps the parent UPDATE and child FK updates in a single transaction
+    with ``defer_foreign_keys`` so the parent can land before children are
+    rewritten — both must be consistent at COMMIT.
+    """
+    if old_name == new_name:
+        return get_lora(conn, old_name)
+    conn.execute("BEGIN")
+    try:
+        conn.execute("PRAGMA defer_foreign_keys = ON")
+        cur = conn.execute(
+            "UPDATE loras SET name = ?, updated_at = ? WHERE name = ?",
+            (new_name, _now(), old_name),
+        )
+        if cur.rowcount == 0:
+            conn.execute("COMMIT")
+            return None
+        conn.execute(
+            "UPDATE lora_vec_map SET lora_name = ? WHERE lora_name = ?",
+            (new_name, old_name),
+        )
+        conn.execute(
+            "UPDATE session_pinned_loras SET lora_name = ? WHERE lora_name = ?",
+            (new_name, old_name),
+        )
+        conn.execute("COMMIT")
+    except Exception:
+        try:
+            conn.execute("ROLLBACK")
+        except sqlite3.OperationalError:
+            pass
+        raise
+    return get_lora(conn, new_name)
+
+
 def list_all_lora_names(conn: sqlite3.Connection) -> list[str]:
     """Return every LoRA primary key, sorted. Used by `reindex-all` CLI."""
     return [r[0] for r in conn.execute("SELECT name FROM loras ORDER BY name")]
