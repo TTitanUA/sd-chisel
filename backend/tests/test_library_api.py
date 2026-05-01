@@ -284,6 +284,66 @@ def test_rename_lora_http_conflict(client):
     assert resp.status_code == 409
 
 
+def test_rename_model_http_success(client, conn):
+    client.post("/api/library/models", json={
+        "name": "old_ckpt",
+        "display_name": "Old",
+        "family_id": "sdxl",
+    })
+    conn.execute(
+        "INSERT INTO projects(id, name, created_at, updated_at) "
+        "VALUES ('p1', 'P', 1, 1)",
+    )
+    conn.execute(
+        "INSERT INTO sessions(id, project_id, model_name, created_at, updated_at) "
+        "VALUES ('s1', 'p1', 'old_ckpt', 1, 1)",
+    )
+
+    resp = client.post(
+        "/api/library/models/old_ckpt/rename",
+        json={"new_name": "new_ckpt"},
+    )
+    assert resp.status_code == 200, resp.json()
+    assert resp.json()["name"] == "new_ckpt"
+    assert client.get("/api/library/models/old_ckpt").status_code == 404
+    assert conn.execute(
+        "SELECT model_name FROM sessions WHERE id = 's1'",
+    ).fetchone()["model_name"] == "new_ckpt"
+
+
+def test_rename_model_http_not_found(client):
+    resp = client.post(
+        "/api/library/models/ghost/rename",
+        json={"new_name": "ghost2"},
+    )
+    assert resp.status_code == 404
+
+
+def test_rename_model_http_conflict(client):
+    client.post("/api/library/models", json={
+        "name": "a_ckpt", "display_name": "A", "family_id": "sdxl",
+    })
+    client.post("/api/library/models", json={
+        "name": "b_ckpt", "display_name": "B", "family_id": "sdxl",
+    })
+    resp = client.post(
+        "/api/library/models/a_ckpt/rename",
+        json={"new_name": "b_ckpt"},
+    )
+    assert resp.status_code == 409
+
+
+def test_rename_model_http_bad_slug(client):
+    client.post("/api/library/models", json={
+        "name": "ckpt_x", "display_name": "X", "family_id": "sdxl",
+    })
+    resp = client.post(
+        "/api/library/models/ckpt_x/rename",
+        json={"new_name": "bad name"},
+    )
+    assert resp.status_code == 422
+
+
 def test_rename_lora_http_bad_slug(client):
     client.post("/api/library/loras", json=_make_lora_payload())
     resp = client.post(

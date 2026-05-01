@@ -366,6 +366,17 @@ def update_model(name: str, body: ModelUpdate, conn: Conn):
     return row
 
 
+@router.post("/models/{name}/rename", response_model=ModelOut)
+def rename_model(name: str, body: RenameRequest, conn: Conn):
+    try:
+        row = library_repo.rename_model(conn, name, body.new_name)
+    except sqlite3.IntegrityError as exc:
+        raise _conflict(exc) from exc
+    if row is None:
+        raise _not_found("model", name)
+    return row
+
+
 @router.delete("/models/{name}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_model(name: str, conn: Conn):
     try:
