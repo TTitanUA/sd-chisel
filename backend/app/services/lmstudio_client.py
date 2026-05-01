@@ -305,8 +305,8 @@ def chat_responses_stream(
 
     Yields:
         {"type": "delta", "content": "..."}              -- assistant text
-        {"type": "function_call", "call_id", "name", "arguments"}  -- custom tool call
-        {"type": "mcp_status", "tool", "status"}         -- MCP tool progress
+        {"type": "function_call", "call_id", "name", "arguments"}  -- custom tool call (final)
+        {"type": "tool_status", "tool", "status"}        -- tool progress (function or MCP)
         {"type": "completed", "response_id": "..."}      -- response complete
     """
     if not model.strip():
@@ -356,10 +356,16 @@ def chat_responses_stream(
                         item = data.get("item") or {}
                         if item.get("type") == "function_call":
                             iid = item.get("id", "")
+                            name = item.get("name", "")
                             fn_calls[iid] = {
                                 "call_id": item.get("call_id", iid),
-                                "name": item.get("name", ""),
+                                "name": name,
                                 "args": item.get("arguments", "") or "",
+                            }
+                            yield {
+                                "type": "tool_status",
+                                "tool": name,
+                                "status": "running",
                             }
                         elif item.get("type") in ("mcp_call", "tool_call"):
                             iid = item.get("id", "")
@@ -367,7 +373,7 @@ def chat_responses_stream(
                             if iid:
                                 mcp_names[iid] = tool
                             yield {
-                                "type": "mcp_status",
+                                "type": "tool_status",
                                 "tool": tool,
                                 "status": "running",
                             }
@@ -386,10 +392,16 @@ def chat_responses_stream(
                                 parsed = json.loads(args_raw) if args_raw else {}
                             except ValueError:
                                 parsed = {}
+                            tool_name = item.get("name", "") or (slot or {}).get("name", "")
+                            yield {
+                                "type": "tool_status",
+                                "tool": tool_name,
+                                "status": "done",
+                            }
                             yield {
                                 "type": "function_call",
                                 "call_id": item.get("call_id", iid),
-                                "name": item.get("name", "") or (slot or {}).get("name", ""),
+                                "name": tool_name,
                                 "arguments": parsed,
                             }
                         elif itype in ("mcp_call", "tool_call"):
@@ -397,7 +409,7 @@ def chat_responses_stream(
                             tool = item.get("name") or item.get("tool", "") or mcp_names.pop(iid, "")
                             ok = item.get("error") in (None, "")
                             yield {
-                                "type": "mcp_status",
+                                "type": "tool_status",
                                 "tool": tool,
                                 "status": "done" if ok else "failed",
                             }

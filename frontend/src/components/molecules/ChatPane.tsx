@@ -9,6 +9,7 @@ import {
 } from "@/api/chat";
 import type { Session } from "@/api/sessions";
 import { useGeneratePrompt } from "@/api/prompts";
+import { useIsReindexing } from "@/api/tasks";
 import styles from "./ChatPane.module.css";
 
 const isMac = typeof navigator !== "undefined" && /Mac|iPhone|iPod|iPad/i.test(navigator.platform);
@@ -18,6 +19,7 @@ export function ChatPane({ session }: { session: Session }) {
   const messages = useMessages(session.id);
   const generate = useGeneratePrompt(session.id);
   const invalidate = useChatInvalidation();
+  const isReindexing = useIsReindexing();
   const [draft, setDraft] = useState("");
   const [pending, setPending] = useState(false);
   const [optimistic, setOptimistic] = useState<ChatMessage | null>(null);
@@ -131,11 +133,13 @@ export function ChatPane({ session }: { session: Session }) {
               size="sm"
               icon={<Icon name="Sparkles" size={12} />}
               onClick={() => generate.mutate()}
-              disabled={generate.isPending || !session.vl_summary}
+              disabled={generate.isPending || !session.vl_summary || isReindexing}
               title={
                 !session.vl_summary
                   ? "Run Analyze on the source image first"
-                  : "Generate prompt"
+                  : isReindexing
+                    ? "LoRA index is updating — try again in a moment"
+                    : "Generate prompt"
               }
             >
               {generate.isPending ? "Generating…" : "Generate prompt"}

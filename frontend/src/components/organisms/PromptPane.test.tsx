@@ -6,6 +6,7 @@ import { PromptPane } from "./PromptPane";
 import type { Session } from "@/api/sessions";
 import * as promptsApi from "@/api/prompts";
 import * as libraryApi from "@/api/library";
+import * as tasksApi from "@/api/tasks";
 
 const session: Session = {
   id: "ses1",
@@ -111,6 +112,24 @@ describe("PromptPane", () => {
     wrap(<PromptPane session={session} />);
     fireEvent.click(screen.getByRole("button", { name: /Regenerate/i }));
     expect(mutate).toHaveBeenCalledTimes(1);
+  });
+
+  it("disables Generate while a reindex task is active", () => {
+    vi.spyOn(promptsApi, "usePrompts").mockReturnValue({
+      data: [],
+    } as unknown as ReturnType<typeof promptsApi.usePrompts>);
+    vi.spyOn(promptsApi, "useGeneratePrompt").mockReturnValue({
+      mutate: vi.fn(), isPending: false, error: null,
+    } as unknown as ReturnType<typeof promptsApi.useGeneratePrompt>);
+    vi.spyOn(tasksApi, "useIsReindexing").mockReturnValue(true);
+
+    wrap(<PromptPane session={session} />);
+    const btn = screen.getByRole("button", { name: /Generate/i });
+    expect(btn).toBeDisabled();
+    expect(btn).toHaveAttribute(
+      "title",
+      expect.stringMatching(/index is updating/i),
+    );
   });
 
   it("renders error from generate mutation", () => {

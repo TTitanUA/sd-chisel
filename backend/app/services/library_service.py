@@ -1,8 +1,12 @@
-"""Coordinates `library_repo` and `indexer` under one outer transaction.
+"""Coordinates `library_repo` and `indexer` for LoRA writes.
 
-Every LoRA write goes through this module, never the repo directly. If the
-embedder fails for create or update, we ROLLBACK so the database never has a
-LoRA row without a matching vector (and vice versa).
+Embedding is **decoupled** from writes: create/update commits the row but
+does NOT compute the vector. The HTTP layer schedules a background
+reindex task after the write returns, and the row is exposed with
+``is_indexed=False`` until the task completes.
+
+Update additionally clears the existing vector before commit so the
+retriever can never serve a stale embedding for a freshly-edited LoRA.
 """
 from __future__ import annotations
 
@@ -33,15 +37,7 @@ def _rollback(conn: sqlite3.Connection) -> None:
 
 
 def create_lora(conn: sqlite3.Connection, **kwargs: Any) -> dict[str, Any]:
-    conn.execute("BEGIN")
-    try:
-        row = library_repo.create_lora(conn, **kwargs)
-        vector = embedder.embed(embedder.build_embedding_text(row))
-        indexer.upsert_lora_vector(conn, lora_name=row["name"], vector=vector)
-        conn.execute("COMMIT")
-    except Exception:
-        _rollback(conn)
-        raise
+    row = library_repo.create_lora(conn, **kwargs)
     return _hydrated_with_index_status(conn, library_repo.get_lora(conn, row["name"]))  # type: ignore[return-value]
 
 
@@ -52,10 +48,11 @@ def update_lora(
     try:
         updated = library_repo.update_lora(conn, name, **kwargs)
         if updated is None:
-            conn.execute("COMMIT")  # nothing to roll back; still a clean exit
+            conn.execute("COMMIT")
             return None
-        vector = embedder.embed(embedder.build_embedding_text(updated))
-        indexer.upsert_lora_vector(conn, lora_name=name, vector=vector)
+        # Drop the old vector — its embedding text no longer matches the row.
+        # `is_indexed` flips to False until the background reindex completes.
+        indexer.delete_lora_vector(conn, lora_name=name)
         conn.execute("COMMIT")
     except Exception:
         _rollback(conn)
@@ -89,7 +86,8 @@ def rename_lora(
 
 
 def reindex_one(conn: sqlite3.Connection, name: str) -> bool:
-    """Re-embed and replace the vector for an existing LoRA. Used by `reindex-all`.
+    """Re-embed and replace the vector for an existing LoRA. Used by the
+    background task runner and by `reindex-all`.
 
     Returns True on success, False if the LoRA is missing.
     """

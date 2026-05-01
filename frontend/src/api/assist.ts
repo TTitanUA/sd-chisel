@@ -8,45 +8,61 @@ export type AssistFieldsSnapshot = {
   prompt_t2i: string;
 };
 
+export type LoraAssistFieldName =
+  | "name"
+  | "display_name"
+  | "description"
+  | "tags"
+  | "trigger_words"
+  | "family_id"
+  | "recommended_weight"
+  | "author"
+  | "version"
+  | "source_url";
+
+export type LoraAssistFieldsSnapshot = {
+  name: string;
+  display_name: string;
+  description: string;
+  tags: string[];
+  trigger_words: string[];
+  family_id: string;
+  recommended_weight: number | null;
+  author: string;
+  version: string;
+  source_url: string;
+  available_families: { id: string; display_name: string }[];
+  is_edit_mode: boolean;
+};
+
 export type AssistStreamEvent =
   | { type: "delta"; content: string }
-  | { type: "artifact"; field: AssistFieldName; content: string }
+  | { type: "artifact"; field: string; content: string }
   | { type: "tool_status"; tool: string; status: string }
   | { type: "done"; response_id: string }
   | { type: "error"; detail: string };
 
 export type AssistStreamCallbacks = {
   onDelta: (chunk: string) => void;
-  onArtifact: (field: AssistFieldName, content: string) => void;
+  onArtifact: (field: string, content: string) => void;
   onToolStatus?: (tool: string, status: string) => void;
   onDone: (responseId: string) => void;
   onError: (detail: string) => void;
 };
 
-export async function streamAssist(
+export type AssistStreamFn<S> = (
   model: string,
   message: string,
   previousResponseId: string | null,
-  currentState: AssistFieldsSnapshot,
+  currentState: S,
   cb: AssistStreamCallbacks,
   signal?: AbortSignal,
-): Promise<void> {
-  const body: Record<string, unknown> = {
-    model,
-    message,
-    current_state: currentState,
-  };
-  if (previousResponseId) body.previous_response_id = previousResponseId;
+) => Promise<void>;
 
-  const res = await fetch(`${API_BASE}/api/library/families/assist`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
-    body: JSON.stringify(body),
-    signal,
-  });
-  if (!res.ok) {
-    throw new ApiError(res.status, await res.text());
-  }
+async function consumeAssistSSE(
+  res: Response,
+  cb: AssistStreamCallbacks,
+): Promise<void> {
   const reader = res.body?.getReader();
   if (!reader) {
     cb.onError("no response body");
@@ -80,3 +96,47 @@ export async function streamAssist(
     }
   }
 }
+
+async function postAssist(
+  url: string,
+  currentState: unknown,
+  model: string,
+  message: string,
+  previousResponseId: string | null,
+  cb: AssistStreamCallbacks,
+  signal?: AbortSignal,
+): Promise<void> {
+  const body: Record<string, unknown> = {
+    model,
+    message,
+    current_state: currentState,
+  };
+  if (previousResponseId) body.previous_response_id = previousResponseId;
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
+    body: JSON.stringify(body),
+    signal,
+  });
+  if (!res.ok) {
+    throw new ApiError(res.status, await res.text());
+  }
+  await consumeAssistSSE(res, cb);
+}
+
+export const streamAssist: AssistStreamFn<AssistFieldsSnapshot> = (
+  model, message, previousResponseId, currentState, cb, signal,
+) =>
+  postAssist(
+    `${API_BASE}/api/library/families/assist`,
+    currentState, model, message, previousResponseId, cb, signal,
+  );
+
+export const streamLoraAssist: AssistStreamFn<LoraAssistFieldsSnapshot> = (
+  model, message, previousResponseId, currentState, cb, signal,
+) =>
+  postAssist(
+    `${API_BASE}/api/library/loras/assist`,
+    currentState, model, message, previousResponseId, cb, signal,
+  );

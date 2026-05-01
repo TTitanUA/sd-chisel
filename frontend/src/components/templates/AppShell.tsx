@@ -1,6 +1,8 @@
 import { Link, Outlet, useLocation } from "react-router-dom";
 import { ProjectSidebar } from "@/components/organisms/ProjectSidebar";
+import { TaskListPopover } from "@/components/molecules/TaskListPopover";
 import { useLmStudioConfig } from "@/api/settings";
+import { useTaskStream } from "@/api/tasks";
 import styles from "./AppShell.module.css";
 
 export function AppShell() {
@@ -8,6 +10,7 @@ export function AppShell() {
   const inLibrary = pathname.startsWith("/library");
   const inSettings = pathname.startsWith("/settings");
   const cfg = useLmStudioConfig();
+  useTaskStream();
 
   const host = cfg.data?.base_url
     ? cfg.data.base_url.replace(/^https?:\/\//, "").replace(/\/v1\/?$/, "")
@@ -45,6 +48,7 @@ export function AppShell() {
         </div>
         <div className={styles.topbarSpacer} />
         <div className={styles.topbarRight}>
+          <TaskListPopover />
           <Link
             to="/settings/lmstudio"
             className={styles.topbarEndpoint}

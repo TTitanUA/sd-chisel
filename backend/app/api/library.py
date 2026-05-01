@@ -25,7 +25,7 @@ from app.models.library import (
     ModelUpdate,
     RenameRequest,
 )
-from app.services import civitai, embedder, library_service, lmstudio_client
+from app.services import civitai, library_service, lmstudio_client, lora_reindex
 from app.storage import library_repo, settings_repo
 
 Conn = Annotated[sqlite3.Connection, Depends(get_conn)]
@@ -39,10 +39,6 @@ def _conflict(exc: sqlite3.IntegrityError) -> HTTPException:
 
 def _not_found(kind: str, key: str) -> HTTPException:
     return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"{kind} not found: {key}")
-
-
-def _embedder_failure(exc: embedder.EmbedderError) -> HTTPException:
-    return HTTPException(status_code=500, detail=f"embedder failed: {exc}")
 
 
 def _dump(data: ModelCreate | ModelUpdate | LoraCreate | LoraUpdate) -> dict:
@@ -618,11 +614,11 @@ def get_lora(name: str, conn: Conn):
 @router.post("/loras", response_model=LoraOut, status_code=status.HTTP_201_CREATED)
 def create_lora(body: LoraCreate, conn: Conn):
     try:
-        return library_service.create_lora(conn, **_dump(body))
+        row = library_service.create_lora(conn, **_dump(body))
     except sqlite3.IntegrityError as exc:
         raise _conflict(exc) from exc
-    except embedder.EmbedderError as exc:
-        raise _embedder_failure(exc) from exc
+    lora_reindex.submit_reindex_lora(row["name"])
+    return row
 
 
 @router.put("/loras/{name}", response_model=LoraOut)
@@ -631,10 +627,9 @@ def update_lora(name: str, body: LoraUpdate, conn: Conn):
         row = library_service.update_lora(conn, name, **_dump(body))
     except sqlite3.IntegrityError as exc:
         raise _conflict(exc) from exc
-    except embedder.EmbedderError as exc:
-        raise _embedder_failure(exc) from exc
     if row is None:
         raise _not_found("lora", name)
+    lora_reindex.submit_reindex_lora(name)
     return row
 
 

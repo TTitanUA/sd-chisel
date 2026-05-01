@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AssistantPane } from "./AssistantPane";
+import { streamAssist, type AssistStreamCallbacks } from "@/api/assist";
 
 function makeStreamResponse(events: string[]) {
   const enc = new TextEncoder();
@@ -38,6 +39,12 @@ const MODELS_RESPONSE = {
   ],
 };
 
+const FAMILY_TOOL_LABELS: Record<string, string> = {
+  update_prompt_guide: "updating base guide",
+  update_prompt_i2i: "updating i2i guide",
+  update_prompt_t2i: "updating t2i guide",
+};
+
 beforeEach(() => {
   vi.restoreAllMocks();
 });
@@ -56,7 +63,14 @@ describe("AssistantPane", () => {
 
     const onArtifact = vi.fn();
     const getCurrentState = () => ({ prompt_guide: "", prompt_i2i: "", prompt_t2i: "" });
-    render(withClient(<AssistantPane getCurrentState={getCurrentState} onArtifact={onArtifact} />));
+    render(withClient(
+      <AssistantPane
+        getCurrentState={getCurrentState}
+        onArtifact={onArtifact}
+        streamFn={streamAssist}
+        toolLabels={FAMILY_TOOL_LABELS}
+      />,
+    ));
 
     await waitFor(() => expect(screen.getByText(/paste documentation/i)).toBeInTheDocument());
     const select = screen.getByRole("combobox");
@@ -82,7 +96,14 @@ describe("AssistantPane", () => {
 
     const onArtifact = vi.fn();
     const getCurrentState = () => ({ prompt_guide: "", prompt_i2i: "", prompt_t2i: "" });
-    render(withClient(<AssistantPane getCurrentState={getCurrentState} onArtifact={onArtifact} />));
+    render(withClient(
+      <AssistantPane
+        getCurrentState={getCurrentState}
+        onArtifact={onArtifact}
+        streamFn={streamAssist}
+        toolLabels={FAMILY_TOOL_LABELS}
+      />,
+    ));
 
     const input = await screen.findByRole("textbox");
     await userEvent.type(input, "help me");
@@ -90,5 +111,47 @@ describe("AssistantPane", () => {
 
     await waitFor(() => expect(onArtifact).toHaveBeenCalledWith("prompt_guide", "# My Guide"));
     await waitFor(() => expect(screen.getByText(/here is a guide/i)).toBeInTheDocument());
+  });
+
+  it("works with a custom streamFn (LoRA-style)", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo) => {
+      const url = typeof input === "string" ? input : input.url;
+      if (url.includes("/lmstudio/models")) return jsonResponse(MODELS_RESPONSE);
+      throw new Error(`unexpected fetch: ${url}`);
+    }));
+
+    const onArtifact = vi.fn();
+    const getCurrentState = () => ({ description: "", tags: [], trigger_words: [] });
+
+    const fakeStream = vi.fn(async (
+      _model: string, _msg: string, _prev: string | null,
+      _state: unknown, cb: AssistStreamCallbacks,
+    ) => {
+      cb.onDelta("Done.");
+      cb.onArtifact("description", "# LoRA desc");
+      cb.onArtifact("tags", '["style","anime"]');
+      cb.onDone("resp_2");
+    });
+
+    render(withClient(
+      <AssistantPane
+        getCurrentState={getCurrentState}
+        onArtifact={onArtifact}
+        streamFn={fakeStream}
+        toolLabels={{ update_description: "updating description" }}
+        emptyMessage="Describe the LoRA."
+      />,
+    ));
+
+    await waitFor(() => expect(screen.getByText("Describe the LoRA.")).toBeInTheDocument());
+
+    const input = await screen.findByRole("textbox");
+    await userEvent.type(input, "fill it");
+    await userEvent.click(screen.getByRole("button", { name: /^send$/i }));
+
+    await waitFor(() => {
+      expect(onArtifact).toHaveBeenCalledWith("description", "# LoRA desc");
+      expect(onArtifact).toHaveBeenCalledWith("tags", '["style","anime"]');
+    });
   });
 });

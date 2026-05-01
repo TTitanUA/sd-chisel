@@ -1,3 +1,5 @@
+import logging
+from contextlib import asynccontextmanager
 from mimetypes import guess_type
 
 from fastapi import FastAPI, HTTPException
@@ -10,8 +12,31 @@ from app.api.library import router as library_router
 from app.api.prompt import router as prompt_router
 from app.api.sessions import router as sessions_router
 from app.api.settings import router as settings_router
+from app.api.tasks import router as tasks_router
+from app.services import lora_reindex, task_runner
 
-app = FastAPI(title="sd-chisel", version="0.0.1")
+logger = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    registry = task_runner.TaskRegistry()
+    registry.start()
+    task_runner.install(registry)
+    try:
+        queued = lora_reindex.sweep_unindexed()
+        if queued:
+            logger.info("queued %d unindexed LoRAs at startup", queued)
+    except Exception:  # noqa: BLE001 — startup sweep must not block boot
+        logger.exception("startup reindex sweep failed")
+    try:
+        yield
+    finally:
+        await registry.stop()
+        task_runner._install_for_tests(None)
+
+
+app = FastAPI(title="sd-chisel", version="0.0.1", lifespan=lifespan)
 
 # Local dev: frontend runs on 5173 by default.
 app.add_middleware(
@@ -27,6 +52,7 @@ app.include_router(library_router)
 app.include_router(prompt_router)
 app.include_router(sessions_router)
 app.include_router(settings_router)
+app.include_router(tasks_router)
 
 _data_root = app_config.resolve_data_root()
 (_data_root / "images").mkdir(parents=True, exist_ok=True)

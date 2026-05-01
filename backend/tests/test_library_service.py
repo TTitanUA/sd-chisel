@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from app.services import embedder, indexer, library_service
+from app.services import indexer, library_service
 from app.storage import db as db_mod
 from app.storage import library_repo
 from app.storage.migrations import apply_pending
@@ -29,32 +29,27 @@ CREATE_KW = dict(
 )
 
 
-def test_create_writes_row_and_indexes_in_one_transaction(conn):
+def test_create_writes_row_without_indexing(conn):
     out = library_service.create_lora(conn, name="cine", **CREATE_KW)
     assert out["name"] == "cine"
-    assert out["is_indexed"] is True
+    # New contract: create commits the row only — embedding is the
+    # background task layer's job. Until reindex runs, is_indexed=False.
+    assert out["is_indexed"] is False
+    assert indexer.is_indexed(conn, "cine") is False
+
+
+def test_reindex_one_populates_vector(conn):
+    library_service.create_lora(conn, name="cine", **CREATE_KW)
+    assert library_service.reindex_one(conn, "cine") is True
     assert indexer.is_indexed(conn, "cine") is True
 
 
-def test_create_rolls_back_when_embedder_fails(conn, monkeypatch):
-    def boom(_text):
-        raise embedder.EmbedderError("boom")
-
-    monkeypatch.setattr(embedder, "embed", boom)
-    with pytest.raises(embedder.EmbedderError):
-        library_service.create_lora(conn, name="failrow", **CREATE_KW)
-    # Neither the loras row nor any vector survived the failure
-    assert library_repo.get_lora(conn, "failrow") is None
-    assert indexer.is_indexed(conn, "failrow") is False
-
-
-def test_update_re_embeds_in_place(conn):
+def test_update_drops_existing_vector(conn):
     library_service.create_lora(conn, name="cine", **CREATE_KW)
-    rowid_before = conn.execute(
-        "SELECT rowid FROM lora_vec_map WHERE lora_name = ?", ("cine",),
-    ).fetchone()[0]
+    library_service.reindex_one(conn, "cine")
+    assert indexer.is_indexed(conn, "cine") is True
 
-    library_service.update_lora(
+    out = library_service.update_lora(
         conn, "cine",
         display_name="Cinematic Light v2",
         description="even more dramatic",
@@ -63,33 +58,11 @@ def test_update_re_embeds_in_place(conn):
         family_id="sdxl",
         recommended_weight=0.85,
     )
-
-    rowid_after = conn.execute(
-        "SELECT rowid FROM lora_vec_map WHERE lora_name = ?", ("cine",),
-    ).fetchone()[0]
-    assert rowid_after == rowid_before
-
-
-def test_update_rolls_back_when_embedder_fails(conn, monkeypatch):
-    library_service.create_lora(conn, name="cine", **CREATE_KW)
-    original = library_repo.get_lora(conn, "cine")
-
-    def boom(_text):
-        raise embedder.EmbedderError("boom")
-
-    monkeypatch.setattr(embedder, "embed", boom)
-    with pytest.raises(embedder.EmbedderError):
-        library_service.update_lora(
-            conn, "cine",
-            display_name="changed",
-            description="changed",
-            tags=[], trigger_words=[],
-            family_id="sdxl", recommended_weight=None,
-        )
-
-    after = library_repo.get_lora(conn, "cine")
-    assert after["display_name"] == original["display_name"]
-    assert after["description"] == original["description"]
+    assert out is not None
+    # Edited row no longer has a fresh vector — retriever must not return
+    # stale embeddings. Background task will re-populate.
+    assert out["is_indexed"] is False
+    assert indexer.is_indexed(conn, "cine") is False
 
 
 def test_update_returns_none_when_lora_missing(conn):
@@ -104,6 +77,7 @@ def test_update_returns_none_when_lora_missing(conn):
 
 def test_delete_removes_row_and_vector_atomically(conn):
     library_service.create_lora(conn, name="cine", **CREATE_KW)
+    library_service.reindex_one(conn, "cine")
     assert library_service.delete_lora(conn, "cine") is True
     assert library_repo.get_lora(conn, "cine") is None
     assert indexer.is_indexed(conn, "cine") is False
@@ -117,21 +91,15 @@ def test_delete_returns_false_when_missing(conn):
     assert library_service.delete_lora(conn, "missing") is False
 
 
-def test_rename_lora_succeeds_and_does_not_call_embedder(conn, monkeypatch):
+def test_rename_lora_preserves_vector(conn):
     library_service.create_lora(conn, name="old_slug", **CREATE_KW)
-
-    calls = []
-    real_embed = embedder.embed
-    def spy(text):
-        calls.append(text)
-        return real_embed(text)
-    monkeypatch.setattr(embedder, "embed", spy)
+    library_service.reindex_one(conn, "old_slug")
 
     out = library_service.rename_lora(conn, "old_slug", "new_slug")
     assert out is not None
     assert out["name"] == "new_slug"
+    # Rename doesn't change embedding text — vector survives the rename.
     assert out["is_indexed"] is True
-    assert calls == [], "rename must not recompute the embedding"
 
     rows = conn.execute(
         "SELECT rowid FROM lora_vec_map WHERE lora_name = ?", ("new_slug",),

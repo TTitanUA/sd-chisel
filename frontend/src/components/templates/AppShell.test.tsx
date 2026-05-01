@@ -23,9 +23,23 @@ function mockFetch() {
       if (String(url).includes("/api/library/")) {
         return Promise.resolve(new Response(JSON.stringify([]), { status: 200 }));
       }
+      if (String(url).includes("/api/tasks")) {
+        return Promise.resolve(
+          new Response(JSON.stringify({ tasks: [] }), { status: 200 }),
+        );
+      }
       return Promise.resolve(new Response(JSON.stringify({ status: "ok" }), { status: 200 }));
     }),
   );
+
+  // jsdom doesn't ship EventSource — `useTaskStream` opens an SSE connection
+  // on mount, so we provide a no-op stub here.
+  class FakeEventSource {
+    onmessage: ((ev: MessageEvent) => void) | null = null;
+    onerror: ((ev: Event) => void) | null = null;
+    close() {}
+  }
+  vi.stubGlobal("EventSource", FakeEventSource);
 }
 
 describe("AppShell", () => {

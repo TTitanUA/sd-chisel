@@ -16,7 +16,7 @@ from app.models.prompts import (
     PromptsResponse,
     RetrievedIntent,
 )
-from app.services import lmstudio_client, prompt_orchestrator
+from app.services import lmstudio_client, prompt_orchestrator, task_runner
 from app.storage import session_repo, settings_repo
 
 Conn = Annotated[sqlite3.Connection, Depends(get_conn)]
@@ -29,6 +29,29 @@ def _not_found(session_id: str) -> HTTPException:
         status_code=status.HTTP_404_NOT_FOUND,
         detail=f"session not found: {session_id}",
     )
+
+
+def _reject_if_indexing() -> None:
+    """409 while any reindex task is still running. The retriever depends on
+    `vec_loras` being current; serving a prompt during a partial reindex
+    would either miss recently-edited LoRAs or pick up rows that are about
+    to be re-embedded."""
+    try:
+        reg = task_runner.get()
+    except RuntimeError:
+        return
+    active = reg.find_active(
+        lambda t: t.kind in ("reindex_lora", "reindex_all"),
+    )
+    if active:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "indexing_in_progress",
+                "message": "LoRA index is updating — try again in a moment.",
+                "task_ids": [t.id for t in active],
+            },
+        )
 
 
 def _validated_prompt_model(conn: sqlite3.Connection, name: str | None) -> str:
@@ -53,6 +76,8 @@ def generate_prompt(session_id: str, conn: Conn) -> GeneratePromptResponse:
     session = session_repo.get_session(conn, session_id)
     if session is None:
         raise _not_found(session_id)
+
+    _reject_if_indexing()
 
     cfg = settings_repo.get_lmstudio(conn)
     if not cfg["lmstudio_url"]:

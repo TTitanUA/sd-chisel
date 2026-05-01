@@ -13,6 +13,7 @@ import {
   type RetrievedIntent,
 } from "@/api/prompts";
 import type { Session } from "@/api/sessions";
+import { useIsReindexing } from "@/api/tasks";
 import { classifyLora, PromptLoraRow } from "./PromptLoraRow";
 import styles from "./PromptPane.module.css";
 
@@ -23,6 +24,7 @@ export function PromptPane({ session }: { session: Session }) {
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [debugOpen, setDebugOpen] = useState(false);
 
+  const isReindexing = useIsReindexing();
   const list = prompts.data ?? [];
   const head: Prompt | null = list[0] ?? null;
   const visible: Prompt | null =
@@ -87,13 +89,15 @@ export function PromptPane({ session }: { session: Session }) {
           variant="primary"
           icon={<Icon name="Sparkles" size={12} />}
           onClick={() => generate.mutate()}
-          disabled={generate.isPending || !session.vl_summary}
+          disabled={generate.isPending || !session.vl_summary || isReindexing}
           title={
             !session.vl_summary
               ? "Run Analyze on the source image first"
-              : visible
-                ? "Regenerate"
-                : "Generate prompt"
+              : isReindexing
+                ? "LoRA index is updating — try again in a moment"
+                : visible
+                  ? "Regenerate"
+                  : "Generate prompt"
           }
         >
           {generate.isPending ? "Generating…" : visible ? "Regenerate" : "Generate"}

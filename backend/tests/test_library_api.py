@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 
 from app.api.deps import get_conn
 from app.main import app
+from app.services import library_service, lora_reindex
 from app.storage import db as db_mod
 from app.storage.migrations import apply_pending
 
@@ -19,8 +20,27 @@ def conn(tmp_path, seed_default_families):
 
 
 @pytest.fixture
-def client(conn):
+def client(conn, monkeypatch):
+    """API client where reindex runs synchronously on the test connection.
+
+    The HTTP route fires `lora_reindex.submit_reindex_lora(name)` after every
+    create/update. In tests we want that work to complete before the response
+    is read, so assertions on `is_indexed` see the post-reindex state — the
+    actual async-task behaviour is covered by `test_lora_reindex.py`.
+    """
     app.dependency_overrides[get_conn] = lambda: conn
+
+    def _sync_reindex(name: str):
+        # Mirror task_runner: per-row failures are swallowed (the row is
+        # already committed; a failed embed marks the task failed, not the
+        # HTTP request).
+        try:
+            library_service.reindex_one(conn, name)
+        except Exception:  # noqa: BLE001
+            pass
+        return None
+
+    monkeypatch.setattr(lora_reindex, "submit_reindex_lora", _sync_reindex)
     try:
         yield TestClient(app)
     finally:
@@ -183,11 +203,16 @@ def _make_lora_payload(**override):
     return base
 
 
-def test_create_lora_returns_is_indexed_true(client):
+def test_create_lora_returns_is_indexed_false_until_reindex(client):
+    """POST returns the row state at write time — the reindex hasn't run yet.
+    The follow-up GET reflects the post-reindex state.
+    """
     resp = client.post("/api/library/loras", json=_make_lora_payload())
     assert resp.status_code == 201
-    body = resp.json()
-    assert body["is_indexed"] is True
+    assert resp.json()["is_indexed"] is False
+    # After the synchronous fixture reindex (mirrors background task), the
+    # next read sees the indexed state.
+    assert client.get("/api/library/loras/cinelight").json()["is_indexed"] is True
 
 
 def test_list_loras_includes_is_indexed_for_each_row(client):
@@ -203,7 +228,7 @@ def test_get_lora_includes_is_indexed(client):
     assert body["is_indexed"] is True
 
 
-def test_update_lora_re_embeds_and_keeps_indexed(client):
+def test_update_lora_drops_index_then_reindexes(client):
     client.post("/api/library/loras", json=_make_lora_payload())
     resp = client.put(
         "/api/library/loras/cinelight",
@@ -218,7 +243,10 @@ def test_update_lora_re_embeds_and_keeps_indexed(client):
         },
     )
     assert resp.status_code == 200
-    assert resp.json()["is_indexed"] is True
+    # PUT response reflects post-write/pre-reindex state — vector dropped.
+    assert resp.json()["is_indexed"] is False
+    # Subsequent GET sees the post-reindex state (synchronous in tests).
+    assert client.get("/api/library/loras/cinelight").json()["is_indexed"] is True
 
 
 def test_delete_lora_removes_vector_too(client, conn):
@@ -229,18 +257,21 @@ def test_delete_lora_removes_vector_too(client, conn):
     ).fetchone()[0] == 0
 
 
-def test_create_lora_returns_500_when_embedder_fails(client, conn, monkeypatch):
+def test_create_lora_keeps_row_when_embedder_fails(client, conn, monkeypatch):
+    """Embed failures no longer roll back the LoRA write — the row commits,
+    `is_indexed` stays false, and the task layer surfaces the error.
+    """
     def boom(_text):
         raise embedder.EmbedderError("simulated embedder failure")
 
     monkeypatch.setattr(embedder, "embed", boom)
 
     resp = client.post("/api/library/loras", json=_make_lora_payload(name="oops"))
-    assert resp.status_code == 500
-    # The whole write rolled back — no orphan loras row:
+    assert resp.status_code == 201
+    assert resp.json()["is_indexed"] is False
     assert conn.execute(
         "SELECT COUNT(*) FROM loras WHERE name = 'oops'",
-    ).fetchone()[0] == 0
+    ).fetchone()[0] == 1
 
 
 def test_lora_create_rejects_is_indexed_in_body(client):

@@ -84,6 +84,36 @@ def test_generate_prompt_404_when_session_unknown(client):
     assert resp.status_code == 404
 
 
+def test_generate_prompt_409_when_reindex_active(client, conn):
+    """A queued reindex task in the registry should block generate-prompt."""
+    import asyncio
+
+    from app.services import task_runner
+    sid = _bootstrap(client, conn)
+
+    async def setup_registry():
+        reg = task_runner.TaskRegistry()
+        # Worker is intentionally NOT started — the task stays queued,
+        # which still counts as active and is enough to trip the gate.
+        reg.submit(
+            kind="reindex_lora", title="t",
+            target={"lora_name": "lo"},
+            runner=lambda progress: None,
+        )
+        return reg
+
+    reg = asyncio.run(setup_registry())
+    task_runner.install(reg)
+    try:
+        resp = client.post(f"/api/sessions/{sid}/generate-prompt")
+        assert resp.status_code == 409
+        body = resp.json()
+        assert body["detail"]["code"] == "indexing_in_progress"
+        assert body["detail"]["task_ids"]
+    finally:
+        task_runner._install_for_tests(None)
+
+
 def test_generate_prompt_409_when_lmstudio_not_configured(client, conn):
     sid = _bootstrap(client, conn)
     settings_repo.set_lmstudio(conn, url=None, api_key=None)

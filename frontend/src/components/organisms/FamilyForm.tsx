@@ -6,8 +6,14 @@ import { LibraryFormPage, LibraryFormSection } from "@/components/organisms/Libr
 import libForm from "@/components/organisms/libraryForm.module.css";
 import { MarkdownField } from "@/components/molecules/MarkdownField";
 import { AssistantPane } from "@/components/molecules/AssistantPane";
-import type { AssistFieldName, AssistFieldsSnapshot } from "@/api/assist";
+import { streamAssist, type AssistFieldsSnapshot } from "@/api/assist";
 import type { Family, FamilyCreate, FamilyUpdate } from "@/api/library";
+
+const FAMILY_TOOL_LABELS: Record<string, string> = {
+  update_prompt_guide: "updating base guide",
+  update_prompt_i2i: "updating i2i guide",
+  update_prompt_t2i: "updating t2i guide",
+};
 
 export function FamilyForm({
   family,
@@ -35,7 +41,7 @@ export function FamilyForm({
     promptGuide.trim() !== "" &&
     (Boolean(family) || id.trim() !== "");
 
-  const handleArtifact = useCallback((field: AssistFieldName, content: string) => {
+  const handleArtifact = useCallback((field: string, content: string) => {
     if (field === "prompt_guide") setPromptGuide(content);
     else if (field === "prompt_i2i") setPromptI2i(content);
     else if (field === "prompt_t2i") setPromptT2i(content);
@@ -169,7 +175,14 @@ export function FamilyForm({
   return (
     <div className={libForm.formWithAssistant}>
       {form}
-      <AssistantPane onArtifact={handleArtifact} getCurrentState={getCurrentState} />
+      <AssistantPane
+        onArtifact={handleArtifact}
+        getCurrentState={getCurrentState}
+        streamFn={streamAssist}
+        toolLabels={FAMILY_TOOL_LABELS}
+        placeholder="Describe the family or paste docs…"
+        emptyMessage="Paste documentation or describe the model family to get started."
+      />
     </div>
   );
 }
