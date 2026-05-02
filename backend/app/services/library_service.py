@@ -115,8 +115,11 @@ def list_loras(
     family_id: str | None = None,
     tag: str | None = None,
     q: str | None = None,
+    include_hidden: bool = True,
 ) -> list[dict[str, Any]]:
-    rows = library_repo.list_loras(conn, family_id=family_id, tag=tag, q=q)
+    rows = library_repo.list_loras(
+        conn, family_id=family_id, tag=tag, q=q, include_hidden=include_hidden,
+    )
     if not rows:
         return rows
     indexed = {

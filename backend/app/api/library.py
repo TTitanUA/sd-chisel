@@ -617,7 +617,10 @@ def list_loras(
     tag: str | None = None,
     q: str | None = None,
 ):
-    return library_service.list_loras(conn, family_id=family_id, tag=tag, q=q)
+    show_hidden = settings_repo.get_privacy(conn)["show_hidden"]
+    return library_service.list_loras(
+        conn, family_id=family_id, tag=tag, q=q, include_hidden=show_hidden,
+    )
 
 
 @router.get("/loras/{name}", response_model=LoraOut)

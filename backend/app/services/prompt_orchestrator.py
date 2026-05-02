@@ -14,7 +14,7 @@ from pydantic import BaseModel, ValidationError
 
 from app.models.prompts import GeneratedPrompt, IntentList
 from app.services import llm_log, lmstudio_client, prompt_builder, retriever
-from app.storage import library_repo, session_repo, source_image_repo
+from app.storage import library_repo, session_repo, settings_repo, source_image_repo
 
 _M = TypeVar("_M", bound=BaseModel)
 
@@ -158,7 +158,8 @@ def _generate_inner(
         [] if (brief and brief.strip())
         else _last_n_messages(conn, session_id, CHAT_HISTORY_LIMIT)
     )
-    distinct_tags = library_repo.list_distinct_tags(conn)
+    show_hidden = settings_repo.get_privacy(conn)["show_hidden"]
+    distinct_tags = library_repo.list_distinct_tags(conn, include_hidden=show_hidden)
 
     # ---- Step 1: intents -------------------------------------------------
     intent_messages = prompt_builder.build_intent_messages(
@@ -183,12 +184,17 @@ def _generate_inner(
         k=RETRIEVAL_TOP_K,
         family_id=family_id,
         global_cap=RETRIEVAL_GLOBAL_CAP,
+        include_hidden=show_hidden,
     )
 
-    # Merge pinned LoRAs into candidates (no double-include)
+    # Merge pinned LoRAs into candidates (no double-include). Hidden pinned
+    # LoRAs are dropped unless the global "show hidden" setting is on, so
+    # the prompt LLM never sees them as available.
     pinned = session.get("pinned_loras") or []
     pinned_names = [p["lora_name"] for p in pinned]
-    pinned_rows = library_repo.get_loras_by_names(conn, pinned_names)
+    pinned_rows = library_repo.get_loras_by_names(
+        conn, pinned_names, include_hidden=show_hidden,
+    )
     seen = {c["name"] for c in bundle["candidates"]}
     for row in pinned_rows:
         if row["name"] not in seen:

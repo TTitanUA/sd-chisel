@@ -93,6 +93,43 @@ def test_retrieve_for_intents_dedupes_across_intents(conn, monkeypatch):
     assert union_names == ["a", "b"]
 
 
+def test_top_k_drops_hidden_when_include_hidden_false(conn, monkeypatch):
+    _seed_lora(conn, name="a", family="sdxl", vector_seed=1)
+    _seed_lora(conn, name="b", family="sdxl", vector_seed=2)
+    library_repo.set_lora_hidden(conn, "b", hidden=True)
+
+    monkeypatch.setattr(
+        "app.services.retriever.embedder.embed",
+        lambda text: _make_vector(1),
+    )
+
+    hits = retriever.top_k(conn, query="x", k=10, include_hidden=False)
+    assert [h["name"] for h in hits] == ["a"]
+    hits_all = retriever.top_k(conn, query="x", k=10, include_hidden=True)
+    assert sorted(h["name"] for h in hits_all) == ["a", "b"]
+
+
+def test_retrieve_for_intents_drops_hidden_when_include_hidden_false(
+    conn, monkeypatch,
+):
+    _seed_lora(conn, name="a", family="sdxl", vector_seed=1)
+    _seed_lora(conn, name="b", family="sdxl", vector_seed=2)
+    library_repo.set_lora_hidden(conn, "b", hidden=True)
+
+    monkeypatch.setattr(
+        "app.services.retriever.embedder.embed",
+        lambda text: _make_vector(1),
+    )
+
+    bundle = retriever.retrieve_for_intents(
+        conn,
+        intents=[{"kind": "k", "query": "q"}],
+        k=10,
+        include_hidden=False,
+    )
+    assert [c["name"] for c in bundle["candidates"]] == ["a"]
+
+
 def test_retrieve_for_intents_caps_global_union(conn, monkeypatch):
     for i in range(8):
         _seed_lora(conn, name=f"l{i}", family="sdxl", vector_seed=i + 1)

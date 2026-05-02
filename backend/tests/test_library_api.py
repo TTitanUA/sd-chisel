@@ -257,6 +257,21 @@ def test_delete_lora_removes_vector_too(client, conn):
     ).fetchone()[0] == 0
 
 
+def test_list_loras_respects_global_show_hidden(client, conn):
+    from app.storage import settings_repo
+    client.post("/api/library/loras", json=_make_lora_payload(name="visible"))
+    client.post("/api/library/loras", json=_make_lora_payload(name="secret"))
+    client.patch("/api/library/loras/secret/hidden", json={"hidden": True})
+
+    settings_repo.set_privacy(conn, show_hidden=False)
+    names_off = sorted(r["name"] for r in client.get("/api/library/loras").json())
+    assert names_off == ["visible"]
+
+    settings_repo.set_privacy(conn, show_hidden=True)
+    names_on = sorted(r["name"] for r in client.get("/api/library/loras").json())
+    assert names_on == ["secret", "visible"]
+
+
 def test_create_lora_keeps_row_when_embedder_fails(client, conn, monkeypatch):
     """Embed failures no longer roll back the LoRA write — the row commits,
     `is_indexed` stays false, and the task layer surfaces the error.

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from pathlib import Path
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
@@ -10,6 +11,7 @@ from starlette.responses import StreamingResponse
 from app.api.deps import get_conn
 from app.models.chat import ChatRequest, MessageOut, MessagesResponse
 from app.services import llm_log, lmstudio_client
+from app.storage import db as db_mod
 from app.storage import session_repo, settings_repo, source_image_repo
 
 Conn = Annotated[sqlite3.Connection, Depends(get_conn)]
@@ -130,6 +132,21 @@ def _sse(payload: dict) -> bytes:
     return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n".encode()
 
 
+def _conn_file(conn: sqlite3.Connection) -> Path:
+    """Return the on-disk path of the ``main`` database for ``conn``.
+
+    The streaming generator outlives the request-scoped ``Depends(get_conn)``
+    teardown, so we cannot reuse ``conn`` inside ``gen()`` — it has already
+    been closed by the time Starlette starts iterating the body. We open a
+    fresh connection to the same file instead. ``PRAGMA database_list``
+    returns ``(seq, name, file)`` rows; the ``main`` row carries the path.
+    """
+    for row in conn.execute("PRAGMA database_list").fetchall():
+        if row["name"] == "main":
+            return Path(row["file"])
+    raise RuntimeError("connection has no 'main' database attached")
+
+
 @router.get(
     "/api/sessions/{session_id}/messages",
     response_model=MessagesResponse,
@@ -238,9 +255,17 @@ def chat(session_id: str, body: ChatRequest, conn: Conn) -> Response:
         "api_key": cfg["lmstudio_api_key"],
     }
 
+    # Capture the db file now — Starlette tears down ``Depends(get_conn)``
+    # BEFORE iterating the StreamingResponse body, so ``conn`` is closed by
+    # the time ``gen()`` runs. ``gen()`` opens its own short-lived
+    # connection to persist the assistant turn (or roll the user row back
+    # on error).
+    db_file = _conn_file(conn)
+
     def gen():
         with llm_log.run_context():
             accumulated: list[str] = []
+            stream_failed: lmstudio_client.LmError | None = None
             try:
                 for chunk in lmstudio_client.chat_stream(
                     endpoint=endpoint, model=model, messages=payload_messages,
@@ -248,22 +273,29 @@ def chat(session_id: str, body: ChatRequest, conn: Conn) -> Response:
                     accumulated.append(chunk)
                     yield _sse({"type": "delta", "content": chunk})
             except lmstudio_client.LmError as exc:
-                if rollback_user_id is not None:
-                    session_repo.delete_message(conn, message_id=rollback_user_id)
-                yield _sse({"type": "error", "detail": str(exc)})
-                return
+                stream_failed = exc
 
-            full = "".join(accumulated).strip()
-            if not full:
-                if rollback_user_id is not None:
-                    session_repo.delete_message(conn, message_id=rollback_user_id)
-                yield _sse({"type": "error", "detail": "empty assistant response"})
-                return
+            stream_conn = db_mod.connect(db_file)
+            try:
+                if stream_failed is not None:
+                    if rollback_user_id is not None:
+                        session_repo.delete_message(stream_conn, message_id=rollback_user_id)
+                    yield _sse({"type": "error", "detail": str(stream_failed)})
+                    return
 
-            row = session_repo.append_message(
-                conn, session_id=session_id, role="assistant", content=full,
-            )
-            yield _sse({"type": "done", "message_id": row["id"]})
+                full = "".join(accumulated).strip()
+                if not full:
+                    if rollback_user_id is not None:
+                        session_repo.delete_message(stream_conn, message_id=rollback_user_id)
+                    yield _sse({"type": "error", "detail": "empty assistant response"})
+                    return
+
+                row = session_repo.append_message(
+                    stream_conn, session_id=session_id, role="assistant", content=full,
+                )
+                yield _sse({"type": "done", "message_id": row["id"]})
+            finally:
+                stream_conn.close()
 
     return StreamingResponse(
         gen(),

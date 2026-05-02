@@ -171,10 +171,16 @@ applies them to an empty or existing DB.
 ### 3.4. Privacy / hidden flags
 
 Every entity that shows up in a list (projects, sessions, families, models,
-loras, lm_models) carries a `hidden` column (0/1). The UI filters records
-with `hidden=1` unless `app_settings.show_hidden` is set to `1`. A single
-toggle on the Privacy page flips visibility globally. The point is privacy
-for demo sessions and NSFW content in the library without deleting data.
+loras, lm_models) carries a `hidden` column (0/1). When
+`app_settings.show_hidden` is `0`, hidden records are filtered out
+everywhere — not just in UI lists. For LoRAs specifically the gate is
+enforced server-side in three places: the `GET /api/library/loras`
+endpoint, the retriever's vector search, and the pinned-LoRA merge inside
+the prompt orchestrator. The prompt LLM never sees a hidden LoRA as a
+candidate while the toggle is off, even if the session has it pinned.
+Setting `show_hidden=1` reveals hidden items globally without mutating
+per-row state. The point is privacy for demo sessions and NSFW content in
+the library without deleting data.
 
 ### 3.5. Binaries
 
@@ -239,6 +245,13 @@ keeps retries clean — without rollback, a failed turn would leave an
 orphan user row, and the next attempt would feed two consecutive user
 messages to the model, which strict-template models reject. The frontend
 restores the typed text into the input on error so nothing is lost.
+
+Connection lifecycle for the streaming endpoint: validations and the
+initial user-row insert run on the request-scoped connection; the
+streaming generator opens its own short-lived connection (to the same
+db file) for the assistant-row insert and the rollback path. The
+request-scoped dependency is torn down before Starlette starts iterating
+the response body, so the generator cannot reuse it.
 
 When the chat history starts with assistant rows (which happens after
 modal-driven compaction has replaced history with the brief recap), the

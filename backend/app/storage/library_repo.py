@@ -244,6 +244,7 @@ def list_loras(
     family_id: str | None = None,
     tag: str | None = None,
     q: str | None = None,
+    include_hidden: bool = True,
 ) -> list[dict[str, Any]]:
     clauses: list[str] = []
     params: list[Any] = []
@@ -259,6 +260,8 @@ def list_loras(
             "OR lower(tags) LIKE ? OR lower(trigger_words) LIKE ?)"
         )
         params.extend([_like(q), _like(q), _like(q), _like(q), _like(q)])
+    if not include_hidden:
+        clauses.append("hidden = 0")
     sql = "SELECT * FROM loras"
     if clauses:
         sql += " WHERE " + " AND ".join(clauses)
@@ -408,27 +411,33 @@ def list_all_lora_names(conn: sqlite3.Connection) -> list[str]:
     return [r[0] for r in conn.execute("SELECT name FROM loras ORDER BY name")]
 
 
-def list_distinct_tags(conn: sqlite3.Connection) -> list[str]:
+def list_distinct_tags(
+    conn: sqlite3.Connection, *, include_hidden: bool = True,
+) -> list[str]:
     """Return every distinct tag string across all LoRAs, sorted ascending."""
-    rows = conn.execute(
+    sql = (
         "SELECT DISTINCT json_each.value AS tag "
         "FROM loras, json_each(loras.tags) "
-        "ORDER BY tag",
-    ).fetchall()
+    )
+    if not include_hidden:
+        sql += "WHERE loras.hidden = 0 "
+    sql += "ORDER BY tag"
+    rows = conn.execute(sql).fetchall()
     return [r["tag"] for r in rows]
 
 
 def get_loras_by_names(
-    conn: sqlite3.Connection, names: list[str],
+    conn: sqlite3.Connection, names: list[str], *, include_hidden: bool = True,
 ) -> list[dict[str, Any]]:
     """Return the hydrated LoRA rows whose ``name`` is in ``names``,
-    preserving the input order. Unknown names are silently dropped."""
+    preserving the input order. Unknown names are silently dropped.
+    When ``include_hidden`` is False, hidden LoRAs are also dropped."""
     if not names:
         return []
     placeholders = ",".join("?" for _ in names)
-    rows = conn.execute(
-        f"SELECT * FROM loras WHERE name IN ({placeholders})",
-        names,
-    ).fetchall()
+    sql = f"SELECT * FROM loras WHERE name IN ({placeholders})"
+    if not include_hidden:
+        sql += " AND hidden = 0"
+    rows = conn.execute(sql, names).fetchall()
     by_name = {r["name"]: _hydrate_lora(conn, r) for r in rows}
     return [by_name[n] for n in names if n in by_name]

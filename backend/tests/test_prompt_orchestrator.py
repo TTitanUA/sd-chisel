@@ -8,7 +8,7 @@ import pytest
 from app.services import prompt_orchestrator
 from app.services.lmstudio_client import LmError
 from app.storage import db as db_mod
-from app.storage import library_repo, session_repo, source_image_repo
+from app.storage import library_repo, session_repo, settings_repo, source_image_repo
 from app.storage.migrations import apply_pending
 
 
@@ -283,6 +283,96 @@ def test_generate_raises_for_unknown_session(conn):
             endpoint={"base_url": "http://x/v1", "api_key": None},
             prompt_model="m1",
         )
+
+
+def test_generate_excludes_hidden_loras_when_show_hidden_off(
+    conn, session_id, monkeypatch,
+):
+    """When the global ``show_hidden`` setting is off, both retrieved and
+    pinned hidden LoRAs must be dropped from the composition prompt — the
+    prompt LLM should never see them as available."""
+    from app.services import indexer
+    library_repo.create_lora(
+        conn, name="hidden-retrieved", display_name="hidden-retrieved",
+        description="d", tags=[], trigger_words=[], family_id="sdxl",
+    )
+    library_repo.create_lora(
+        conn, name="hidden-pinned", display_name="hidden-pinned",
+        description="d", tags=[], trigger_words=[], family_id="sdxl",
+    )
+    indexer.upsert_lora_vector(conn, lora_name="hidden-retrieved", vector=[0.001] * 1024)
+    indexer.upsert_lora_vector(conn, lora_name="hidden-pinned", vector=[0.001] * 1024)
+    indexer.upsert_lora_vector(conn, lora_name="lora-a", vector=[0.001] * 1024)
+    library_repo.set_lora_hidden(conn, "hidden-retrieved", hidden=True)
+    library_repo.set_lora_hidden(conn, "hidden-pinned", hidden=True)
+    session_repo.set_pinned_loras(
+        conn, session_id, [{"lora_name": "hidden-pinned", "weight_override": 0.7}],
+    )
+    settings_repo.set_privacy(conn, show_hidden=False)
+
+    monkeypatch.setattr(
+        "app.services.retriever.embedder.embed",
+        lambda text: [0.001] * 1024,
+    )
+    captured: dict = {"calls": []}
+
+    def fake_complete(*, endpoint, model, messages, response_format=None, transport=None):
+        captured["calls"].append(messages)
+        if len(captured["calls"]) == 1:
+            return json.dumps({"intents": [{"kind": "k", "query": "q"}]})
+        return json.dumps({"positive": "p", "negative": "n", "loras": []})
+
+    monkeypatch.setattr(
+        "app.services.prompt_orchestrator.lmstudio_client.chat_complete", fake_complete,
+    )
+    prompt_orchestrator.generate(
+        conn, session_id=session_id,
+        endpoint={"base_url": "http://x/v1", "api_key": None},
+        prompt_model="m1",
+    )
+    composition_system = captured["calls"][1][0]["content"]
+    assert "hidden-retrieved" not in composition_system
+    assert "hidden-pinned" not in composition_system
+    assert "lora-a" in composition_system
+
+
+def test_generate_includes_hidden_loras_when_show_hidden_on(
+    conn, session_id, monkeypatch,
+):
+    """Mirror of the previous test: when ``show_hidden`` is on, hidden
+    LoRAs are surfaced to the prompt LLM as usual."""
+    from app.services import indexer
+    library_repo.create_lora(
+        conn, name="hidden-retrieved", display_name="hidden-retrieved",
+        description="d", tags=[], trigger_words=[], family_id="sdxl",
+    )
+    indexer.upsert_lora_vector(conn, lora_name="hidden-retrieved", vector=[0.001] * 1024)
+    indexer.upsert_lora_vector(conn, lora_name="lora-a", vector=[0.001] * 1024)
+    library_repo.set_lora_hidden(conn, "hidden-retrieved", hidden=True)
+    settings_repo.set_privacy(conn, show_hidden=True)
+
+    monkeypatch.setattr(
+        "app.services.retriever.embedder.embed",
+        lambda text: [0.001] * 1024,
+    )
+    captured: dict = {"calls": []}
+
+    def fake_complete(*, endpoint, model, messages, response_format=None, transport=None):
+        captured["calls"].append(messages)
+        if len(captured["calls"]) == 1:
+            return json.dumps({"intents": [{"kind": "k", "query": "q"}]})
+        return json.dumps({"positive": "p", "negative": "n", "loras": []})
+
+    monkeypatch.setattr(
+        "app.services.prompt_orchestrator.lmstudio_client.chat_complete", fake_complete,
+    )
+    prompt_orchestrator.generate(
+        conn, session_id=session_id,
+        endpoint={"base_url": "http://x/v1", "api_key": None},
+        prompt_model="m1",
+    )
+    composition_system = captured["calls"][1][0]["content"]
+    assert "hidden-retrieved" in composition_system
 
 
 def test_generate_persists_pinned_loras_into_candidates(conn, session_id, monkeypatch):

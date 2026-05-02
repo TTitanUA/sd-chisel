@@ -34,9 +34,11 @@ def top_k(
     query: str,
     k: int,
     family_id: str | None = None,
+    include_hidden: bool = True,
 ) -> list[dict[str, Any]]:
     """Embed `query`, return up to k {name, distance} hits, optionally
-    filtered to `family_id`."""
+    filtered to `family_id`. When ``include_hidden`` is False, LoRAs flagged
+    ``hidden=1`` are dropped."""
     vec = embedder.embed(query)
     payload = sqlite_vec.serialize_float32(vec)
     fetch_k = max(k * OVERFETCH_FACTOR, k)
@@ -53,9 +55,14 @@ def top_k(
         "JOIN loras l ON l.name = m.lora_name "
     )
     params: list[Any] = [payload, fetch_k]
+    where: list[str] = []
     if family_id:
-        sql += "WHERE l.family_id = ? "
+        where.append("l.family_id = ?")
         params.append(family_id)
+    if not include_hidden:
+        where.append("l.hidden = 0")
+    if where:
+        sql += "WHERE " + " AND ".join(where) + " "
     sql += "ORDER BY knn.distance"
 
     rows = conn.execute(sql, params).fetchall()
@@ -69,13 +76,19 @@ def retrieve_for_intents(
     k: int,
     family_id: str | None = None,
     global_cap: int = DEFAULT_GLOBAL_CAP,
+    include_hidden: bool = True,
 ) -> dict[str, Any]:
     """Run top_k for each intent, dedupe the union by name (keeping the
-    smallest distance), cap at ``global_cap``, and return the bundle."""
+    smallest distance), cap at ``global_cap``, and return the bundle.
+    ``include_hidden=False`` propagates to top_k and to the final
+    ``library_repo.get_loras_by_names`` hydration."""
     flat_hits: list[dict[str, Any]] = []
     best_by_name: dict[str, float] = {}
     for idx, intent in enumerate(intents):
-        hits = top_k(conn, query=intent["query"], k=k, family_id=family_id)
+        hits = top_k(
+            conn, query=intent["query"], k=k, family_id=family_id,
+            include_hidden=include_hidden,
+        )
         for h in hits:
             flat_hits.append({
                 "intent_index": idx,
@@ -89,7 +102,9 @@ def retrieve_for_intents(
 
     ranked = sorted(best_by_name.items(), key=lambda kv: kv[1])[:global_cap]
     candidate_names = [name for name, _ in ranked]
-    candidates = library_repo.get_loras_by_names(conn, candidate_names)
+    candidates = library_repo.get_loras_by_names(
+        conn, candidate_names, include_hidden=include_hidden,
+    )
     by_name = {c["name"]: c for c in candidates}
 
     grouped: dict[int, dict[str, Any]] = {}

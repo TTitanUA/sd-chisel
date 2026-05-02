@@ -51,3 +51,32 @@ def test_get_loras_by_names_preserves_input_order(conn):
 
 def test_get_loras_by_names_empty_input_returns_empty(conn):
     assert library_repo.get_loras_by_names(conn, []) == []
+
+
+def test_list_loras_excludes_hidden_when_include_hidden_false(conn):
+    _seed(conn, name="a", family="sdxl", tags=[])
+    _seed(conn, name="b", family="sdxl", tags=[])
+    library_repo.set_lora_hidden(conn, "b", hidden=True)
+
+    visible = library_repo.list_loras(conn, include_hidden=False)
+    assert [r["name"] for r in visible] == ["a"]
+    everything = library_repo.list_loras(conn, include_hidden=True)
+    assert sorted(r["name"] for r in everything) == ["a", "b"]
+
+
+def test_get_loras_by_names_excludes_hidden_when_include_hidden_false(conn):
+    _seed(conn, name="a", family="sdxl", tags=[])
+    _seed(conn, name="b", family="sdxl", tags=[])
+    library_repo.set_lora_hidden(conn, "b", hidden=True)
+
+    rows = library_repo.get_loras_by_names(conn, ["a", "b"], include_hidden=False)
+    assert [r["name"] for r in rows] == ["a"]
+
+
+def test_list_distinct_tags_excludes_hidden_when_include_hidden_false(conn):
+    _seed(conn, name="a", family="sdxl", tags=["lighting"])
+    _seed(conn, name="b", family="sdxl", tags=["nsfw"])
+    library_repo.set_lora_hidden(conn, "b", hidden=True)
+
+    assert library_repo.list_distinct_tags(conn, include_hidden=False) == ["lighting"]
+    assert library_repo.list_distinct_tags(conn, include_hidden=True) == ["lighting", "nsfw"]
