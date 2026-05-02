@@ -278,6 +278,55 @@ def append_message(
     ).fetchone())  # type: ignore[return-value]
 
 
+def delete_message(conn: sqlite3.Connection, *, message_id: int) -> None:
+    conn.execute("DELETE FROM messages WHERE id = ?", (message_id,))
+
+
+def get_message(
+    conn: sqlite3.Connection, *, message_id: int,
+) -> dict[str, Any] | None:
+    row = conn.execute(
+        "SELECT * FROM messages WHERE id = ?", (message_id,),
+    ).fetchone()
+    return dict(row) if row is not None else None
+
+
+def update_message_content(
+    conn: sqlite3.Connection, *, message_id: int, content: str,
+) -> dict[str, Any]:
+    conn.execute(
+        "UPDATE messages SET content = ? WHERE id = ?",
+        (content, message_id),
+    )
+    return _row(conn.execute(
+        "SELECT * FROM messages WHERE id = ?", (message_id,),
+    ).fetchone())  # type: ignore[return-value]
+
+
+def delete_messages_after(
+    conn: sqlite3.Connection, *, session_id: str, message_id: int,
+) -> int:
+    """Delete every message in ``session_id`` with id strictly greater than
+    ``message_id``. Used by the edit-and-truncate flow: editing a user
+    turn drops the assistant reply and any subsequent turns so the user
+    can re-run the conversation from that point.
+    Returns the number of rows removed.
+    """
+    cur = conn.execute(
+        "DELETE FROM messages WHERE session_id = ? AND id > ?",
+        (session_id, message_id),
+    )
+    return cur.rowcount or 0
+
+
+def clear_messages(conn: sqlite3.Connection, *, session_id: str) -> int:
+    """Delete every message belonging to ``session_id``. Returns row count."""
+    cur = conn.execute(
+        "DELETE FROM messages WHERE session_id = ?", (session_id,),
+    )
+    return cur.rowcount or 0
+
+
 def list_messages(conn: sqlite3.Connection, *, session_id: str) -> list[dict[str, Any]]:
     return [dict(r) for r in conn.execute(
         "SELECT * FROM messages WHERE session_id = ? ORDER BY created_at, id",

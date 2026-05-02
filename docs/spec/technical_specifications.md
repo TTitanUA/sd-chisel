@@ -233,6 +233,54 @@ selected on the session is the only model used — `tool_use` capability
 is no longer a requirement for chat (the field still exists on
 `lm_models` and is consulted by library assistants).
 
+The user message is persisted before streaming begins, but **rolled
+back on any upstream failure** (LMStudio error or empty response). This
+keeps retries clean — without rollback, a failed turn would leave an
+orphan user row, and the next attempt would feed two consecutive user
+messages to the model, which strict-template models reject. The frontend
+restores the typed text into the input on error so nothing is lost.
+
+When the chat history starts with assistant rows (which happens after
+modal-driven compaction has replaced history with the brief recap), the
+chat payload promotes those leading assistant rows to system messages
+before the user turn. Some local models use jinja templates that fail
+with "No user query found in messages" if the first non-system turn is
+the assistant.
+
+The chat exposes two delete operations and one edit-and-resend mode
+alongside `POST .../chat`:
+
+- `DELETE /api/sessions/{s}/messages/{id}` — remove a single message.
+  Restricted to `role = "user"` rows; assistant/system rows return 409.
+- `DELETE /api/sessions/{s}/messages` — drop every message in the
+  session (clear chat).
+- `POST .../chat` accepts an optional `replace_message_id`. When set,
+  the request is treated as an *edit* of that user message: the server
+  replaces its content with `body.content`, truncates every later
+  message in the session (cascade by id), and streams a single fresh
+  assistant reply — all atomically. No new user row is appended, so
+  the history can never contain two consecutive user turns. On upstream
+  failure the truncate+replace stays committed (the user explicitly
+  asked for the edit); only the assistant reply is missing, and a
+  follow-up regular send will produce one. The 404/409 rules match the
+  delete endpoint: target must exist in the session and be a user row.
+
+The frontend surfaces this through composer-driven editing rather than
+inline bubble editing:
+
+- The user bubble shows hover-revealed pencil and trash icons.
+- Clicking the pencil sets the bubble's content into the composer
+  textarea, highlights the bubble (accent outline + an "editing" tag
+  in the meta line), and shows a banner above the composer with a
+  cancel (×) button. Pressing Esc in the composer also cancels.
+- The Send button changes to "Save & send"; pressing it issues `POST
+  /chat` with `replace_message_id`. On success the editing state
+  clears; on failure the messages query is invalidated and editing
+  state is dropped (the truncate+replace landed; only the assistant
+  reply is missing, and the user can re-send normally).
+- A "Clear" button in the chat header calls the collection-DELETE
+  endpoint after a confirm prompt.
+
 Generation never fires from the chat itself. The user reaches a
 direction in conversation and then clicks the explicit Generate button
 on the prompt panel, which opens the Generate modal (§4.3.1).

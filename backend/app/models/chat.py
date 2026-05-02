@@ -11,6 +11,12 @@ class StrictModel(BaseModel):
 
 class ChatRequest(StrictModel):
     content: str = Field(min_length=1, max_length=8000)
+    # When set, this turn is an *edit* of an existing user message rather
+    # than a new turn. The handler replaces that message's content,
+    # truncates every later message, and streams a fresh assistant reply
+    # — all inside the same request. No new user row is appended, so the
+    # history never ends up with two user turns in a row.
+    replace_message_id: int | None = None
 
     @field_validator("content")
     @classmethod

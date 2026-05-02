@@ -4,6 +4,7 @@ import remarkGfm from "remark-gfm";
 import { Button } from "@/components/atoms/Button";
 import { Icon } from "@/components/atoms/Icon";
 import {
+  chatApi,
   streamChat,
   useChatInvalidation,
   useMessages,
@@ -56,6 +57,14 @@ export function ChatPane({ session }: { session: Session }) {
   const [error, setError] = useState<string | null>(null);
   const [mention, setMention] = useState<MentionState | null>(null);
   const [highlightedIdx, setHighlightedIdx] = useState(0);
+  // When set, the next Send call goes to /chat with replace_message_id —
+  // the backend swaps the target user row's content, drops everything
+  // after it, then streams a fresh assistant reply. Keeping the edit in
+  // the composer (rather than inline on the bubble) means the standard
+  // composer Send/Cancel flow does the work, and we can never end up
+  // with two consecutive user turns.
+  const [editingTargetId, setEditingTargetId] = useState<number | null>(null);
+  const [actionPending, setActionPending] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -85,7 +94,13 @@ export function ChatPane({ session }: { session: Session }) {
   async function send() {
     const content = draft.trim();
     if (!content || pending) return;
-    const tempUser: ChatMessage = {
+    const replaceId = editingTargetId;
+    const isEdit = replaceId !== null;
+    // For new turns we show an optimistic user bubble; for edits the
+    // bubble is already in `rows` (we just hide its actions and mark it).
+    // The composer is cleared in both cases so a successful send doesn't
+    // leave the edited text sitting in the composer.
+    const tempUser: ChatMessage | null = isEdit ? null : {
       id: -Date.now(),
       session_id: session.id,
       role: "user",
@@ -97,20 +112,45 @@ export function ChatPane({ session }: { session: Session }) {
     setDraft("");
     setError(null);
     setPending(true);
+    let failed = false;
     try {
-      await streamChat(session.id, content, {
-        onDelta: (chunk) => setStreaming((s) => s + chunk),
-        onDone: () => {
-          invalidate.messages(session.id);
+      await streamChat(
+        session.id,
+        content,
+        {
+          onDelta: (chunk) => setStreaming((s) => s + chunk),
+          onDone: () => {
+            invalidate.messages(session.id);
+          },
+          onError: (detail) => {
+            failed = true;
+            setError(detail);
+          },
         },
-        onError: (detail) => setError(detail),
-      });
+        replaceId !== null ? { replaceMessageId: replaceId } : undefined,
+      );
     } catch (err) {
+      failed = true;
       setError(String(err));
     } finally {
       setPending(false);
       setStreaming("");
       setOptimistic(null);
+      if (failed) {
+        // For new turns the backend rolls back the persisted user row,
+        // so restoring the draft lets the user retry. For edits the
+        // backend keeps the edit committed (truncate+replace already
+        // happened) — refresh the list and clear the editing state so
+        // the user can either re-edit or send a new turn.
+        if (isEdit) {
+          invalidate.messages(session.id);
+          setEditingTargetId(null);
+        } else {
+          setDraft((d) => (d ? d : content));
+        }
+      } else if (isEdit) {
+        setEditingTargetId(null);
+      }
     }
   }
 
@@ -152,6 +192,59 @@ export function ChatPane({ session }: { session: Session }) {
     });
   }
 
+  async function handleDelete(id: number) {
+    if (actionPending) return;
+    if (!window.confirm("Delete this message?")) return;
+    if (editingTargetId === id) cancelEdit();
+    setActionPending(true);
+    setError(null);
+    try {
+      await chatApi.deleteMessage(session.id, id);
+      invalidate.messages(session.id);
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setActionPending(false);
+    }
+  }
+
+  function startEdit(m: ChatMessage) {
+    if (pending || actionPending) return;
+    setEditingTargetId(m.id);
+    setDraft(m.content);
+    setError(null);
+    requestAnimationFrame(() => {
+      const el = textareaRef.current;
+      if (!el) return;
+      el.focus();
+      // Place caret at the end so the user can extend or backspace.
+      const end = el.value.length;
+      el.setSelectionRange(end, end);
+    });
+  }
+
+  function cancelEdit() {
+    setEditingTargetId(null);
+    setDraft("");
+  }
+
+  async function handleClear() {
+    if (actionPending || pending) return;
+    if (rows.length === 0) return;
+    if (!window.confirm("Clear all chat messages? This cannot be undone.")) return;
+    cancelEdit();
+    setActionPending(true);
+    setError(null);
+    try {
+      await chatApi.clearMessages(session.id);
+      invalidate.messages(session.id);
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setActionPending(false);
+    }
+  }
+
   function onKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (mention !== null && mentionCandidates.length > 0) {
       if (e.key === "ArrowDown") {
@@ -178,11 +271,31 @@ export function ChatPane({ session }: { session: Session }) {
         return;
       }
     }
+    if (e.key === "Escape" && editingTargetId !== null) {
+      e.preventDefault();
+      cancelEdit();
+      return;
+    }
     if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
       e.preventDefault();
       void send();
     }
   }
+
+  // If the message being edited disappears from the list (deleted from
+  // another tab, cleared, or wiped by a previous edit cascade), drop the
+  // editing state so the composer doesn't keep targeting a missing row.
+  useEffect(() => {
+    if (editingTargetId === null) return;
+    if (!rows.some((r) => r.id === editingTargetId)) {
+      setEditingTargetId(null);
+      setDraft("");
+    }
+  }, [editingTargetId, rows]);
+
+  const editingTarget = editingTargetId !== null
+    ? rows.find((r) => r.id === editingTargetId) ?? null
+    : null;
 
   return (
     <div className={styles.pane}>
@@ -196,6 +309,16 @@ export function ChatPane({ session }: { session: Session }) {
         >
           {session.prompt_model_name ?? "(no model)"}
         </span>
+        <Button
+          size="sm"
+          variant="ghost"
+          icon={<Icon name="BrushCleaning" size={12} />}
+          onClick={() => void handleClear()}
+          disabled={pending || actionPending || rows.length === 0}
+          title="Clear all chat messages"
+        >
+          Clear
+        </Button>
       </div>
       <div className={styles.body}>
         <div className={styles.scroll} ref={scrollRef}>
@@ -207,7 +330,17 @@ export function ChatPane({ session }: { session: Session }) {
             </div>
           )}
           {rows.map((m) => (
-            <Bubble key={m.id} role={m.role} content={m.content} createdAt={m.created_at} />
+            <Bubble
+              key={m.id}
+              role={m.role}
+              content={m.content}
+              createdAt={m.created_at}
+              editable={m.role === "user"}
+              isEditing={editingTargetId === m.id}
+              onEditStart={() => startEdit(m)}
+              onDelete={() => void handleDelete(m.id)}
+              actionsDisabled={pending || actionPending}
+            />
           ))}
           {showOptimistic && optimistic && (
             <Bubble role={optimistic.role} content={optimistic.content} createdAt={optimistic.created_at} />
@@ -219,6 +352,25 @@ export function ChatPane({ session }: { session: Session }) {
         </div>
         {error && <div className={styles.error} role="alert">{error}</div>}
         <div className={styles.composer}>
+          {editingTarget && (
+            <div className={styles.editBanner}>
+              <Icon name="Pencil" size={12} />
+              <span className={styles.editBannerText}>
+                Editing your message — sending will replace it and drop
+                everything below.
+              </span>
+              <button
+                type="button"
+                className={styles.editBannerClose}
+                onClick={cancelEdit}
+                disabled={pending}
+                aria-label="Cancel edit"
+                title="Cancel edit"
+              >
+                <Icon name="X" size={12} />
+              </button>
+            </div>
+          )}
           <div className={styles.composerInputWrap}>
             <textarea
               ref={textareaRef}
@@ -258,7 +410,9 @@ export function ChatPane({ session }: { session: Session }) {
               onClick={() => void send()}
               disabled={pending || draft.trim().length === 0}
             >
-              {pending ? "Sending…" : "Send"}
+              {pending
+                ? (editingTarget ? "Saving…" : "Sending…")
+                : (editingTarget ? "Save & send" : "Send")}
             </Button>
           </div>
         </div>
@@ -277,16 +431,34 @@ function Bubble({
   content,
   createdAt,
   streaming = false,
+  editable = false,
+  isEditing = false,
+  onEditStart,
+  onDelete,
+  actionsDisabled = false,
 }: {
   role: "user" | "assistant" | "system";
   content: string;
   createdAt: number;
   streaming?: boolean;
+  editable?: boolean;
+  isEditing?: boolean;
+  onEditStart?: () => void;
+  onDelete?: () => void;
+  actionsDisabled?: boolean;
 }) {
   const time = useMemo(() => formatTime(createdAt), [createdAt]);
   const variantClass = role === "user" ? "ds-chat-user" : "ds-chat-assistant";
+  const hostClass = [
+    "ds-chat",
+    variantClass,
+    styles.bubbleHost,
+    isEditing ? styles.bubbleEditing : null,
+  ]
+    .filter(Boolean)
+    .join(" ");
   return (
-    <div className={`ds-chat ${variantClass}`}>
+    <div className={hostClass}>
       {role !== "user" && (
         <div className="ds-chat-avatar" aria-hidden="true">
           <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
@@ -297,6 +469,7 @@ function Bubble({
       <div className="ds-chat-body">
         <div className="ds-chat-meta">
           {role === "user" ? "You" : "sd-chisel"} · {time}
+          {isEditing && <span className={styles.editingTag}> · editing</span>}
         </div>
         <div className={styles.msgContent}>
           {role === "assistant" ? (
@@ -311,6 +484,30 @@ function Bubble({
           {streaming && <span className="ds-chat-cursor" />}
         </div>
       </div>
+      {editable && (
+        <div className={styles.bubbleActions}>
+          <button
+            type="button"
+            className={styles.iconBtn}
+            onClick={() => onEditStart?.()}
+            disabled={actionsDisabled || isEditing}
+            aria-label="Edit message"
+            title="Edit (drops everything after this turn)"
+          >
+            <Icon name="Pencil" size={12} />
+          </button>
+          <button
+            type="button"
+            className={styles.iconBtn}
+            onClick={() => onDelete?.()}
+            disabled={actionsDisabled}
+            aria-label="Delete message"
+            title="Delete message"
+          >
+            <Icon name="Trash2" size={12} />
+          </button>
+        </div>
+      )}
     </div>
   );
 }

@@ -346,7 +346,7 @@ def test_chat_422_on_blank_content(client, monkeypatch):
     assert client.post(f"/api/sessions/{sid}/chat", json={"content": "   "}).status_code == 422
 
 
-def test_chat_emits_error_event_and_keeps_user_message_on_upstream_failure(client, monkeypatch):
+def test_chat_emits_error_event_and_rolls_back_user_message_on_upstream_failure(client, monkeypatch):
     sid = _bootstrap_chat_session(client, monkeypatch)
 
     def fail(**_):
@@ -363,13 +363,13 @@ def test_chat_emits_error_event_and_keeps_user_message_on_upstream_failure(clien
     assert any(e["type"] == "error" for e in events)
     assert all(e["type"] != "done" for e in events)
 
-    # User message remains; assistant was NOT saved
+    # User message is rolled back so a retry doesn't pile up duplicate
+    # user turns in the history.
     msgs = client.get(f"/api/sessions/{sid}/messages").json()["messages"]
-    assert [m["role"] for m in msgs] == ["user"]
-    assert msgs[0]["content"] == "hey"
+    assert msgs == []
 
 
-def test_chat_does_not_persist_assistant_when_stream_yields_nothing(client, monkeypatch):
+def test_chat_does_not_persist_anything_when_stream_yields_nothing(client, monkeypatch):
     sid = _bootstrap_chat_session(client, monkeypatch)
 
     def empty(**_):
@@ -384,6 +384,146 @@ def test_chat_does_not_persist_assistant_when_stream_yields_nothing(client, monk
     events = _parse_sse(body)
     assert any(e["type"] == "error" for e in events)
     msgs = client.get(f"/api/sessions/{sid}/messages").json()["messages"]
-    assert [m["role"] for m in msgs] == ["user"]
+    assert msgs == []
+
+
+# --- delete / edit / clear -------------------------------------------------
+
+
+def test_delete_user_message_removes_only_that_row(client, conn):
+    sid = _make_session(client)
+    u1 = session_repo.append_message(conn, session_id=sid, role="user", content="u1")
+    a1 = session_repo.append_message(conn, session_id=sid, role="assistant", content="a1")
+    u2 = session_repo.append_message(conn, session_id=sid, role="user", content="u2")
+
+    resp = client.delete(f"/api/sessions/{sid}/messages/{u1['id']}")
+    assert resp.status_code == 204
+
+    remaining = client.get(f"/api/sessions/{sid}/messages").json()["messages"]
+    assert [m["id"] for m in remaining] == [a1["id"], u2["id"]]
+
+
+def test_delete_message_404_when_message_in_other_session(client, conn):
+    sid_a = _make_session(client)
+    sid_b = _make_session(client)
+    msg = session_repo.append_message(conn, session_id=sid_a, role="user", content="x")
+    assert client.delete(f"/api/sessions/{sid_b}/messages/{msg['id']}").status_code == 404
+
+
+def test_delete_message_404_when_missing(client):
+    sid = _make_session(client)
+    assert client.delete(f"/api/sessions/{sid}/messages/9999").status_code == 404
+
+
+def test_delete_assistant_message_rejected_with_409(client, conn):
+    sid = _make_session(client)
+    a = session_repo.append_message(conn, session_id=sid, role="assistant", content="a")
+    assert client.delete(f"/api/sessions/{sid}/messages/{a['id']}").status_code == 409
+
+
+def test_clear_messages_drops_everything_for_session(client, conn):
+    sid_a = _make_session(client)
+    sid_b = _make_session(client)
+    session_repo.append_message(conn, session_id=sid_a, role="user", content="a-u")
+    session_repo.append_message(conn, session_id=sid_a, role="assistant", content="a-a")
+    keep = session_repo.append_message(conn, session_id=sid_b, role="user", content="b-u")
+
+    resp = client.delete(f"/api/sessions/{sid_a}/messages")
+    assert resp.status_code == 204
+
+    assert client.get(f"/api/sessions/{sid_a}/messages").json()["messages"] == []
+    other = client.get(f"/api/sessions/{sid_b}/messages").json()["messages"]
+    assert [m["id"] for m in other] == [keep["id"]]
+
+
+def test_clear_messages_404_when_session_missing(client):
+    assert client.delete("/api/sessions/missing/messages").status_code == 404
+
+
+# --- chat with replace_message_id ------------------------------------------
+
+
+def test_chat_with_replace_id_truncates_after_and_does_not_append_user(client, monkeypatch, conn):
+    sid = _bootstrap_chat_session(client, monkeypatch)
+    u1 = session_repo.append_message(conn, session_id=sid, role="user", content="u1")
+    session_repo.append_message(conn, session_id=sid, role="assistant", content="a1")
+    session_repo.append_message(conn, session_id=sid, role="user", content="u2")
+    session_repo.append_message(conn, session_id=sid, role="assistant", content="a2")
+
+    captured: dict = {}
+
+    def fake_stream(*, endpoint, model, messages, transport=None):
+        captured["messages"] = messages
+        yield "edited reply"
+
+    monkeypatch.setattr(lmstudio_client, "chat_stream", fake_stream)
+
+    with client.stream(
+        "POST",
+        f"/api/sessions/{sid}/chat",
+        json={"content": "u1 rewritten", "replace_message_id": u1["id"]},
+    ) as resp:
+        body = b"".join(resp.iter_bytes())
+    assert resp.status_code == 200
+    events = _parse_sse(body)
+    assert any(e["type"] == "done" for e in events)
+
+    # Payload must contain exactly ONE user turn at the tail with the new
+    # content — no leftover dup, no duplicate appended user.
+    user_turns = [m for m in captured["messages"] if m["role"] == "user"]
+    assert [m["content"] for m in user_turns] == ["u1 rewritten"]
+
+    # DB now has just the edited row plus the new assistant.
+    msgs = client.get(f"/api/sessions/{sid}/messages").json()["messages"]
+    assert [(m["role"], m["content"]) for m in msgs] == [
+        ("user", "u1 rewritten"),
+        ("assistant", "edited reply"),
+    ]
+
+
+def test_chat_replace_id_404_on_missing_message(client, monkeypatch):
+    sid = _bootstrap_chat_session(client, monkeypatch)
+    resp = client.post(
+        f"/api/sessions/{sid}/chat",
+        json={"content": "hi", "replace_message_id": 9999},
+    )
+    assert resp.status_code == 404
+
+
+def test_chat_replace_id_409_when_targeting_assistant(client, monkeypatch, conn):
+    sid = _bootstrap_chat_session(client, monkeypatch)
+    a = session_repo.append_message(conn, session_id=sid, role="assistant", content="a")
+    resp = client.post(
+        f"/api/sessions/{sid}/chat",
+        json={"content": "x", "replace_message_id": a["id"]},
+    )
+    assert resp.status_code == 409
+
+
+def test_chat_replace_id_keeps_edit_committed_on_upstream_failure(client, monkeypatch, conn):
+    sid = _bootstrap_chat_session(client, monkeypatch)
+    u = session_repo.append_message(conn, session_id=sid, role="user", content="orig")
+    session_repo.append_message(conn, session_id=sid, role="assistant", content="reply")
+
+    def fail(**_):
+        raise lmstudio_client.LmError("upstream", "boom")
+        yield  # pragma: no cover
+
+    monkeypatch.setattr(lmstudio_client, "chat_stream", fail)
+
+    with client.stream(
+        "POST",
+        f"/api/sessions/{sid}/chat",
+        json={"content": "edited", "replace_message_id": u["id"]},
+    ) as resp:
+        body = b"".join(resp.iter_bytes())
+    events = _parse_sse(body)
+    assert any(e["type"] == "error" for e in events)
+
+    # The edit IS committed (content replaced, follow-up dropped) even
+    # though the assistant call failed — user explicitly asked for the
+    # edit; rolling it back would lose their work.
+    msgs = client.get(f"/api/sessions/{sid}/messages").json()["messages"]
+    assert [(m["role"], m["content"]) for m in msgs] == [("user", "edited")]
 
 

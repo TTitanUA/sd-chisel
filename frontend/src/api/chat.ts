@@ -21,6 +21,14 @@ export const chatKeys = {
 export const chatApi = {
   listMessages: (sessionId: string) =>
     apiFetch<{ messages: ChatMessage[] }>(`/api/sessions/${sessionId}/messages`),
+  deleteMessage: (sessionId: string, messageId: number) =>
+    apiFetch<void>(`/api/sessions/${sessionId}/messages/${messageId}`, {
+      method: "DELETE",
+    }),
+  clearMessages: (sessionId: string) =>
+    apiFetch<void>(`/api/sessions/${sessionId}/messages`, {
+      method: "DELETE",
+    }),
 };
 
 export function useMessages(sessionId: string | undefined) {
@@ -49,18 +57,26 @@ export type StreamCallbacks = {
  * POST a chat turn and parse the SSE response into typed callbacks.
  * Resolves once the stream closes (success OR error). Does NOT throw on
  * application-level errors — callers handle them via onError.
+ *
+ * When ``replaceMessageId`` is set the request behaves as an edit: the
+ * server replaces that user message's content, drops every later
+ * message in the session, and streams a single fresh assistant reply.
  */
 export async function streamChat(
   sessionId: string,
   content: string,
   cb: StreamCallbacks,
-  signal?: AbortSignal,
+  opts?: { replaceMessageId?: number; signal?: AbortSignal },
 ): Promise<void> {
+  const body: Record<string, unknown> = { content };
+  if (opts?.replaceMessageId !== undefined) {
+    body.replace_message_id = opts.replaceMessageId;
+  }
   const res = await fetch(`${API_BASE}/api/sessions/${sessionId}/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
-    body: JSON.stringify({ content }),
-    signal,
+    body: JSON.stringify(body),
+    signal: opts?.signal,
   });
   if (!res.ok) {
     throw new ApiError(res.status, await res.text());
