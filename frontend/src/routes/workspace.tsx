@@ -66,18 +66,11 @@ export default function WorkspaceRoute() {
           </Button>
         </div>
       </header>
-      {s.session_type === "t2i" ? (
-        <div className={styles.empty}>
-          T2I workflow is not yet implemented. Open the session settings or
-          create an i2i session to continue.
-        </div>
-      ) : (
-        <div className={styles.grid}>
-          <SourceImagesPane session={s} />
-          <ChatPane session={s} />
-          <PromptPane session={s} />
-        </div>
-      )}
+      <div className={styles.grid}>
+        <SourceImagesPane session={s} />
+        <ChatPane session={s} />
+        <PromptPane session={s} />
+      </div>
       <SessionSettingsDrawer
         key={s.id}
         session={s}

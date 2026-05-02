@@ -19,12 +19,22 @@ Conn = Annotated[sqlite3.Connection, Depends(get_conn)]
 router = APIRouter(tags=["chat"])
 
 CHAT_HISTORY_LIMIT = 30
-CHAT_SYSTEM_PROMPT = (
+CHAT_SYSTEM_PROMPT_I2I = (
     "You are a chat assistant helping the user iterate on a Stable-Diffusion "
     "image-to-image idea. Discuss composition, lighting, style, mood, and "
-    "concrete edits. Stay concise and concrete; do not write final prompt "
-    "JSON. Generation is launched by the user from a separate Generate "
-    "button — never claim to have generated anything yourself."
+    "concrete edits to the source image. Stay concise and concrete; do not "
+    "write final prompt JSON. Generation is launched by the user from a "
+    "separate Generate button — never claim to have generated anything "
+    "yourself."
+)
+CHAT_SYSTEM_PROMPT_T2I = (
+    "You are a chat assistant helping the user iterate on a Stable-Diffusion "
+    "text-to-image idea. Discuss subject, composition, lighting, style, and "
+    "mood of the image the user wants to create. Reference images, if any, "
+    "are inspiration only — the result is generated from text. Stay concise "
+    "and concrete; do not write final prompt JSON. Generation is launched by "
+    "the user from a separate Generate button — never claim to have generated "
+    "anything yourself."
 )
 
 
@@ -54,8 +64,29 @@ def _validated_prompt_model_name(
 def _build_system_messages(
     conn: sqlite3.Connection, session_row: dict,
 ) -> list[dict]:
-    msgs: list[dict] = [{"role": "system", "content": CHAT_SYSTEM_PROMPT}]
+    mode = session_row.get("session_type") or "i2i"
+    system_prompt = (
+        CHAT_SYSTEM_PROMPT_T2I if mode == "t2i" else CHAT_SYSTEM_PROMPT_I2I
+    )
+    msgs: list[dict] = [{"role": "system", "content": system_prompt}]
     sources = source_image_repo.list_for_session(conn, session_row["id"])
+    analysis_trailer = (
+        "\n\nThe user may refer to images as `@Image_N` "
+        "(e.g. `@Image_2`). Use the same `Image_N` form when you "
+        "talk about images — do not invent filenames."
+    )
+    if mode == "t2i":
+        ref_lines = []
+        for s in sources:
+            if not (s.get("analysis") or "").strip():
+                continue
+            text = s["analysis"].strip().replace("\n", " ")
+            ref_lines.append(f"- Image_{s['image_number']}: {text}")
+        if ref_lines:
+            block = "# Reference images\n" + "\n".join(ref_lines) + analysis_trailer
+            msgs.append({"role": "system", "content": block})
+        return msgs
+
     main_image = next((s for s in sources if s["is_main"]), None)
     if main_image is not None and (main_image.get("analysis") or "").strip():
         main_label = f"Image_{main_image['image_number']}"
@@ -71,11 +102,7 @@ def _build_system_messages(
             ref_lines.append(f"- Image_{s['image_number']}: {text}")
         if ref_lines:
             block += "\n\n# Reference images\n" + "\n".join(ref_lines)
-        block += (
-            "\n\nThe user may refer to images as `@Image_N` "
-            "(e.g. `@Image_2`). Use the same `Image_N` form when you "
-            "talk about images — do not invent filenames."
-        )
+        block += analysis_trailer
         msgs.append({"role": "system", "content": block})
     return msgs
 

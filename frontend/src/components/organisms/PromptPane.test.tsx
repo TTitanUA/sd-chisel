@@ -125,6 +125,18 @@ describe("PromptPane", () => {
     expect(screen.getByTestId("generate-modal")).toBeInTheDocument();
   });
 
+  it("for t2i sessions: Generate is enabled with no source images", () => {
+    vi.spyOn(promptsApi, "usePrompts").mockReturnValue({
+      data: [],
+    } as unknown as ReturnType<typeof promptsApi.usePrompts>);
+    vi.spyOn(tasksApi, "useIsReindexing").mockReturnValue(false);
+
+    const t2i: Session = { ...session, session_type: "t2i", source_images: [] };
+    wrap(<PromptPane session={t2i} />);
+    const btn = screen.getByRole("button", { name: /Generate/i });
+    expect(btn).toBeEnabled();
+  });
+
   it("disables Generate while a reindex task is active", () => {
     vi.spyOn(promptsApi, "usePrompts").mockReturnValue({
       data: [],

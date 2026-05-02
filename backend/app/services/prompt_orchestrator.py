@@ -109,23 +109,32 @@ def _generate_inner(
         raise PreconditionError(f"session not found: {session_id}")
 
     mode = session.get("session_type") or "i2i"
-    if mode == "t2i":
-        raise PreconditionError(
-            "t2i prompt generation is not yet implemented",
-        )
 
     sources = source_image_repo.list_for_session(conn, session_id)
-    main_image = next((s for s in sources if s["is_main"]), None)
-    if main_image is None or not (main_image.get("analysis") or "").strip():
-        raise PreconditionError(
-            "session has no main source image with a completed analysis yet",
-        )
-    main_summary = main_image["analysis"]
-    reference_summaries = [
-        (f"Image_{s['image_number']}", s["analysis"])
-        for s in sources
-        if not s["is_main"] and (s.get("analysis") or "").strip()
-    ]
+    main_summary: str | None
+    if mode == "t2i":
+        # t2i has no main image — every source row is a reference.
+        # Generation may also run with zero source images (pure
+        # text-to-image). The composition system prompt picks up
+        # # Mode: t2i and the family's prompt_t2i guide downstream.
+        main_summary = None
+        reference_summaries = [
+            (f"Image_{s['image_number']}", s["analysis"])
+            for s in sources
+            if (s.get("analysis") or "").strip()
+        ]
+    else:
+        main_image = next((s for s in sources if s["is_main"]), None)
+        if main_image is None or not (main_image.get("analysis") or "").strip():
+            raise PreconditionError(
+                "session has no main source image with a completed analysis yet",
+            )
+        main_summary = main_image["analysis"]
+        reference_summaries = [
+            (f"Image_{s['image_number']}", s["analysis"])
+            for s in sources
+            if not s["is_main"] and (s.get("analysis") or "").strip()
+        ]
 
     family_id: str | None = None
     family_prompt_guide = ""
@@ -147,8 +156,9 @@ def _generate_inner(
                     base = family_prompt_guide.strip()
                     family_prompt_guide = f"{base}\n\n{mode_guide}" if base else mode_guide
     if not family_prompt_guide:
+        kind = "image-to-image" if mode == "i2i" else "text-to-image"
         family_prompt_guide = (
-            "You are writing a Stable Diffusion image-to-image prompt. Be "
+            f"You are writing a Stable Diffusion {kind} prompt. Be "
             "concrete and concise. Use comma-separated tags."
         )
 

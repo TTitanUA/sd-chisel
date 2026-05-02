@@ -435,9 +435,118 @@ def test_generate_does_not_pass_response_format(conn, session_id, monkeypatch):
     )
 
 
-def test_generate_rejects_t2i_session_with_precondition_error(conn, session_id):
+def _switch_to_t2i(conn, session_id: str) -> None:
+    """Flip a fixture session into t2i mode and clear any seeded main row."""
     conn.execute(
         "UPDATE sessions SET session_type = 't2i' WHERE id = ?", (session_id,),
+    )
+    conn.execute(
+        "UPDATE session_source_images SET is_main = 0 WHERE session_id = ?",
+        (session_id,),
+    )
+
+
+def test_generate_t2i_runs_without_main_image(conn, session_id, monkeypatch):
+    _switch_to_t2i(conn, session_id)
+    monkeypatch.setattr(
+        "app.services.retriever.embedder.embed",
+        lambda text: [0.001] * 1024,
+    )
+    monkeypatch.setattr(
+        "app.services.prompt_orchestrator.lmstudio_client.chat_complete",
+        _fake_lm_responses(
+            intent_payload=json.dumps({"intents": [
+                {"kind": "subject", "query": "stylish portrait"},
+            ]}),
+            composition_payload=json.dumps({
+                "positive": "stylish portrait, painterly",
+                "negative": "blurry",
+                "loras": [],
+            }),
+        ),
+    )
+
+    out = prompt_orchestrator.generate(
+        conn, session_id=session_id,
+        endpoint={"base_url": "http://x/v1", "api_key": None},
+        prompt_model="m1",
+    )
+    assert out["prompt"]["positive"] == "stylish portrait, painterly"
+
+
+def test_generate_t2i_with_zero_sources(conn, session_id, monkeypatch):
+    _switch_to_t2i(conn, session_id)
+    # delete all source rows entirely — pure text-to-image
+    conn.execute(
+        "DELETE FROM session_source_images WHERE session_id = ?", (session_id,),
+    )
+    monkeypatch.setattr(
+        "app.services.retriever.embedder.embed",
+        lambda text: [0.001] * 1024,
+    )
+    captured: dict = {"calls": []}
+
+    def fake(*, endpoint, model, messages, response_format=None, transport=None):
+        captured["calls"].append(messages)
+        if len(captured["calls"]) == 1:
+            return json.dumps({"intents": [{"kind": "k", "query": "q"}]})
+        return json.dumps({"positive": "p", "negative": "n", "loras": []})
+
+    monkeypatch.setattr(
+        "app.services.prompt_orchestrator.lmstudio_client.chat_complete", fake,
+    )
+    prompt_orchestrator.generate(
+        conn, session_id=session_id,
+        endpoint={"base_url": "http://x/v1", "api_key": None},
+        prompt_model="m1",
+    )
+    composition_system = captured["calls"][1][0]["content"]
+    # No main analysis, no references — the source-image block must be omitted.
+    assert "# Source image analysis" not in composition_system
+    assert "# Reference images" not in composition_system
+    assert "# Mode: t2i" in composition_system
+
+
+def test_generate_t2i_appends_family_prompt_t2i_to_composition_system(
+    conn, session_id, monkeypatch,
+):
+    _switch_to_t2i(conn, session_id)
+    conn.execute(
+        "UPDATE families SET prompt_t2i = ? WHERE id = 'sdxl'",
+        ("APPEND_T2I_GUIDE_MARKER",),
+    )
+    monkeypatch.setattr(
+        "app.services.retriever.embedder.embed",
+        lambda text: [0.001] * 1024,
+    )
+    captured: dict = {"calls": []}
+
+    def fake_complete(*, endpoint, model, messages, response_format=None, transport=None):
+        captured["calls"].append(messages)
+        if len(captured["calls"]) == 1:
+            return json.dumps({"intents": [{"kind": "k", "query": "q"}]})
+        return json.dumps({"positive": "p", "negative": "n", "loras": []})
+
+    monkeypatch.setattr(
+        "app.services.prompt_orchestrator.lmstudio_client.chat_complete", fake_complete,
+    )
+    prompt_orchestrator.generate(
+        conn, session_id=session_id,
+        endpoint={"base_url": "http://x/v1", "api_key": None},
+        prompt_model="m1",
+    )
+    composition_system = captured["calls"][1][0]["content"]
+    assert "APPEND_T2I_GUIDE_MARKER" in composition_system
+    assert "# Mode: t2i" in composition_system
+    intent_system = captured["calls"][0][0]["content"]
+    assert "text-to-image" in intent_system.lower()
+
+
+def test_generate_i2i_still_requires_main_image(conn, session_id):
+    # Drop the main flag without switching mode — i2i precondition should fire.
+    conn.execute(
+        "UPDATE session_source_images SET is_main = 0 WHERE session_id = ?",
+        (session_id,),
     )
     with pytest.raises(prompt_orchestrator.PreconditionError) as exc:
         prompt_orchestrator.generate(
@@ -445,7 +554,7 @@ def test_generate_rejects_t2i_session_with_precondition_error(conn, session_id):
             endpoint={"base_url": "http://x/v1", "api_key": None},
             prompt_model="m1",
         )
-    assert "t2i" in str(exc.value)
+    assert "main" in str(exc.value)
 
 
 def test_generate_appends_family_prompt_i2i_to_composition_system(

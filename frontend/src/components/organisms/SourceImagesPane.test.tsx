@@ -107,6 +107,31 @@ describe("SourceImagesPane", () => {
     expect(dialog).toHaveTextContent("image-one.png");
   });
 
+  it("for t2i sessions: hides star/main badge, shows reference-images empty hint", () => {
+    const session: Session = {
+      ...baseSession,
+      session_type: "t2i",
+      source_images: [
+        makeImage({ id: "a", original_filename: "ref-a.png", is_main: false }),
+        makeImage({ id: "b", original_filename: "ref-b.png", is_main: false }),
+      ],
+    };
+    const { container } = render(withClient(<SourceImagesPane session={session} />));
+    expect(screen.getByText("ref-a.png")).toBeInTheDocument();
+    expect(screen.getByText("ref-b.png")).toBeInTheDocument();
+    // No star button should render in t2i mode.
+    expect(screen.queryByRole("button", { name: /set as main|main image/i })).toBeNull();
+    // No "main" badge text on any card (querySelectorAll returns empty for the badge class).
+    expect(container.querySelectorAll("[class*='mainBadge']")).toHaveLength(0);
+  });
+
+  it("for empty t2i sessions: empty hint switches to the reference copy", () => {
+    const session: Session = { ...baseSession, session_type: "t2i" };
+    render(withClient(<SourceImagesPane session={session} />));
+    expect(screen.getByText(/Drop reference images/i)).toBeInTheDocument();
+    expect(screen.queryByText(/first image becomes the/i)).toBeNull();
+  });
+
   it("Re-analyze button opens the analyze modal pre-filled with prior refining prompt", async () => {
     const session = {
       ...baseSession,

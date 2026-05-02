@@ -84,15 +84,24 @@ def summarize_session_chat(
     mode = session.get("session_type") or "i2i"
 
     sources = source_image_repo.list_for_session(conn, session_id)
-    main = next((s for s in sources if s["is_main"]), None)
-    main_summary = (main or {}).get("analysis") or ""
-
     history = session_repo.list_messages(conn, session_id=session_id)
     history = history[-CHAT_HISTORY_LIMIT:]
 
     parts: list[str] = [f"# Session mode\n{mode}"]
-    if main_summary.strip():
-        parts.append(f"# Source image analysis\n{main_summary.strip()}")
+    if mode == "t2i":
+        ref_lines = []
+        for s in sources:
+            if not (s.get("analysis") or "").strip():
+                continue
+            text = s["analysis"].strip().replace("\n", " ")
+            ref_lines.append(f"- Image_{s['image_number']}: {text}")
+        if ref_lines:
+            parts.append("# Reference images\n" + "\n".join(ref_lines))
+    else:
+        main = next((s for s in sources if s["is_main"]), None)
+        main_summary = (main or {}).get("analysis") or ""
+        if main_summary.strip():
+            parts.append(f"# Source image analysis\n{main_summary.strip()}")
     if history:
         lines = [f"{m['role']}: {m['content']}" for m in history]
         parts.append("# Conversation\n" + "\n".join(lines))

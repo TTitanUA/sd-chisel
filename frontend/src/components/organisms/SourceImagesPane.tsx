@@ -48,6 +48,7 @@ export function SourceImagesPane({ session }: { session: Session }) {
   }
 
   const sources = session.source_images;
+  const isT2I = session.session_type === "t2i";
 
   return (
     <div className={styles.pane} aria-label="Sources pane">
@@ -100,10 +101,15 @@ export function SourceImagesPane({ session }: { session: Session }) {
         {sources.length === 0 ? (
           <div className={styles.empty}>
             <Icon name="Folder" size={28} />
-            <div className={styles.emptyTitle}>Drop source images</div>
+            <div className={styles.emptyTitle}>
+              {isT2I ? "Drop reference images" : "Drop source images"}
+            </div>
             <div className={styles.emptySub}>
-              PNG/JPEG/WEBP. The first image becomes the <b>main</b>; later
-              uploads are references.
+              {isT2I ? (
+                <>PNG/JPEG/WEBP. All uploads are references — t2i has no main image.</>
+              ) : (
+                <>PNG/JPEG/WEBP. The first image becomes the <b>main</b>; later uploads are references.</>
+              )}
             </div>
             <Button
               size="sm"

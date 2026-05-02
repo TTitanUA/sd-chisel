@@ -25,8 +25,12 @@ export function PromptPane({ session }: { session: Session }) {
   const [modalOpen, setModalOpen] = useState(false);
 
   const isReindexing = useIsReindexing();
+  const isT2I = session.session_type === "t2i";
+  // i2i requires a main image with analysis; t2i has no main and may
+  // generate from text alone, so the gate does not depend on sources.
   const mainSourceAnalysis =
     session.source_images.find((i) => i.is_main)?.analysis ?? null;
+  const generateBlocked = !isT2I && !mainSourceAnalysis;
   const list = prompts.data ?? [];
   const head: Prompt | null = list[0] ?? null;
   const visible: Prompt | null =
@@ -88,9 +92,9 @@ export function PromptPane({ session }: { session: Session }) {
           variant="primary"
           icon={<Icon name="Sparkles" size={12} />}
           onClick={() => setModalOpen(true)}
-          disabled={!mainSourceAnalysis || isReindexing}
+          disabled={generateBlocked || isReindexing}
           title={
-            !mainSourceAnalysis
+            generateBlocked
               ? "Run Analyze on the main source image first"
               : isReindexing
                 ? "LoRA index is updating — try again in a moment"
@@ -112,7 +116,7 @@ export function PromptPane({ session }: { session: Session }) {
       {!visible && (
         <div className={styles.empty}>
           No prompt yet. Click <b>Generate</b> to produce one from the current
-          chat + source analysis.
+          chat{isT2I ? " (and any reference images)." : " + source analysis."}
         </div>
       )}
 

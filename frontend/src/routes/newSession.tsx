@@ -21,7 +21,7 @@ const TYPE_OPTIONS: { value: SessionType; label: string; description: string }[]
     value: "t2i",
     label: "t2i",
     description:
-      "Text-to-image: prompt is built from chat alone with no source image. Workflow not yet implemented.",
+      "Text-to-image: prompt is built from chat (and any reference images you upload). All uploaded images are references — t2i has no main image. Uses the family's prompt_t2i guide.",
   },
 ];
 

@@ -296,10 +296,15 @@ async def upload_source_image(
     conn: Conn,
     file: Annotated[UploadFile, File()],
 ):
-    _require_session(conn, session_id)
+    session_row = _require_session(conn, session_id)
     ext = _resolve_ext(file.content_type)
 
-    is_first = source_image_repo.count_for_session(conn, session_id) == 0
+    mode = session_row.get("session_type") or "i2i"
+    # t2i sessions have no main image — every upload is a reference.
+    is_main = (
+        False if mode == "t2i"
+        else source_image_repo.count_for_session(conn, session_id) == 0
+    )
     sources_dir = images.session_sources_dir(session_id)
 
     image_id = new_id()
@@ -313,7 +318,7 @@ async def upload_source_image(
         image_id=image_id,
         path=rel_path,
         original_filename=original_filename,
-        is_main=is_first,
+        is_main=is_main,
     )
     return _source_image_to_api_dict(inserted)
 
@@ -323,7 +328,7 @@ async def upload_source_image(
     status_code=204,
 )
 def delete_source_image(session_id: str, image_id: str, conn: Conn):
-    _require_session(conn, session_id)
+    session_row = _require_session(conn, session_id)
     existing = _require_source_image(conn, session_id, image_id)
     deleted = source_image_repo.delete(conn, image_id)
     if deleted is not None:
@@ -335,7 +340,8 @@ def delete_source_image(session_id: str, image_id: str, conn: Conn):
                 target.unlink()
             except OSError:
                 pass
-    if existing["is_main"]:
+    mode = session_row.get("session_type") or "i2i"
+    if mode != "t2i" and existing["is_main"]:
         source_image_repo.promote_first_remaining(conn, session_id)
     return Response(status_code=204)
 
@@ -345,8 +351,12 @@ def delete_source_image(session_id: str, image_id: str, conn: Conn):
     response_model=SourceImageOut,
 )
 def set_source_main(session_id: str, image_id: str, conn: Conn):
-    _require_session(conn, session_id)
+    session_row = _require_session(conn, session_id)
     _require_source_image(conn, session_id, image_id)
+    if (session_row.get("session_type") or "i2i") == "t2i":
+        raise HTTPException(
+            status_code=409, detail="t2i sessions have no main image",
+        )
     updated = source_image_repo.set_main(
         conn, session_id=session_id, image_id=image_id,
     )

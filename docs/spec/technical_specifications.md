@@ -125,13 +125,16 @@ applies them to an empty or existing DB.
   always gets `MAX(image_number) + 1`, so deletions leave permanent gaps —
   this is what guarantees that `Image_N` references in chat / prompt
   context stay unambiguous across delete + re-upload), `is_main` (0/1;
-  exactly one row per session is main, enforced by a unique partial
-  index), `analysis` (free VL text, NULL until analyzed; overwritten by
-  every re-analysis), and `analysis_prompt` (the optional refining
-  instruction the user typed for the last run, NULL when none was
-  provided). Only `i2i` sessions hold rows here. The canonical user- and
-  LLM-facing identifier for each image is `Image_<image_number>` (e.g.
-  `Image_3`); `original_filename` is metadata.
+  for `i2i` exactly one row per session is main; for `t2i` every row
+  is `is_main=0` — the unique partial index on `is_main = 1` permits
+  zero-main sessions), `analysis` (free VL text, NULL until analyzed;
+  overwritten by every re-analysis), and `analysis_prompt` (the
+  optional refining instruction the user typed for the last run, NULL
+  when none was provided). Both `i2i` and `t2i` sessions can hold rows
+  here; for `t2i` every uploaded image is a reference. The canonical
+  user- and LLM-facing identifier for each image is
+  `Image_<image_number>` (e.g. `Image_3`); `original_filename` is
+  metadata.
 - **`session_pinned_loras`** — required LoRAs for a session: always added
   to the LLM context on top of the retrieved set. Optional `weight_override`
   on top of `recommended_weight`.
@@ -214,19 +217,29 @@ analysis:
 
 The result is free text, stored on the row in
 `session_source_images.analysis`. The refining instruction is also
-persisted in `analysis_prompt` so the next re-analysis dialog can pre-fill
-it. Re-running overwrites both fields. Only applicable to `i2i` sessions
-— `t2i` sessions have no source images.
+persisted in `analysis_prompt` so the next re-analysis dialog can
+pre-fill it. Re-running overwrites both fields. Both `i2i` and `t2i`
+sessions can run analyse-source — for `t2i` every uploaded image is a
+reference and consumed as such by the downstream chat / summarizer /
+orchestrator.
 
-Prompt and chat composition consume the analyses as: the **main** row's
-text is the primary "Source image analysis" labelled with its
-`Image_<image_number>` identifier; every reference row that has its own
-completed analysis is appended under a "Reference images" block as
-`- Image_<image_number>: <analysis>` lines. References with no analysis
-yet are silently skipped. The chat system prompt also tells the model
-that the user may refer to images as `@Image_N` and that the model must
-use the same form when referring back to them, never an
-`original_filename`.
+Prompt and chat composition consume the analyses differently per
+mode:
+
+- **i2i** — the main row's text is the primary "Source image
+  analysis" labelled with its `Image_<image_number>` identifier;
+  every reference row that has its own completed analysis is
+  appended under a "Reference images" block as
+  `- Image_<image_number>: <analysis>` lines.
+- **t2i** — there is no main row. Every analysed source image is
+  rendered under a single "Reference images" block in the same
+  bullet form. When no images have been analysed yet, the block is
+  omitted entirely (pure text-to-image is legitimate).
+
+References with no analysis yet are silently skipped in either mode.
+The chat system prompt also tells the model that the user may refer
+to images as `@Image_N` and that the model must use the same form
+when referring back to them, never an `original_filename`.
 
 ### 4.2. `chat` (SSE)
 
@@ -238,6 +251,15 @@ chunks), `done` (final message id), `error`. The `prompt_model_name`
 selected on the session is the only model used — `tool_use` capability
 is no longer a requirement for chat (the field still exists on
 `lm_models` and is consulted by library assistants).
+
+The chat system prompt has two variants picked by `session_type`: an
+`i2i` framing ("iterate on a Stable-Diffusion image-to-image idea")
+and a `t2i` framing ("iterate on a text-to-image idea"). For `i2i` the
+context block emits a labelled "Source image analysis (Image_N, main)"
+followed by an optional "Reference images" bullet list. For `t2i` the
+context block has no main label — every analysed source image goes
+into a single "Reference images" block. With zero analysed sources
+the context block is omitted entirely.
 
 The user message is persisted before streaming begins, but **rolled
 back on any upstream failure** (LMStudio error or empty response). This
@@ -385,6 +407,20 @@ It returns `GeneratedPrompt`:
 - `loras` — array of `{name, weight}` with weight in `[-2.0, 2.0]`; may be
   empty.
 
+**Mode handling.** The orchestrator branches on `session_type`:
+
+- **i2i** — requires a main source image with a completed analysis;
+  the main analysis is rendered as the primary "Source image
+  analysis" block, and any other analysed sources are appended as
+  references.
+- **t2i** — no main image is required; the orchestrator may even run
+  with zero source images (pure text-to-image). Every analysed
+  source goes under "Reference images". The composition system
+  prompt picks up `# Mode: t2i` and the family's `prompt_t2i`
+  appended on top of `prompt_guide` (vs. `prompt_i2i` for i2i). The
+  intent-step system message also has a t2i-specific framing
+  ("planner that turns a text-to-image brief…").
+
 **Conventions:**
 
 - A LoRA whose `name` is missing from the `loras` table — the frontend
@@ -461,12 +497,14 @@ Prefix is `/api/`. Endpoints are grouped by domain.
   and non-empty) replaces chat history in the orchestrator pipeline,
   and `compact_history=true` triggers the §3.2 message compaction on
   success. Returns `prompt_id` + `GeneratedPrompt` + `intents` +
-  `retrieved` + `brief` inline in a single response. For a `t2i`
-  session the endpoint currently returns 409 ("t2i prompt generation
-  is not yet implemented") — the t2i flow is scoped to creation +
-  display in this slice; full wiring is deferred. Generation also
-  returns 409 when the session has no main image with a completed
-  analysis.
+  `retrieved` + `brief` inline in a single response. Both `i2i` and
+  `t2i` are wired end-to-end. For `i2i`, generation returns 409 when
+  the session has no main image with a completed analysis. For
+  `t2i`, no main image is required and generation may run with zero
+  source images (pure text-to-image). The
+  `PATCH /sources/{id}/main` endpoint returns 409 for `t2i` sessions
+  ("t2i sessions have no main image"); uploads to a `t2i` session
+  always store rows with `is_main = 0`.
 - **Library / families:** list, read, create, replace, delete, toggle
   `hidden`, `POST /families/assist` (kicks off the assistant, returns a
   task id).
@@ -619,10 +657,14 @@ through TanStack Query hooks in `src/api/`.
   refining-instruction textarea; the modal disables itself while the
   request is in flight and auto-closes on success (errors keep it open
   for retry). The header carries a session-type badge (`i2i` / `t2i`)
-  next to the model and pinned-loras chips. For `t2i` sessions the
-  body grid is replaced with a "T2I workflow not yet implemented"
-  placeholder; the header and SessionSettingsDrawer still render
-  normally. The ChatPane composer supports an `@`-mention picker:
+  next to the model and pinned-loras chips. The same three-pane grid
+  renders for both modes; `t2i` sessions hide the per-card star
+  toggle and the "main" badge (every uploaded image is a reference)
+  and the empty-state hint switches to a t2i-specific copy. Generate
+  in PromptPane is gated on a main-image analysis only for `i2i`;
+  for `t2i` Generate is always reachable (subject to LMStudio /
+  reindex availability), and the orchestrator may run with zero
+  source images (pure text-to-image). The ChatPane composer supports an `@`-mention picker:
   typing `@` at the start of a token (start-of-input or after
   whitespace) opens a popover above the textarea listing every source
   image in the session as `Image_N` with the original filename as a
@@ -779,10 +821,14 @@ public API for importing LoRA metadata.
 - Mode-specific prompt guides (`prompt_i2i`, `prompt_t2i`) — appended
   to the family `prompt_guide` during composition.
 - Session types (`i2i` / `t2i`) chosen at creation on a dedicated
-  screen and displayed as an immutable header badge. `i2i` is fully
-  wired and consumes the family's mode-specific guide; `t2i` is a
-  creation + display stub (workspace placeholder, generate-prompt
-  refuses with 409).
+  screen and displayed as an immutable header badge. Both modes are
+  wired end-to-end: chat / summarizer / orchestrator each pick the
+  right framing and the family's mode-specific guide
+  (`prompt_i2i` / `prompt_t2i`). `t2i` sessions store every uploaded
+  image with `is_main = 0` (reference only); the `PATCH .../main`
+  endpoint 409s on `t2i`, the workspace hides the main affordances,
+  and the orchestrator runs with any number of analysed references
+  (including zero).
 - Privacy/hidden flags on every list entity + a global `show_hidden`.
 - Rename flow for models and LoRAs that preserves embeddings.
 - Background task registry + SSE indicator.

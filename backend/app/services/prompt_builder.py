@@ -19,8 +19,6 @@ INTENT_SYSTEM_I2I = (
     "1 to 6 intents. No prose, no markdown — JSON only."
 )
 
-# Reserved for the t2i wiring slice. The orchestrator currently short-
-# circuits t2i sessions, so this constant is unused at runtime.
 INTENT_SYSTEM_T2I = (
     "You are a planner that turns a text-to-image brief into a small list "
     "of search intents. For each intent emit a `kind` (a short tag like "
@@ -65,7 +63,7 @@ def _format_references(
 def build_intent_messages(
     *,
     mode: str = "i2i",
-    vl_summary: str,
+    vl_summary: str | None,
     chat_messages: list[dict[str, Any]],
     distinct_tags: list[str],
     reference_summaries: list[tuple[str, str]] | None = None,
@@ -80,7 +78,9 @@ def build_intent_messages(
         tag_block = (
             "We have no tags yet (cold start) — choose any short `kind` you like."
         )
-    parts = [f"# Source image analysis\n{vl_summary}"]
+    parts: list[str] = []
+    if vl_summary and vl_summary.strip():
+        parts.append(f"# Source image analysis\n{vl_summary}")
     refs_block = _format_references(reference_summaries)
     if refs_block:
         parts.append(refs_block)
@@ -115,7 +115,7 @@ def build_composition_messages(
     family_prompt_guide: str,
     model_description: str | None,
     candidates: list[dict[str, Any]],
-    vl_summary: str,
+    vl_summary: str | None,
     chat_messages: list[dict[str, Any]],
     use_negative: bool,
     reference_summaries: list[tuple[str, str]] | None = None,
@@ -129,7 +129,8 @@ def build_composition_messages(
     else:
         loras_section = "(no candidate LoRAs)"
     parts.append("# Available LoRAs\n" + loras_section)
-    parts.append(f"# Source image analysis\n{vl_summary}")
+    if vl_summary and vl_summary.strip():
+        parts.append(f"# Source image analysis\n{vl_summary}")
     refs_block = _format_references(reference_summaries)
     if refs_block:
         parts.append(refs_block)

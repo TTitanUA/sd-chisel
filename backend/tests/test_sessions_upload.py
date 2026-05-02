@@ -154,6 +154,60 @@ def test_delete_reference_keeps_main(client):
     assert listing[0]["is_main"] is True
 
 
+def _make_t2i_session(client) -> str:
+    pid = client.post("/api/projects", json={"name": "P"}).json()["id"]
+    return client.post(
+        f"/api/projects/{pid}/sessions",
+        json={"session_type": "t2i", "name": "s", "model_name": None, "use_negative": True},
+    ).json()["id"]
+
+
+def test_t2i_uploads_never_become_main(client):
+    sid = _make_t2i_session(client)
+    a = client.post(
+        f"/api/sessions/{sid}/sources",
+        files={"file": ("a.png", _PNG_1x1, "image/png")},
+    ).json()
+    b = client.post(
+        f"/api/sessions/{sid}/sources",
+        files={"file": ("b.png", _PNG_1x1, "image/png")},
+    ).json()
+    assert a["is_main"] is False
+    assert b["is_main"] is False
+    listing = client.get(f"/api/sessions/{sid}/sources").json()
+    assert all(row["is_main"] is False for row in listing)
+
+
+def test_t2i_set_main_returns_409(client):
+    sid = _make_t2i_session(client)
+    a = client.post(
+        f"/api/sessions/{sid}/sources",
+        files={"file": ("a.png", _PNG_1x1, "image/png")},
+    ).json()
+    resp = client.patch(f"/api/sessions/{sid}/sources/{a['id']}/main")
+    assert resp.status_code == 409
+    assert "t2i" in resp.json()["detail"].lower()
+    listing = client.get(f"/api/sessions/{sid}/sources").json()
+    assert listing[0]["is_main"] is False
+
+
+def test_t2i_delete_does_not_promote(client):
+    sid = _make_t2i_session(client)
+    a = client.post(
+        f"/api/sessions/{sid}/sources",
+        files={"file": ("a.png", _PNG_1x1, "image/png")},
+    ).json()
+    b = client.post(
+        f"/api/sessions/{sid}/sources",
+        files={"file": ("b.png", _PNG_1x1, "image/png")},
+    ).json()
+    client.delete(f"/api/sessions/{sid}/sources/{a['id']}")
+    listing = client.get(f"/api/sessions/{sid}/sources").json()
+    assert len(listing) == 1
+    assert listing[0]["id"] == b["id"]
+    assert listing[0]["is_main"] is False
+
+
 def test_upload_rejects_unknown_content_type(client):
     sid = _make_session(client)
     resp = client.post(

@@ -179,6 +179,42 @@ def test_summarize_passes_t2i_mode(conn, monkeypatch):
     assert "# Session mode\nt2i" in captured["user"]
 
 
+def test_summarize_t2i_renders_references_not_main(conn, monkeypatch):
+    """For t2i, every analysed source row goes under '# Reference images';
+    no '# Source image analysis' main block is emitted (there is no main)."""
+    sid = _make_session(conn, session_type="t2i")
+    img1 = source_image_repo.insert(
+        conn, session_id=sid, path=f"images/{sid}/sources/a.png",
+        original_filename="a.png", is_main=False,
+    )
+    source_image_repo.set_analysis(
+        conn, img1["id"], analysis="autumn forest", refining_prompt=None,
+    )
+    img2 = source_image_repo.insert(
+        conn, session_id=sid, path=f"images/{sid}/sources/b.png",
+        original_filename="b.png", is_main=False,
+    )
+    source_image_repo.set_analysis(
+        conn, img2["id"], analysis="bronze sculpture", refining_prompt=None,
+    )
+
+    captured: dict = {}
+
+    def fake_complete(*, endpoint, model, messages, **_):
+        captured["user"] = messages[-1]["content"]
+        return "## Goal\nok"
+
+    monkeypatch.setattr(lmstudio_client, "chat_complete", fake_complete)
+    chat_summarizer.summarize_session_chat(
+        conn, session_id=sid, endpoint={"server_root": "http://h"},
+        prompt_model="pm",
+    )
+    assert "# Reference images" in captured["user"]
+    assert "autumn forest" in captured["user"]
+    assert "bronze sculpture" in captured["user"]
+    assert "# Source image analysis" not in captured["user"]
+
+
 def test_compact_messages_with_summary_replaces_history(conn):
     sid = _make_session(conn)
     session_repo.append_message(conn, session_id=sid, role="user", content="a")

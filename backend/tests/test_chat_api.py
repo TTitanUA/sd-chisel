@@ -200,6 +200,70 @@ def test_chat_includes_vl_summary_and_recent_history(client, conn, monkeypatch):
     ]
 
 
+def test_chat_t2i_uses_t2i_system_prompt_and_renders_refs_only(
+    client, conn, monkeypatch,
+):
+    """t2i chat picks the t2i framing and lists every analysed source as a
+    reference — no `(main)` label, no `# Source image analysis` block."""
+    from app.storage import session_repo
+    # Set up a t2i session: bootstrap LMStudio, then create the session
+    # explicitly with session_type=t2i and point it at a prompt model.
+    client.put("/api/settings/lmstudio", json={"base_url": "http://h", "api_key": None})
+    monkeypatch.setattr(lmstudio_client, "list_models", lambda **_: [
+        lmstudio_client.LmsModel(name="mistral", vision=False, tool_use=False, reasoning=False),
+    ])
+    client.post("/api/settings/lmstudio/refresh")
+    client.patch("/api/settings/lmstudio/models/mistral", json={"enabled": True})
+    pid = client.post("/api/projects", json={"name": "P"}).json()["id"]
+    sid = client.post(
+        f"/api/projects/{pid}/sessions",
+        json={"session_type": "t2i", "name": "s", "model_name": None, "use_negative": True},
+    ).json()["id"]
+    client.patch(
+        f"/api/sessions/{sid}",
+        json={
+            "name": "s", "model_name": None, "use_negative": True,
+            "pinned_loras": [], "vl_model_name": None,
+            "prompt_model_name": "mistral",
+        },
+    )
+
+    img1 = source_image_repo.insert(
+        conn, session_id=sid, path=f"images/{sid}/sources/a.png",
+        original_filename="a.png", is_main=False,
+    )
+    source_image_repo.set_analysis(
+        conn, img1["id"], analysis="autumn forest", refining_prompt=None,
+    )
+    img2 = source_image_repo.insert(
+        conn, session_id=sid, path=f"images/{sid}/sources/b.png",
+        original_filename="b.png", is_main=False,
+    )
+    source_image_repo.set_analysis(
+        conn, img2["id"], analysis="bronze sculpture", refining_prompt=None,
+    )
+
+    captured: dict = {}
+
+    def fake_stream(**kwargs):
+        captured.update(kwargs)
+        yield "ok"
+
+    monkeypatch.setattr(lmstudio_client, "chat_stream", fake_stream)
+
+    with client.stream("POST", f"/api/sessions/{sid}/chat", json={"content": "now"}) as r:
+        b"".join(r.iter_bytes())
+
+    msgs = captured["messages"]
+    system_blob = "\n".join(m["content"] for m in msgs if m["role"] == "system")
+    assert "text-to-image" in system_blob.lower()
+    assert "(main)" not in system_blob
+    assert "# Source image analysis" not in system_blob
+    assert "# Reference images" in system_blob
+    assert "autumn forest" in system_blob
+    assert "bronze sculpture" in system_blob
+
+
 def test_chat_truncates_history_to_30(client, conn, monkeypatch):
     from app.storage import session_repo
     sid = _bootstrap_chat_session(client, monkeypatch)

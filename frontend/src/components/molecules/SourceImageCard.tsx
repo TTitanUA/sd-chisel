@@ -55,6 +55,7 @@ export function SourceImageCard({
     setMain.mutate();
   }
 
+  const showMain = session.session_type !== "t2i";
   const src = buildSourceImageSrc(image);
   const previewText = image.analysis
     ? image.analysis.length > PREVIEW_LIMIT
@@ -83,18 +84,22 @@ export function SourceImageCard({
           ) : (
             <div className={styles.imageMissing}>missing</div>
           )}
-          <button
-            type="button"
-            className={styles.starBtn}
-            data-active={image.is_main || undefined}
-            onClick={onToggleMain}
-            disabled={image.is_main || setMain.isPending}
-            aria-label={image.is_main ? "Main image" : "Set as main"}
-            title={image.is_main ? "Main image" : "Set as main"}
-          >
-            <Icon name="Star" size={14} />
-          </button>
-          {image.is_main && <span className={styles.mainBadge}>main</span>}
+          {showMain && (
+            <button
+              type="button"
+              className={styles.starBtn}
+              data-active={image.is_main || undefined}
+              onClick={onToggleMain}
+              disabled={image.is_main || setMain.isPending}
+              aria-label={image.is_main ? "Main image" : "Set as main"}
+              title={image.is_main ? "Main image" : "Set as main"}
+            >
+              <Icon name="Star" size={14} />
+            </button>
+          )}
+          {showMain && image.is_main && (
+            <span className={styles.mainBadge}>main</span>
+          )}
         </div>
 
         <div className={styles.center}>

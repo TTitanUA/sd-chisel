@@ -79,6 +79,11 @@ export function ChatPane({ session }: { session: Session }) {
 
   const rows = messages.data ?? [];
   const hasAnySources = session.source_images.length > 0;
+  // i2i requires a source image as the visual anchor; t2i does not — the
+  // chat works from text alone, with any uploaded images acting as
+  // optional references.
+  const isT2I = session.session_type === "t2i";
+  const chatReady = isT2I || hasAnySources;
   const showOptimistic = optimistic && !rows.some((r) => r.id === optimistic.id);
   const showStreamingThinking = pending && streaming.length === 0;
   const showStreamingBubble = pending && streaming.length > 0;
@@ -324,9 +329,15 @@ export function ChatPane({ session }: { session: Session }) {
         <div className={styles.scroll} ref={scrollRef}>
           {rows.length === 0 && !showOptimistic && !showStreamingThinking && !showStreamingBubble && (
             <div className={styles.empty}>
-              {hasAnySources
-                ? <>Describe the change you want. I&rsquo;ll pick LoRAs from your library and assemble a prompt.</>
-                : <>Add a source image first &mdash; I need a VL summary to anchor the prompt.</>}
+              {chatReady ? (
+                isT2I ? (
+                  <>Describe the image you want to create. I&rsquo;ll pick LoRAs from your library and assemble a prompt.</>
+                ) : (
+                  <>Describe the change you want. I&rsquo;ll pick LoRAs from your library and assemble a prompt.</>
+                )
+              ) : (
+                <>Add a source image first &mdash; I need a VL summary to anchor the prompt.</>
+              )}
             </div>
           )}
           {rows.map((m) => (
@@ -376,8 +387,10 @@ export function ChatPane({ session }: { session: Session }) {
               ref={textareaRef}
               className={styles.textarea}
               placeholder={
-                hasAnySources
-                  ? "Describe the change…"
+                chatReady
+                  ? isT2I
+                    ? "Describe the image…"
+                    : "Describe the change…"
                   : "Add source image first"
               }
               value={draft}
