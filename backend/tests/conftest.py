@@ -9,16 +9,22 @@ The `seed_default_families` helper lets tests pre-populate the canonical
 10 family ids that production fixtures (models, loras) reference. The app
 itself starts with an empty `families` table; this helper exists purely
 so legacy tests don't have to create each family inline.
+
+LLM round-trip logging (``services/llm_log.py``) is force-disabled here so
+tests never write to ``data/llm_log/``.
 """
 from __future__ import annotations
 
 import hashlib
+import os
 import sqlite3
 
 import pytest
 
 from app.services import embedder
 from app.storage import library_repo
+
+os.environ.setdefault("SDCHISEL_LLM_LOG", "0")
 
 
 DEFAULT_FAMILY_IDS = (

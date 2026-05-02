@@ -56,7 +56,22 @@ class PromptOut(BaseModel):
     prompt: GeneratedPrompt
     intents: list[Intent] | None
     retrieved: list[RetrievedIntent] | None
+    brief: str | None = None
     created_at: int
+
+
+class GeneratePromptRequest(BaseModel):
+    """Body of ``POST /api/sessions/{s}/generate-prompt``.
+
+    Both fields are optional for backward compatibility — a manual
+    invocation with no body still works (orchestrator falls back to
+    chat history). The modal flow always sends ``brief`` (possibly
+    edited by the user) and may set ``compact_history`` to wipe and
+    replace the chat history with the brief after success.
+    """
+    model_config = ConfigDict(extra="ignore")
+    brief: str | None = None
+    compact_history: bool = False
 
 
 class GeneratePromptResponse(BaseModel):
@@ -64,8 +79,40 @@ class GeneratePromptResponse(BaseModel):
     prompt: GeneratedPrompt
     intents: list[Intent]
     retrieved: list[RetrievedIntent]
+    brief: str | None = None
     created_at: int
 
 
 class PromptsResponse(BaseModel):
     prompts: list[PromptOut]
+
+
+class SummarizeImageView(BaseModel):
+    label: str
+    analysis: str
+
+
+class SummarizePinnedLoraView(BaseModel):
+    name: str
+    weight: float | None = None
+
+
+class SummarizeContext(BaseModel):
+    """Read-only preview of what the orchestrator will see (minus
+    family prompt guides). Powers the Generate modal so the user sees
+    the context before committing to a regeneration.
+    """
+    mode: str
+    model_name: str | None = None
+    model_description: str | None = None
+    family_id: str | None = None
+    family_display_name: str | None = None
+    pinned_loras: list[SummarizePinnedLoraView] = Field(default_factory=list)
+    use_negative: bool = True
+    main_image: SummarizeImageView | None = None
+    reference_images: list[SummarizeImageView] = Field(default_factory=list)
+
+
+class SummarizeChatResponse(BaseModel):
+    brief: str
+    context: SummarizeContext

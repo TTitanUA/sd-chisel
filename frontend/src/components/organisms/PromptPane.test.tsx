@@ -8,6 +8,11 @@ import * as promptsApi from "@/api/prompts";
 import * as libraryApi from "@/api/library";
 import * as tasksApi from "@/api/tasks";
 
+vi.mock("./GenerateModal", () => ({
+  GenerateModal: ({ open }: { open: boolean }) =>
+    open ? <div data-testid="generate-modal">modal</div> : null,
+}));
+
 const session: Session = {
   id: "ses1",
   project_id: "p1",
@@ -69,11 +74,6 @@ describe("PromptPane", () => {
     vi.spyOn(promptsApi, "usePrompts").mockReturnValue({
       data: [],
     } as unknown as ReturnType<typeof promptsApi.usePrompts>);
-    vi.spyOn(promptsApi, "useGeneratePrompt").mockReturnValue({
-      mutate: vi.fn(),
-      isPending: false,
-      error: null,
-    } as unknown as ReturnType<typeof promptsApi.useGeneratePrompt>);
 
     wrap(<PromptPane session={{ ...session, source_images: [] }} />);
     expect(screen.getByText(/No prompt yet/i)).toBeInTheDocument();
@@ -96,13 +96,11 @@ describe("PromptPane", () => {
           },
           intents: [{ kind: "style", query: "moody" }],
           retrieved: [{ intent_index: 0, intent_query: "moody", results: [{ name: "lora-known", distance: 0.1 }] }],
+          brief: null,
           created_at: 0,
         },
       ],
     } as unknown as ReturnType<typeof promptsApi.usePrompts>);
-    vi.spyOn(promptsApi, "useGeneratePrompt").mockReturnValue({
-      mutate: vi.fn(), isPending: false, error: null,
-    } as unknown as ReturnType<typeof promptsApi.useGeneratePrompt>);
 
     wrap(<PromptPane session={session} />);
     expect(screen.getByDisplayValue("moody girl")).toBeInTheDocument();
@@ -112,30 +110,25 @@ describe("PromptPane", () => {
     expect(screen.getByText(/unknown/i)).toBeInTheDocument();
   });
 
-  it("calls generate when Regenerate is clicked", () => {
-    const mutate = vi.fn();
+  it("opens GenerateModal when Regenerate is clicked", () => {
     vi.spyOn(promptsApi, "usePrompts").mockReturnValue({
       data: [{
         id: 9, session_id: session.id, intents: null, retrieved: null,
-        prompt: { positive: "p", negative: "n", loras: [] }, created_at: 0,
+        prompt: { positive: "p", negative: "n", loras: [] },
+        brief: null, created_at: 0,
       }],
     } as unknown as ReturnType<typeof promptsApi.usePrompts>);
-    vi.spyOn(promptsApi, "useGeneratePrompt").mockReturnValue({
-      mutate, isPending: false, error: null,
-    } as unknown as ReturnType<typeof promptsApi.useGeneratePrompt>);
 
     wrap(<PromptPane session={session} />);
+    expect(screen.queryByTestId("generate-modal")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: /Regenerate/i }));
-    expect(mutate).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId("generate-modal")).toBeInTheDocument();
   });
 
   it("disables Generate while a reindex task is active", () => {
     vi.spyOn(promptsApi, "usePrompts").mockReturnValue({
       data: [],
     } as unknown as ReturnType<typeof promptsApi.usePrompts>);
-    vi.spyOn(promptsApi, "useGeneratePrompt").mockReturnValue({
-      mutate: vi.fn(), isPending: false, error: null,
-    } as unknown as ReturnType<typeof promptsApi.useGeneratePrompt>);
     vi.spyOn(tasksApi, "useIsReindexing").mockReturnValue(true);
 
     wrap(<PromptPane session={session} />);
@@ -145,17 +138,5 @@ describe("PromptPane", () => {
       "title",
       expect.stringMatching(/index is updating/i),
     );
-  });
-
-  it("renders error from generate mutation", () => {
-    vi.spyOn(promptsApi, "usePrompts").mockReturnValue({
-      data: [],
-    } as unknown as ReturnType<typeof promptsApi.usePrompts>);
-    vi.spyOn(promptsApi, "useGeneratePrompt").mockReturnValue({
-      mutate: vi.fn(), isPending: false, error: new Error("boom"),
-    } as unknown as ReturnType<typeof promptsApi.useGeneratePrompt>);
-
-    wrap(<PromptPane session={session} />);
-    expect(screen.getByRole("alert")).toHaveTextContent("boom");
   });
 });

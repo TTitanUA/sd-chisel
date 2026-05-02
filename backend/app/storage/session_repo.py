@@ -297,12 +297,13 @@ def append_prompt(
     loras: list[dict[str, Any]],
     intents: list[dict[str, Any]] | None,
     retrieved: list[dict[str, Any]] | None,
+    brief: str | None = None,
 ) -> dict[str, Any]:
     now = _now()
     cur = conn.execute(
         "INSERT INTO prompts(session_id, positive, negative, loras_json, "
-        "intents_json, retrieved_loras_json, created_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        "intents_json, retrieved_loras_json, brief, created_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         (
             session_id,
             positive,
@@ -310,12 +311,46 @@ def append_prompt(
             json.dumps(loras, ensure_ascii=False),
             json.dumps(intents, ensure_ascii=False) if intents is not None else None,
             json.dumps(retrieved, ensure_ascii=False) if retrieved is not None else None,
+            brief,
             now,
         ),
     )
     return _row(conn.execute(
         "SELECT * FROM prompts WHERE id = ?", (cur.lastrowid,),
     ).fetchone())  # type: ignore[return-value]
+
+
+def compact_messages_with_summary(
+    conn: sqlite3.Connection, *, session_id: str, brief: str,
+) -> dict[str, Any]:
+    """Replace all messages of ``session_id`` with one assistant row that
+    holds the chat summary. Atomic. Returns the new row.
+
+    Used by the modal Generate flow when the user opts in to history
+    compaction — it loses old messages on purpose, to free context for
+    small models on subsequent turns.
+    """
+    summary_text = f"Summary of previous discussion:\n\n{brief.strip()}"
+    try:
+        conn.execute("BEGIN")
+        conn.execute(
+            "DELETE FROM messages WHERE session_id = ?", (session_id,),
+        )
+        cur = conn.execute(
+            "INSERT INTO messages(session_id, role, content, created_at) "
+            "VALUES (?, 'assistant', ?, ?)",
+            (session_id, summary_text, _now()),
+        )
+        conn.execute("COMMIT")
+        return _row(conn.execute(
+            "SELECT * FROM messages WHERE id = ?", (cur.lastrowid,),
+        ).fetchone())  # type: ignore[return-value]
+    except Exception:
+        try:
+            conn.execute("ROLLBACK")
+        except Exception:
+            pass
+        raise
 
 
 def list_prompts(

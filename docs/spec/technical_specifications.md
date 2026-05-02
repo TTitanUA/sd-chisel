@@ -135,11 +135,19 @@ applies them to an empty or existing DB.
 - **`session_pinned_loras`** — required LoRAs for a session: always added
   to the LLM context on top of the retrieved set. Optional `weight_override`
   on top of `recommended_weight`.
-- **`messages`** — append-only chat, `role ∈ {user, assistant, system}`.
+- **`messages`** — chat log, `role ∈ {user, assistant, system}`. Normally
+  append-only; the one mutation is **history compaction** invoked from
+  the Generate modal when the user opts in: every existing row is
+  replaced atomically by a single assistant row whose content is the
+  brief that fed the just-completed generation, prefixed with `Summary
+  of previous discussion:`. The point is to keep the chat-context
+  payload small for local models on subsequent turns.
 - **`prompts`** — append-only history of final prompts: `positive`,
   `negative` (NULL when `use_negative=0`), `loras_json` (what the LLM
   actually returned, verbatim, with no filtering of unknowns), plus the
-  debug fields `intents_json` and `retrieved_loras_json` for retrospection.
+  debug fields `intents_json`, `retrieved_loras_json`, and `brief` (the
+  chat summary that fed this run, when one was supplied — NULL for
+  manual generate calls without a brief).
 
 **Session deletion** is transactional on both sides: cascade in the DB
 (messages, prompts, pins) plus an application-level hook removes
@@ -216,42 +224,62 @@ use the same form when referring back to them, never an
 
 ### 4.2. `chat` (SSE)
 
-Streaming chat for discussing the desired changes. History is append-only
-in `messages`. The endpoint speaks Server-Sent Events with these payload
-types: `delta` (assistant text chunks), `done` (final message id),
-`error`, plus `tool_call` and `tool_result` when the agent invokes the
-regenerate tool.
+Pure streaming chat for discussing the desired changes — no tools, no
+agent. History is normally append-only in `messages` (see §3.2 for the
+one exception: history compaction). The endpoint speaks
+Server-Sent Events with three payload types: `delta` (assistant text
+chunks), `done` (final message id), `error`. The `prompt_model_name`
+selected on the session is the only model used — `tool_use` capability
+is no longer a requirement for chat (the field still exists on
+`lm_models` and is consulted by library assistants).
 
-When the session's `prompt_model_name` resolves to an `lm_models` row
-with `tool_use = 1`, the assistant is given access to a single function
-tool, `regenerate_prompt(brief: string)`. The system prompt instructs the
-agent to discuss freely and invoke the tool **only after the user gives
-an explicit go-ahead** ("go", "generate", "погнали", "давай" or any
-clear equivalent). The `brief` is a self-contained summary of the
-agreed direction; it becomes the primary input to §4.3 and replaces
-chat history for that pipeline run.
+Generation never fires from the chat itself. The user reaches a
+direction in conversation and then clicks the explicit Generate button
+on the prompt panel, which opens the Generate modal (§4.3.1).
 
-Server-side the tool call is executed in-process by routing into the
-existing prompt orchestrator (no HTTP self-call): `tool_call` is emitted
-when the tool invocation is parsed off the stream, the orchestrator runs
-end-to-end, `tool_result` carries the resulting `prompt_id` (or an
-`error`), and the assistant is fed the tool result back so it can stream
-a closing reply as ordinary `delta` events. The new prompt is persisted
-to `prompts` exactly as a manual `/generate-prompt` call would do.
+### 4.3. Generate flow
 
-When the chat model is **not** tool-capable, the endpoint stays purely
-conversational — no tool spec is sent and behavior matches the pre-tool
-state. Generation is then only triggered by the explicit Regenerate
-button on the prompt panel (`POST /api/sessions/{s}/generate-prompt`),
-which remains available regardless of capability.
+#### 4.3.1. Modal-driven UX
 
-### 4.3. `generate-prompt` — two-stage flow
+Generation always goes through the Generate modal on the prompt panel.
+Opening the modal triggers `POST /api/sessions/{s}/summarize-chat`,
+which makes one LLM call (same `prompt_model_name`) to converge the
+chat history plus the main image analysis into a brief of **user
+intent** — what the user wants to change (i2i) or create (t2i).
+The summarizer is deliberately model-agnostic and does not re-describe
+the source image; the orchestrator already has the VL analyses and
+family prompt guides for that. The output is plain markdown with a
+`## Goal` paragraph and an optional `## Constraints` bullet list,
+returned to the client together with a read-only context preview
+(mode, model name + family, pinned LoRAs, `use_negative`, source-image
+analyses, model description). Family prompt guides are deliberately
+omitted from the preview — they belong to the model side of the
+contract.
 
-The orchestrator accepts an optional `brief` input. When set (the chat
-tool path passes it; the manual Regenerate button does not), the brief
-**replaces** chat history in both the intent and the composition LLM
-payloads as a dedicated `# User brief` block. Without a brief, the
-orchestrator falls back to the last N chat messages as before.
+The brief is rendered as a **read-only** markdown preview — the
+editing affordance is the chat itself. To refine the brief, the user
+cancels the modal and continues the discussion; re-opening the modal
+re-runs summarization against the updated chat. Cancelling makes no
+server-side changes. Confirming sends
+`POST /api/sessions/{s}/generate-prompt` with body
+`{brief, compact_history}`, where `compact_history` is an opt-in
+checkbox that, on success, invokes the §3.2 history compaction so the
+chat starts from a clean summary on the next turn. The modal stays
+open with disabled controls while the orchestrator runs, then closes
+on success; failures stay inline for retry.
+
+The modal is the only generation entry point — even with empty chat,
+opening the modal still runs summarization (the brief falls back to a
+neutral derivative of the source-image analysis) so the user has a
+unified place to launch and review.
+
+#### 4.3.2. Orchestrator stages
+
+The orchestrator accepts an optional `brief` input. When set (the
+modal flow always supplies one), the brief **replaces** chat history
+in both the intent and the composition LLM payloads as a dedicated
+`# User brief` block. Without a brief, the orchestrator falls back to
+the last N chat messages as before.
 
 **Step 1 — intent rewriting.** The LLM gets the VL summary, the last N
 chat messages (or the brief, when provided), and an aggregated list of
@@ -363,13 +391,21 @@ Prefix is `/api/`. Endpoints are grouped by domain.
   flips the main flag to that row; `POST /sources/{id}/analyze` accepts
   a JSON body `{ "refining_prompt": string | null }` and runs the VL
   call against that row's image. Chat (`POST /sessions/{s}/chat`, SSE).
-  Prompt generation (`POST /sessions/{s}/generate-prompt`) — returns
-  `prompt_id` + `GeneratedPrompt` + `intents` + `retrieved` inline in a
-  single response. For a `t2i` session the endpoint currently returns
-  409 ("t2i prompt generation is not yet implemented") — the t2i flow
-  is scoped to creation + display in this slice; full wiring is
-  deferred. Generation also returns 409 when the session has no main
-  image with a completed analysis.
+  Chat summarization (`POST /sessions/{s}/summarize-chat`) — runs one
+  LLM call to converge the chat plus main image analysis into a brief,
+  returns `{brief, context}` where context is a read-only preview of
+  what generation will see. Prompt generation
+  (`POST /sessions/{s}/generate-prompt`) — body
+  `{brief?: string, compact_history?: bool}`; `brief` (when present
+  and non-empty) replaces chat history in the orchestrator pipeline,
+  and `compact_history=true` triggers the §3.2 message compaction on
+  success. Returns `prompt_id` + `GeneratedPrompt` + `intents` +
+  `retrieved` + `brief` inline in a single response. For a `t2i`
+  session the endpoint currently returns 409 ("t2i prompt generation
+  is not yet implemented") — the t2i flow is scoped to creation +
+  display in this slice; full wiring is deferred. Generation also
+  returns 409 when the session has no main image with a completed
+  analysis.
 - **Library / families:** list, read, create, replace, delete, toggle
   `hidden`, `POST /families/assist` (kicks off the assistant, returns a
   task id).
@@ -449,6 +485,36 @@ import, assistants).
   description HTML to markdown, and normalizes `trigger_words` and `tags`.
   Used by both the manual import button and the LoRA assistant.
 
+### 5.6. LLM round-trip logging
+
+Every public `lmstudio_client` call emits one structured record to
+`data/llm_log/<YYYY-MM-DD>.jsonl` (UTC date) with: timestamp, `run_id`,
+call kind (`chat_stream`, `chat_stream_with_tools`, `chat_complete`,
+`analyze_image`, `chat_responses_stream`, `list_models`,
+`list_loaded_instance_ids`, `unload_model`), model name, full request
+payload, assembled response (text deltas joined into a single string,
+plus any tool call payload), duration, and any error. A `run_id`
+context variable groups every call within a single user-facing turn —
+one chat message produces up to four records (the user-visible
+streaming reply plus, when a tool call fires, the orchestrator's intent
+and composition completions plus the closing follow-up stream) all
+sharing the same `run_id` so the whole flow is greppable as one logical
+unit. Image binaries inside chat messages are redacted to
+`<base64:Nb>` placeholders before they hit disk so the log stays
+readable. Logging is on by default and can be disabled with
+`SDCHISEL_LLM_LOG=0`; the test suite force-disables it via the
+conftest.
+
+A companion CLI at `scripts/debug_chat.py` drives a real session
+through chat / summarization / orchestrator without going through the
+HTTP layer. Modes: `list-sessions`, `inspect <id>`,
+`chat <id> --message "..."`, `summarize <id>`,
+`orchestrator <id> --brief "..."` (with optional `--no-persist`),
+`tail-log [--follow]`. The harness is read-only against `data/app.db`
+(chat mode never persists messages; orchestrator mode writes to
+`prompts` unless `--no-persist`) and reuses the same logging path as
+the live endpoints.
+
 ---
 
 ## 6. Frontend
@@ -466,9 +532,9 @@ tokens. No Tailwind, no shadcn. Package manager: pnpm.
 Atomic design: `atoms/` (Button, Badge, Icon), `molecules/` (form blocks,
 SourceImageCard, AnalyzeImageModal, AnalysisDetailModal, ImageLightbox,
 MentionPopover, SessionSettingsDrawer), `organisms/` (LibraryCrud,
-SourceImagesPane, PromptPane, ChatPane, ProjectSidebar, CRUD forms,
-LmStudioSettings, TaskIndicator), `templates/` (WorkspaceLayout,
-LibraryLayout, AppShell).
+SourceImagesPane, PromptPane, ChatPane, GenerateModal, ProjectSidebar,
+CRUD forms, LmStudioSettings, TaskIndicator), `templates/`
+(WorkspaceLayout, LibraryLayout, AppShell).
 Pages (`routes/`) are assembled from templates + organisms; data flows in
 through TanStack Query hooks in `src/api/`.
 
@@ -540,6 +606,19 @@ through TanStack Query hooks in `src/api/`.
 - A **Copy LoRA string** button assembles `<lora:a:0.6> <lora:b:0.8> ...`.
 - Copy positive / Copy negative buttons — independent.
 - Debug pane (collapsed by default): intents → retrieved LoRAs → picked.
+- The Generate / Regenerate button opens the **GenerateModal**: a Radix
+  Dialog that, on open, runs `POST /summarize-chat`, then shows the
+  resulting brief as a **read-only** markdown preview alongside a
+  context preview (mode, model + family, pinned LoRAs, `use_negative`,
+  source-image analyses, and model description when available). Family
+  prompt guides are deliberately not shown — they belong to the model.
+  Refinement happens in the chat itself: cancel and continue the
+  discussion, then re-open the modal to re-summarize. Optional
+  "Compact chat history after generation" checkbox triggers §3.2
+  message compaction. Generate launches the orchestrator with the
+  brief; the modal stays open with disabled controls during the call
+  and closes on success. Failures stay inline for retry. Cancel makes
+  no server-side changes.
 
 ### 6.4. Hidden indicators
 
@@ -589,8 +668,8 @@ public API for importing LoRA metadata.
   - `app/api/` — REST/SSE endpoints (projects, sessions, chat, prompt,
     library, settings, tasks).
   - `app/services/` — embedder, indexer, retriever, prompt_builder,
-    prompt_orchestrator, lmstudio_client, civitai, lora_reindex,
-    task_runner, library_service.
+    prompt_orchestrator, chat_summarizer, lmstudio_client, llm_log,
+    civitai, lora_reindex, task_runner, library_service.
   - `app/storage/` — db init/migrations, library_repo, session_repo,
     settings_repo, images.
   - `app/models/` — Pydantic schemas (including `GeneratedPrompt` and
@@ -606,12 +685,15 @@ public API for importing LoRA metadata.
   - `src/store/` — Zustand store for client state.
   - `src/styles/`, `assets/`, `lib/`.
 - `scripts/` — `dev.sh` / `dev.ps1` / `dev.mjs` (raise backend + frontend
-  with one command, merging stdout with `[be]` / `[fe]` prefixes).
+  with one command, merging stdout with `[be]` / `[fe]` prefixes);
+  `debug_chat.py` (drive a session through chat / orchestrator without
+  the UI, see §5.6).
 - `docs/` — the specification (this file).
 - `doc/concept.md` — the original prose concept (historical).
 - `mvp-ui-mock/` — design-system prototype (CSS tokens, primitives —
   ported into `frontend/src/styles/`).
-- `data/` — runtime state (git-ignored): `app.db` + `images/<session_id>/`.
+- `data/` — runtime state (git-ignored): `app.db` +
+  `images/<session_id>/` + `llm_log/<YYYY-MM-DD>.jsonl` (see §5.6).
 
 ---
 
@@ -646,11 +728,11 @@ public API for importing LoRA metadata.
 - Civitai import for LoRAs (parser + metadata fetch + UI button).
 - Library assistants (family prompt guide + LoRA metadata) on top of the
   task registry.
-- Tool-calling chat agent: when the session's chat model has the
-  `tool_use` capability, the assistant can invoke a single
-  `regenerate_prompt(brief)` tool that runs the orchestrator and
-  refreshes the prompt panel inline (gracefully degrades to plain text
-  chat for non-capable models).
+- Generate modal flow: explicit two-step generation triggered from
+  the prompt panel — chat summarization into an editable brief, then
+  orchestrator with optional history compaction. Replaces the earlier
+  in-chat tool-calling agent, which proved too dependent on local-model
+  tool behavior to be reliable.
 
 **Out of scope (architectural placeholders):**
 

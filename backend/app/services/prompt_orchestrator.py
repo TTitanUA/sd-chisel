@@ -13,7 +13,7 @@ from typing import Any, TypeVar
 from pydantic import BaseModel, ValidationError
 
 from app.models.prompts import GeneratedPrompt, IntentList
-from app.services import lmstudio_client, prompt_builder, retriever
+from app.services import llm_log, lmstudio_client, prompt_builder, retriever
 from app.storage import library_repo, session_repo, source_image_repo
 
 _M = TypeVar("_M", bound=BaseModel)
@@ -79,6 +79,24 @@ def _coerce_negative(prompt: GeneratedPrompt, *, use_negative: bool) -> Generate
 
 
 def generate(
+    conn: sqlite3.Connection,
+    *,
+    session_id: str,
+    endpoint: dict[str, Any],
+    prompt_model: str,
+    brief: str | None = None,
+) -> dict[str, Any]:
+    with llm_log.run_context():
+        return _generate_inner(
+            conn,
+            session_id=session_id,
+            endpoint=endpoint,
+            prompt_model=prompt_model,
+            brief=brief,
+        )
+
+
+def _generate_inner(
     conn: sqlite3.Connection,
     *,
     session_id: str,
@@ -208,6 +226,7 @@ def generate(
         loras=[lora.model_dump() for lora in prompt_obj.loras],
         intents=intents_dump,
         retrieved=retrieved_dump,
+        brief=brief,
     )
 
     return {
@@ -215,5 +234,6 @@ def generate(
         "prompt": prompt_obj.model_dump(),
         "intents": intents_dump,
         "retrieved": retrieved_dump,
+        "brief": brief,
         "created_at": row["created_at"],
     }

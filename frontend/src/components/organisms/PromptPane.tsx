@@ -4,7 +4,6 @@ import { Icon } from "@/components/atoms/Icon";
 import { useLoras } from "@/api/library";
 import type { Lora } from "@/api/library";
 import {
-  useGeneratePrompt,
   usePrompts,
   type GeneratedPrompt,
   type Intent,
@@ -14,15 +13,16 @@ import {
 } from "@/api/prompts";
 import type { Session } from "@/api/sessions";
 import { useIsReindexing } from "@/api/tasks";
+import { GenerateModal } from "./GenerateModal";
 import { classifyLora, PromptLoraRow } from "./PromptLoraRow";
 import styles from "./PromptPane.module.css";
 
 export function PromptPane({ session }: { session: Session }) {
   const prompts = usePrompts(session.id);
-  const generate = useGeneratePrompt(session.id);
   const loras = useLoras();
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [debugOpen, setDebugOpen] = useState(false);
+  const [modalOpen, setModalOpen] = useState(false);
 
   const isReindexing = useIsReindexing();
   const mainSourceAnalysis =
@@ -75,9 +75,6 @@ export function PromptPane({ session }: { session: Session }) {
     return parts.join("\n\n") + (p.negative ? `\n\nNEGATIVE:\n${p.negative}` : "");
   }, [visible, loraString]);
 
-  const generateError =
-    generate.error instanceof Error ? generate.error.message : null;
-
   function copy(text: string) {
     if (!text) return;
     void navigator.clipboard?.writeText(text);
@@ -90,8 +87,8 @@ export function PromptPane({ session }: { session: Session }) {
           size="sm"
           variant="primary"
           icon={<Icon name="Sparkles" size={12} />}
-          onClick={() => generate.mutate()}
-          disabled={generate.isPending || !mainSourceAnalysis || isReindexing}
+          onClick={() => setModalOpen(true)}
+          disabled={!mainSourceAnalysis || isReindexing}
           title={
             !mainSourceAnalysis
               ? "Run Analyze on the main source image first"
@@ -102,17 +99,17 @@ export function PromptPane({ session }: { session: Session }) {
                   : "Generate prompt"
           }
         >
-          {generate.isPending ? "Generating…" : visible ? "Regenerate" : "Generate"}
+          {visible ? "Regenerate" : "Generate"}
         </Button>
       </div>
 
-      {generateError && (
-        <div className={styles.error} role="alert">
-          {generateError}
-        </div>
-      )}
+      <GenerateModal
+        session={session}
+        open={modalOpen}
+        onOpenChange={setModalOpen}
+      />
 
-      {!visible && !generate.isPending && (
+      {!visible && (
         <div className={styles.empty}>
           No prompt yet. Click <b>Generate</b> to produce one from the current
           chat + source analysis.

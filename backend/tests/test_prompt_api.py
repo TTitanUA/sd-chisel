@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 
 from app.api.deps import get_conn
 from app.main import app
-from app.services import prompt_orchestrator
+from app.services import chat_summarizer, prompt_orchestrator
 from app.services.lmstudio_client import LmError
 from app.storage import db as db_mod
 from app.storage import library_repo, session_repo, settings_repo, source_image_repo
@@ -185,3 +185,113 @@ def test_list_prompts_returns_newest_first(client, conn):
 def test_list_prompts_404_for_unknown_session(client):
     resp = client.get("/api/sessions/nope/prompts")
     assert resp.status_code == 404
+
+
+# --- summarize-chat + generate-prompt body fields --------------------------
+
+
+def test_summarize_chat_returns_brief_and_context(client, conn, monkeypatch):
+    sid = _bootstrap(client, conn)
+    session_repo.append_message(conn, session_id=sid, role="user", content="moodier")
+    session_repo.append_message(
+        conn, session_id=sid, role="assistant", content="ok, low light",
+    )
+    monkeypatch.setattr(
+        chat_summarizer, "summarize_session_chat",
+        lambda *a, **kw: "Make it moodier with low key lighting.",
+    )
+    resp = client.post(f"/api/sessions/{sid}/summarize-chat")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["brief"] == "Make it moodier with low key lighting."
+    ctx = body["context"]
+    assert ctx["mode"] == "i2i"
+    assert ctx["model_name"] == "m1"
+    assert ctx["family_id"] == "sdxl"
+    assert ctx["use_negative"] is True
+    assert ctx["main_image"]["label"] == "Image_1"
+    assert ctx["main_image"]["analysis"] == "summary text"
+    assert ctx["reference_images"] == []
+
+
+def test_summarize_chat_502_on_lm_error(client, conn, monkeypatch):
+    sid = _bootstrap(client, conn)
+    monkeypatch.setattr(
+        chat_summarizer, "summarize_session_chat",
+        lambda *a, **kw: (_ for _ in ()).throw(LmError("upstream", "boom")),
+    )
+    resp = client.post(f"/api/sessions/{sid}/summarize-chat")
+    assert resp.status_code == 502
+
+
+def test_generate_prompt_passes_brief_to_orchestrator(client, conn, monkeypatch):
+    sid = _bootstrap(client, conn)
+    captured: dict = {}
+
+    def fake_generate(_conn, **kwargs):
+        captured.update(kwargs)
+        return {
+            "prompt_id": 7,
+            "prompt": {"positive": "p", "negative": None, "loras": []},
+            "intents": [],
+            "retrieved": [],
+            "brief": kwargs.get("brief"),
+            "created_at": 0,
+        }
+
+    monkeypatch.setattr(prompt_orchestrator, "generate", fake_generate)
+    resp = client.post(
+        f"/api/sessions/{sid}/generate-prompt",
+        json={"brief": "moody nighttime", "compact_history": False},
+    )
+    assert resp.status_code == 200
+    assert captured["brief"] == "moody nighttime"
+    assert resp.json()["brief"] == "moody nighttime"
+
+
+def test_generate_prompt_compacts_history_when_flag_set(client, conn, monkeypatch):
+    sid = _bootstrap(client, conn)
+    session_repo.append_message(conn, session_id=sid, role="user", content="old-1")
+    session_repo.append_message(conn, session_id=sid, role="assistant", content="old-2")
+
+    monkeypatch.setattr(prompt_orchestrator, "generate", lambda *a, **kw: {
+        "prompt_id": 1,
+        "prompt": {"positive": "p", "negative": None, "loras": []},
+        "intents": [],
+        "retrieved": [],
+        "brief": kw.get("brief"),
+        "created_at": 0,
+    })
+    resp = client.post(
+        f"/api/sessions/{sid}/generate-prompt",
+        json={"brief": "moody", "compact_history": True},
+    )
+    assert resp.status_code == 200
+
+    msgs = session_repo.list_messages(conn, session_id=sid)
+    assert len(msgs) == 1
+    assert msgs[0]["role"] == "assistant"
+    assert msgs[0]["content"].startswith("Summary of previous discussion:")
+    assert "moody" in msgs[0]["content"]
+
+
+def test_generate_prompt_does_not_compact_when_brief_missing(client, conn, monkeypatch):
+    """compact_history=true is a no-op when brief is empty — there is
+    nothing to summarize down to."""
+    sid = _bootstrap(client, conn)
+    session_repo.append_message(conn, session_id=sid, role="user", content="keep me")
+
+    monkeypatch.setattr(prompt_orchestrator, "generate", lambda *a, **kw: {
+        "prompt_id": 1,
+        "prompt": {"positive": "p", "negative": None, "loras": []},
+        "intents": [], "retrieved": [], "brief": None, "created_at": 0,
+    })
+    resp = client.post(
+        f"/api/sessions/{sid}/generate-prompt",
+        json={"compact_history": True},
+    )
+    assert resp.status_code == 200
+
+    msgs = session_repo.list_messages(conn, session_id=sid)
+    assert len(msgs) == 1
+    assert msgs[0]["content"] == "keep me"

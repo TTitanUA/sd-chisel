@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Button } from "@/components/atoms/Button";
@@ -47,21 +46,14 @@ function detectMention(value: string, caret: number): MentionState | null {
 const isMac = typeof navigator !== "undefined" && /Mac|iPhone|iPod|iPad/i.test(navigator.platform);
 const SEND_HINT = isMac ? "⌘↵ to send" : "Ctrl↵ to send";
 
-type ToolChipState =
-  | { phase: "running"; brief: string }
-  | { phase: "ok"; brief: string; promptId: number }
-  | { phase: "fail"; brief: string; error: string };
-
 export function ChatPane({ session }: { session: Session }) {
   const messages = useMessages(session.id);
   const invalidate = useChatInvalidation();
-  const qc = useQueryClient();
   const [draft, setDraft] = useState("");
   const [pending, setPending] = useState(false);
   const [optimistic, setOptimistic] = useState<ChatMessage | null>(null);
   const [streaming, setStreaming] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const [toolChip, setToolChip] = useState<ToolChipState | null>(null);
   const [mention, setMention] = useState<MentionState | null>(null);
   const [highlightedIdx, setHighlightedIdx] = useState(0);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -79,7 +71,7 @@ export function ChatPane({ session }: { session: Session }) {
   const rows = messages.data ?? [];
   const hasAnySources = session.source_images.length > 0;
   const showOptimistic = optimistic && !rows.some((r) => r.id === optimistic.id);
-  const showStreamingThinking = pending && streaming.length === 0 && !toolChip;
+  const showStreamingThinking = pending && streaming.length === 0;
   const showStreamingBubble = pending && streaming.length > 0;
   const totalCount = rows.length + (showOptimistic ? 1 : 0);
 
@@ -88,7 +80,7 @@ export function ChatPane({ session }: { session: Session }) {
     if (el && typeof el.scrollTo === "function") {
       el.scrollTo({ top: el.scrollHeight });
     }
-  }, [rows.length, streaming, optimistic?.id, showStreamingThinking, toolChip]);
+  }, [rows.length, streaming, optimistic?.id, showStreamingThinking]);
 
   async function send() {
     const content = draft.trim();
@@ -104,7 +96,6 @@ export function ChatPane({ session }: { session: Session }) {
     setStreaming("");
     setDraft("");
     setError(null);
-    setToolChip(null);
     setPending(true);
     try {
       await streamChat(session.id, content, {
@@ -113,21 +104,6 @@ export function ChatPane({ session }: { session: Session }) {
           invalidate.messages(session.id);
         },
         onError: (detail) => setError(detail),
-        onToolCall: (_name, brief) => {
-          setToolChip({ phase: "running", brief });
-        },
-        onToolResult: (result) => {
-          if (result.ok) {
-            setToolChip((cur) =>
-              cur ? { phase: "ok", brief: cur.brief, promptId: result.promptId } : cur,
-            );
-            void qc.invalidateQueries({ queryKey: ["prompts", session.id] });
-          } else {
-            setToolChip((cur) =>
-              cur ? { phase: "fail", brief: cur.brief, error: result.error } : cur,
-            );
-          }
-        },
       });
     } catch (err) {
       setError(String(err));
@@ -135,8 +111,6 @@ export function ChatPane({ session }: { session: Session }) {
       setPending(false);
       setStreaming("");
       setOptimistic(null);
-      // Tool chip stays visible after the turn ends — it is part of the
-      // history of this in-session interaction. Cleared on the next send.
     }
   }
 
@@ -241,7 +215,6 @@ export function ChatPane({ session }: { session: Session }) {
           {showStreamingBubble && (
             <Bubble role="assistant" content={streaming} createdAt={Math.floor(Date.now() / 1000)} streaming />
           )}
-          {toolChip && <ToolChip state={toolChip} />}
           {showStreamingThinking && <ThinkingBubble />}
         </div>
         {error && <div className={styles.error} role="alert">{error}</div>}
@@ -360,40 +333,3 @@ function ThinkingBubble() {
   );
 }
 
-function ToolChip({ state }: { state: ToolChipState }) {
-  if (state.phase === "running") {
-    return (
-      <div
-        className={`${styles.toolChip} ${styles.toolChipRunning}`}
-        role="status"
-        aria-live="polite"
-      >
-        <Icon name="Sparkles" size={12} />
-        <span>Regenerating prompt…</span>
-        <span className={styles.toolChipBrief} title={state.brief}>
-          {state.brief}
-        </span>
-      </div>
-    );
-  }
-  if (state.phase === "ok") {
-    return (
-      <div className={`${styles.toolChip} ${styles.toolChipOk}`} role="status">
-        <Icon name="Check" size={12} />
-        <span>Prompt regenerated</span>
-        <span className={styles.toolChipBrief} title={state.brief}>
-          {state.brief}
-        </span>
-      </div>
-    );
-  }
-  return (
-    <div
-      className={`${styles.toolChip} ${styles.toolChipFail}`}
-      role="alert"
-    >
-      <Icon name="X" size={12} />
-      <span>Generation failed: {state.error}</span>
-    </div>
-  );
-}
