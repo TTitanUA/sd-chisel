@@ -5,6 +5,7 @@ import styles from "./SettingsLayout.module.css";
 
 const TABS = [
   { to: "/settings/lmstudio", label: "LMStudio", icon: "Server" as const },
+  { to: "/settings/comfyui", label: "ComfyUI", icon: "Workflow" as const },
   { to: "/settings/privacy", label: "Privacy", icon: "Shield" as const },
 ];
 

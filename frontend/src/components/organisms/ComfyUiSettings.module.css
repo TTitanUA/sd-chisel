@@ -1,0 +1,104 @@
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  max-width: 720px;
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.h {
+  font-size: var(--text-md);
+  font-weight: 600;
+}
+
+.sub {
+  color: var(--text-subtle);
+  font-size: var(--text-xs);
+}
+
+.urlField {
+  position: relative;
+}
+
+.urlDefault {
+  position: absolute;
+  top: 0;
+  right: 0;
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--text-subtle);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  line-height: 1;
+}
+
+.urlDefault:hover {
+  color: var(--accent);
+}
+
+.actionRow {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.checkResults {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.checkLine {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: var(--text-sm);
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--bg-raised);
+}
+
+.checkLine[data-tone="ok"] {
+  border-color: color-mix(in srgb, var(--success, #16a34a) 40%, var(--border));
+}
+
+.checkLine[data-tone="err"] {
+  border-color: color-mix(in srgb, var(--danger) 40%, var(--border));
+}
+
+.checkLineIcon {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.checkLine[data-tone="ok"] .checkLineIcon {
+  color: var(--success, #16a34a);
+}
+
+.checkLine[data-tone="err"] .checkLineIcon {
+  color: var(--danger);
+}
+
+.checkLineLabel {
+  font-weight: 500;
+}
+
+.checkLineDetail {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  font-family: var(--font-mono, monospace);
+  word-break: break-word;
+}
+
+.checkLineMeta {
+  color: var(--text-subtle);
+  font-size: var(--text-xs);
+}

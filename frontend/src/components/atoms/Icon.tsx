@@ -1,4 +1,5 @@
 import {
+  AlertCircle,
   BrushCleaning,
   Check,
   ChevronDown,
@@ -22,11 +23,13 @@ import {
   Sparkles,
   Star,
   Trash2,
+  Workflow,
   X,
   type LucideIcon,
 } from "lucide-react";
 
 const ICONS = {
+  AlertCircle,
   BrushCleaning,
   Check,
   ChevronDown,
@@ -50,6 +53,7 @@ const ICONS = {
   Sparkles,
   Star,
   Trash2,
+  Workflow,
   X,
 } as const satisfies Record<string, LucideIcon>;
 

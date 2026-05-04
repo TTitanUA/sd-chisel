@@ -8,6 +8,25 @@ export type LmStudioConfig = {
   updated_at: number;
 };
 
+export type ComfyUiConfig = {
+  base_url: string | null;
+  install_path: string | null;
+  api_key: string | null;
+  configured: boolean;
+  updated_at: number;
+};
+
+export type ComfyUiCheckField = {
+  ok: boolean;
+  detail: string | null;
+  info: Record<string, unknown> | null;
+};
+
+export type ComfyUiCheck = {
+  url: ComfyUiCheckField;
+  install_path: ComfyUiCheckField;
+};
+
 export type LmModel = {
   name: string;
   vision: boolean;
@@ -38,6 +57,7 @@ export type Action = keyof ActionDefaults;
 export const settingsKeys = {
   lmstudio: () => ["settings", "lmstudio"] as const,
   lmModels: () => ["settings", "lmstudio", "models"] as const,
+  comfyui: () => ["settings", "comfyui"] as const,
   privacy: () => ["settings", "privacy"] as const,
   actionDefaults: () => ["settings", "action-defaults"] as const,
 };
@@ -67,6 +87,15 @@ export const settingsApi = {
       method: "PATCH",
       body: JSON.stringify(patch),
     }),
+  getComfyUi: () => apiFetch<ComfyUiConfig>("/api/settings/comfyui"),
+  putComfyUi: (body: { base_url: string | null; install_path: string | null; api_key: string | null }) =>
+    apiFetch<ComfyUiConfig>("/api/settings/comfyui", {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+  checkComfyUi: () =>
+    apiFetch<ComfyUiCheck>("/api/settings/comfyui/check", { method: "POST" }),
+
   getPrivacy: () => apiFetch<Privacy>("/api/settings/privacy"),
   putPrivacy: (body: { show_hidden: boolean }) =>
     apiFetch<Privacy>("/api/settings/privacy", {
@@ -106,10 +135,26 @@ export function useSettingsInvalidation() {
     models: () => {
       void client.invalidateQueries({ queryKey: settingsKeys.lmModels() });
     },
+    comfyui: () => {
+      void client.invalidateQueries({ queryKey: settingsKeys.comfyui() });
+    },
     all: () => {
       void client.invalidateQueries({ queryKey: ["settings"] });
     },
   };
+}
+
+export function useComfyUiConfig() {
+  return useQuery({
+    queryKey: settingsKeys.comfyui(),
+    queryFn: settingsApi.getComfyUi,
+  });
+}
+
+export function useCheckComfyUi() {
+  return useMutation({
+    mutationFn: () => settingsApi.checkComfyUi(),
+  });
 }
 
 export function useRefreshLmStudio() {

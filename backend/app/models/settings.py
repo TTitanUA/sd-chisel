@@ -19,6 +19,32 @@ class LmStudioConfigOut(StrictModel):
     updated_at: int
 
 
+class ComfyUiConfig(StrictModel):
+    base_url: str | None = Field(default=None, max_length=500)
+    install_path: str | None = Field(default=None, max_length=1000)
+    api_key: str | None = Field(default=None, max_length=500)
+
+
+class ComfyUiConfigOut(StrictModel):
+    base_url: str | None
+    install_path: str | None
+    api_key: str | None
+    configured: bool
+    updated_at: int
+
+
+class ComfyUiCheckFieldOut(StrictModel):
+    """Per-field result from the connection check."""
+    ok: bool
+    detail: str | None = None  # error message when ok is false
+    info: dict | None = None   # success metadata (version, pack count)
+
+
+class ComfyUiCheckOut(StrictModel):
+    url: ComfyUiCheckFieldOut
+    install_path: ComfyUiCheckFieldOut
+
+
 class LmModelOut(StrictModel):
     name: str
     vision: bool

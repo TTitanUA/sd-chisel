@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 import sqlite3
-from typing import Annotated
+from pathlib import Path
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
@@ -9,6 +11,10 @@ from app.api.deps import get_conn
 from app.models.settings import (
     ActionDefaultsOut,
     ActionDefaultsPatch,
+    ComfyUiCheckFieldOut,
+    ComfyUiCheckOut,
+    ComfyUiConfig,
+    ComfyUiConfigOut,
     LmModelOut,
     LmModelPatch,
     LmModelsOut,
@@ -17,7 +23,7 @@ from app.models.settings import (
     PrivacyOut,
     PrivacyPatch,
 )
-from app.services import action_settings, lmstudio_client
+from app.services import action_settings, comfy_client, lmstudio_client
 from app.storage import settings_repo
 
 Conn = Annotated[sqlite3.Connection, Depends(get_conn)]
@@ -112,6 +118,99 @@ def patch_lm_model(name: str, body: LmModelPatch, conn: Conn) -> dict:
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"unknown model: {name}")
     return row
+
+
+def _to_comfy_out(row: dict) -> dict:
+    return {
+        "base_url": row["comfyui_url"],
+        "install_path": row["comfyui_path"],
+        "api_key": row["comfyui_api_key"],
+        "configured": bool(row["comfyui_url"]) and bool(row["comfyui_path"]),
+        "updated_at": row["updated_at"],
+    }
+
+
+def _comfy_endpoint_from_row(row: dict) -> dict:
+    return {
+        "server_root": row["comfyui_url"],
+        "api_key": row["comfyui_api_key"],
+    }
+
+
+@router.get("/api/settings/comfyui", response_model=ComfyUiConfigOut)
+def get_comfyui(conn: Conn) -> dict:
+    return _to_comfy_out(settings_repo.get_comfyui(conn))
+
+
+@router.put("/api/settings/comfyui", response_model=ComfyUiConfigOut)
+def put_comfyui(body: ComfyUiConfig, conn: Conn) -> dict:
+    return _to_comfy_out(
+        settings_repo.set_comfyui(
+            conn,
+            url=body.base_url,
+            install_path=body.install_path,
+            api_key=body.api_key,
+        ),
+    )
+
+
+def _check_comfy_url(row: dict) -> dict[str, Any]:
+    if not row.get("comfyui_url"):
+        return {"ok": False, "detail": "URL is not set", "info": None}
+    try:
+        stats = comfy_client.system_stats(endpoint=_comfy_endpoint_from_row(row))
+    except comfy_client.ComfyError as exc:
+        return {"ok": False, "detail": str(exc), "info": None}
+    return {
+        "ok": True,
+        "detail": None,
+        "info": {
+            "comfyui_version": stats.comfyui_version,
+            "python_version": stats.python_version,
+            "os": stats.os,
+        },
+    }
+
+
+def _check_comfy_path(row: dict) -> dict[str, Any]:
+    raw = row.get("comfyui_path")
+    if not raw:
+        return {"ok": False, "detail": "Path is not set", "info": None}
+    p = Path(raw)
+    if not p.exists():
+        return {"ok": False, "detail": "Path does not exist", "info": None}
+    if not p.is_dir():
+        return {"ok": False, "detail": "Path is not a directory", "info": None}
+    custom_nodes = p / "custom_nodes"
+    if not custom_nodes.is_dir():
+        return {
+            "ok": False,
+            "detail": "No 'custom_nodes/' subdirectory — is this really the ComfyUI install root?",
+            "info": None,
+        }
+    pack_count = sum(
+        1 for child in custom_nodes.iterdir()
+        if child.is_dir() and not child.name.startswith((".", "__"))
+    )
+    return {
+        "ok": True,
+        "detail": None,
+        "info": {"pack_count": pack_count},
+    }
+
+
+@router.post("/api/settings/comfyui/check", response_model=ComfyUiCheckOut)
+async def check_comfyui(conn: Conn) -> dict:
+    row = settings_repo.get_comfyui(conn)
+    # Run both checks concurrently — they're independent and the URL
+    # one does network I/O while the path one hits the filesystem.
+    url_task = asyncio.to_thread(_check_comfy_url, row)
+    path_task = asyncio.to_thread(_check_comfy_path, row)
+    url_result, path_result = await asyncio.gather(url_task, path_task)
+    return {
+        "url": ComfyUiCheckFieldOut(**url_result).model_dump(),
+        "install_path": ComfyUiCheckFieldOut(**path_result).model_dump(),
+    }
 
 
 @router.get("/api/settings/privacy", response_model=PrivacyOut)

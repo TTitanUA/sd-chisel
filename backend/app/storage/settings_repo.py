@@ -63,6 +63,36 @@ def set_lmstudio(
     return get_lmstudio(conn)
 
 
+def get_comfyui(conn: sqlite3.Connection) -> dict[str, Any]:
+    row = conn.execute(
+        "SELECT comfyui_url, comfyui_path, comfyui_api_key, updated_at "
+        "FROM app_settings WHERE id = 1",
+    ).fetchone()
+    return dict(row) if row is not None else {
+        "comfyui_url": None,
+        "comfyui_path": None,
+        "comfyui_api_key": None,
+        "updated_at": 0,
+    }
+
+
+def set_comfyui(
+    conn: sqlite3.Connection,
+    *,
+    url: str | None,
+    install_path: str | None,
+    api_key: str | None,
+) -> dict[str, Any]:
+    now = _now()
+    path_clean = (install_path or "").strip() or None
+    conn.execute(
+        "UPDATE app_settings SET comfyui_url = ?, comfyui_path = ?, "
+        "comfyui_api_key = ?, updated_at = ? WHERE id = 1",
+        (_normalize_url(url), path_clean, (api_key or None), now),
+    )
+    return get_comfyui(conn)
+
+
 def get_privacy(conn: sqlite3.Connection) -> dict[str, Any]:
     row = conn.execute(
         "SELECT show_hidden, updated_at FROM app_settings WHERE id = 1",

@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 
 from app.api.deps import get_conn
 from app.main import app
-from app.services import lmstudio_client
+from app.services import comfy_client, lmstudio_client
 from app.storage import db as db_mod
 from app.storage.migrations import apply_pending
 
@@ -221,3 +221,128 @@ def test_put_action_defaults_rejects_out_of_range(client):
     )
     assert res.status_code == 400
     assert "temperature" in res.json()["detail"]
+
+
+# --- ComfyUI settings ---
+
+def test_get_comfyui_returns_blank_by_default(client):
+    body = client.get("/api/settings/comfyui").json()
+    assert body == {
+        "base_url": None,
+        "install_path": None,
+        "api_key": None,
+        "configured": False,
+        "updated_at": body["updated_at"],
+    }
+
+
+def test_put_comfyui_persists_and_normalises_url(client, tmp_path):
+    install = tmp_path / "ComfyUI"
+    (install / "custom_nodes").mkdir(parents=True)
+    resp = client.put(
+        "/api/settings/comfyui",
+        json={
+            "base_url": "http://127.0.0.1:8188/",
+            "install_path": str(install),
+            "api_key": "secret",
+        },
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["base_url"] == "http://127.0.0.1:8188"  # trailing slash stripped
+    assert body["install_path"] == str(install)
+    assert body["api_key"] == "secret"
+    assert body["configured"] is True
+
+    again = client.get("/api/settings/comfyui").json()
+    assert again["base_url"] == "http://127.0.0.1:8188"
+    assert again["install_path"] == str(install)
+
+
+def test_put_comfyui_configured_requires_both_fields(client):
+    body = client.put(
+        "/api/settings/comfyui",
+        json={"base_url": "http://h", "install_path": None, "api_key": None},
+    ).json()
+    assert body["configured"] is False  # path missing
+
+
+def test_check_comfyui_reports_per_field_results(client, tmp_path, monkeypatch):
+    install = tmp_path / "ComfyUI"
+    (install / "custom_nodes").mkdir(parents=True)
+    (install / "custom_nodes" / "rgthree-comfy").mkdir()
+    (install / "custom_nodes" / ".disabled").mkdir()  # ignored prefix
+    (install / "custom_nodes" / "__pycache__").mkdir()  # ignored prefix
+    (install / "custom_nodes" / "stub.py").write_text("# loose file")  # not a dir
+
+    client.put(
+        "/api/settings/comfyui",
+        json={
+            "base_url": "http://h",
+            "install_path": str(install),
+            "api_key": None,
+        },
+    )
+
+    captured: dict[str, Any] = {}
+
+    def fake_stats(*, endpoint, transport=None):
+        captured["endpoint"] = endpoint
+        return comfy_client.ComfySystemStats(
+            comfyui_version="1.4.2", python_version="3.11.7", os="nt",
+        )
+
+    monkeypatch.setattr(comfy_client, "system_stats", fake_stats)
+
+    body = client.post("/api/settings/comfyui/check").json()
+    assert body["url"]["ok"] is True
+    assert body["url"]["info"]["comfyui_version"] == "1.4.2"
+    assert body["install_path"]["ok"] is True
+    assert body["install_path"]["info"]["pack_count"] == 1
+    assert captured["endpoint"] == {"server_root": "http://h", "api_key": None}
+
+
+def test_check_comfyui_reports_url_failure(client, tmp_path, monkeypatch):
+    install = tmp_path / "ComfyUI"
+    (install / "custom_nodes").mkdir(parents=True)
+    client.put(
+        "/api/settings/comfyui",
+        json={"base_url": "http://h", "install_path": str(install), "api_key": None},
+    )
+
+    def fake(*, endpoint, transport=None):
+        raise comfy_client.ComfyError("upstream", "503: busy")
+
+    monkeypatch.setattr(comfy_client, "system_stats", fake)
+    body = client.post("/api/settings/comfyui/check").json()
+    assert body["url"]["ok"] is False
+    assert "503" in body["url"]["detail"]
+    assert body["install_path"]["ok"] is True
+
+
+def test_check_comfyui_reports_path_failure(client, tmp_path, monkeypatch):
+    # Path exists but lacks a custom_nodes/ subdir.
+    install = tmp_path / "wrongdir"
+    install.mkdir()
+    client.put(
+        "/api/settings/comfyui",
+        json={"base_url": "http://h", "install_path": str(install), "api_key": None},
+    )
+    monkeypatch.setattr(
+        comfy_client, "system_stats",
+        lambda **_: comfy_client.ComfySystemStats(
+            comfyui_version="x", python_version="y", os="z",
+        ),
+    )
+    body = client.post("/api/settings/comfyui/check").json()
+    assert body["install_path"]["ok"] is False
+    assert "custom_nodes" in body["install_path"]["detail"]
+
+
+def test_check_comfyui_reports_unset_fields(client):
+    # No PUT first — both fields blank.
+    body = client.post("/api/settings/comfyui/check").json()
+    assert body["url"]["ok"] is False
+    assert body["url"]["detail"] == "URL is not set"
+    assert body["install_path"]["ok"] is False
+    assert body["install_path"]["detail"] == "Path is not set"
