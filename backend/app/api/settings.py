@@ -104,7 +104,7 @@ def list_lm_models(conn: Conn) -> dict:
     return {"models": settings_repo.list_lm_models(conn)}
 
 
-@router.patch("/api/settings/lmstudio/models/{name}", response_model=LmModelOut)
+@router.patch("/api/settings/lmstudio/models/{name:path}", response_model=LmModelOut)
 def patch_lm_model(name: str, body: LmModelPatch, conn: Conn) -> dict:
     fields = [body.vision, body.tool_use, body.reasoning, body.enabled, body.favorite, body.hidden]
     if all(v is None for v in fields):

@@ -122,6 +122,23 @@ def test_patch_lm_model_capabilities(client, monkeypatch):
     assert body["tool_use"] is False
 
 
+def test_patch_lm_model_accepts_encoded_slash_in_name(client, monkeypatch):
+    name = "google/gemma-4-26b-a4b"
+    client.put("/api/settings/lmstudio", json={"base_url": "http://h", "api_key": None})
+    monkeypatch.setattr(lmstudio_client, "list_models", lambda **_: [_fake_model(name)])
+    client.post("/api/settings/lmstudio/refresh")
+
+    resp = client.patch(
+        "/api/settings/lmstudio/models/google%2Fgemma-4-26b-a4b",
+        json={"favorite": True},
+    )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["name"] == name
+    assert body["favorite"] is True
+
+
 def test_patch_lm_model_404_for_unknown(client):
     resp = client.patch("/api/settings/lmstudio/models/ghost", json={"enabled": False})
     assert resp.status_code == 404
