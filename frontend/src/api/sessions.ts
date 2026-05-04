@@ -12,7 +12,7 @@ export type Project = {
 
 export type PinnedLora = { lora_name: string; weight_override: number | null };
 
-export type SessionType = "i2i" | "t2i";
+export type SessionType = "i2i" | "t2i" | "comfy";
 
 export type SourceImage = {
   id: string;
@@ -49,6 +49,7 @@ export type Session = {
   chat_settings?: SamplingBundle | null;
   summarize_settings?: SamplingBundle | null;
   generate_settings?: SamplingBundle | null;
+  comfy_workflow_id?: string | null;
   hidden: boolean;
   created_at: number;
   updated_at: number;
@@ -59,6 +60,7 @@ export type SessionCreate = {
   name?: string | null;
   model_name?: string | null;
   use_negative?: boolean;
+  comfy_workflow_id?: string | null;
 };
 
 export type SessionUpdate = {

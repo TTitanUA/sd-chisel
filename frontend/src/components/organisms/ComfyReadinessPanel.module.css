@@ -1,0 +1,147 @@
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 24px;
+  max-width: 880px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.headBody {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.subtitle {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-subtle);
+}
+
+.gateBanner {
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm, 6px);
+  padding: 10px 14px;
+  font-size: 13px;
+  background: var(--bg-raised);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.gateBanner[data-tone="ready"] {
+  border-color: color-mix(in srgb, var(--success, #16a34a) 40%, var(--border));
+  color: var(--success, #16a34a);
+}
+
+.gateBanner[data-tone="error"] {
+  border-color: color-mix(in srgb, var(--danger) 40%, var(--border));
+  color: var(--danger);
+}
+
+.cards {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.card {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px 16px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+}
+
+.card[data-status="ready"] {
+  border-color: color-mix(in srgb, var(--success, #16a34a) 35%, var(--border));
+}
+.card[data-status="not_installed"] {
+  border-color: color-mix(in srgb, var(--danger) 30%, var(--border));
+}
+
+.cardTitleRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.cardTitle {
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.cardClassType {
+  color: var(--text-subtle);
+  font-size: 11px;
+  font-family: var(--font-mono, monospace);
+}
+
+.cardMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  color: var(--text-subtle);
+  font-size: 11px;
+  font-family: var(--font-mono, monospace);
+}
+
+.cardDescription {
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+  grid-column: 1 / -1;
+}
+
+.cardActions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.badge {
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 600;
+}
+
+.badge[data-status="ready"] {
+  background: color-mix(in srgb, var(--success, #16a34a) 15%, transparent);
+  color: var(--success, #16a34a);
+}
+.badge[data-status="needs_config"] {
+  background: color-mix(in srgb, var(--accent, #d97706) 15%, transparent);
+  color: var(--accent, #d97706);
+}
+.badge[data-status="not_installed"] {
+  background: color-mix(in srgb, var(--danger) 15%, transparent);
+  color: var(--danger);
+}
+
+.empty {
+  color: var(--text-subtle);
+  font-style: italic;
+  font-size: 13px;
+}

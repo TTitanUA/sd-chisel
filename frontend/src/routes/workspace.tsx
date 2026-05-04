@@ -5,6 +5,7 @@ import { Badge } from "@/components/atoms/Badge";
 import { Button } from "@/components/atoms/Button";
 import { Icon } from "@/components/atoms/Icon";
 import { ChatPane } from "@/components/molecules/ChatPane";
+import { ComfyReadinessPanel } from "@/components/organisms/ComfyReadinessPanel";
 import { PromptPane } from "@/components/organisms/PromptPane";
 import { SessionSettingsDrawer } from "@/components/organisms/SessionSettingsDrawer";
 import { SourceImagesPane } from "@/components/organisms/SourceImagesPane";
@@ -41,6 +42,8 @@ export default function WorkspaceRoute() {
   const s = session.data;
   const project = (projects.data ?? []).find((p) => p.id === projectId);
 
+  const isComfy = s.session_type === "comfy";
+
   return (
     <>
       <header className={styles.header}>
@@ -52,31 +55,39 @@ export default function WorkspaceRoute() {
         <div className={styles.spacer} />
         <div className={styles.actions}>
           <Badge variant="accent">{s.session_type}</Badge>
-          {s.model_name && <Badge>{s.model_name}</Badge>}
-          {s.use_negative && <Badge>neg · on</Badge>}
-          {s.pinned_loras.length > 0 && (
+          {!isComfy && s.model_name && <Badge>{s.model_name}</Badge>}
+          {!isComfy && s.use_negative && <Badge>neg · on</Badge>}
+          {!isComfy && s.pinned_loras.length > 0 && (
             <Badge variant="accent">{s.pinned_loras.length} pinned</Badge>
           )}
-          <Button
-            size="sm"
-            icon={<Icon name="Settings" size={12} />}
-            onClick={() => setDrawerOpen(true)}
-          >
-            Session settings
-          </Button>
+          {!isComfy && (
+            <Button
+              size="sm"
+              icon={<Icon name="Settings" size={12} />}
+              onClick={() => setDrawerOpen(true)}
+            >
+              Session settings
+            </Button>
+          )}
         </div>
       </header>
-      <div className={styles.grid}>
-        <SourceImagesPane session={s} />
-        <ChatPane session={s} />
-        <PromptPane session={s} />
-      </div>
-      <SessionSettingsDrawer
-        key={s.id}
-        session={s}
-        open={drawerOpen}
-        onOpenChange={setDrawerOpen}
-      />
+      {isComfy ? (
+        <ComfyReadinessPanel sessionId={s.id} />
+      ) : (
+        <div className={styles.grid}>
+          <SourceImagesPane session={s} />
+          <ChatPane session={s} />
+          <PromptPane session={s} />
+        </div>
+      )}
+      {!isComfy && (
+        <SessionSettingsDrawer
+          key={s.id}
+          session={s}
+          open={drawerOpen}
+          onOpenChange={setDrawerOpen}
+        />
+      )}
     </>
   );
 }

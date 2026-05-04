@@ -32,8 +32,100 @@
 
 .types {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
+}
+
+.workflowSection {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-raised, var(--bg));
+}
+
+.workflowSectionTitle {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-subtle);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.workflowList {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+.workflowRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  font-size: 13px;
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
+  color: inherit;
+}
+
+.workflowRow:hover {
+  border-color: var(--border-strong, var(--border));
+}
+
+.workflowRowActive {
+  border-color: var(--accent, currentColor);
+  background: var(--surface-active, var(--bg));
+}
+
+.workflowRowName {
+  flex: 1;
+  font-weight: 500;
+}
+
+.workflowRowMeta {
+  color: var(--text-subtle);
+  font-size: 11px;
+  font-family: var(--font-mono, monospace);
+}
+
+.workflowEmpty {
+  color: var(--text-subtle);
+  font-size: 12px;
+  font-style: italic;
+}
+
+.uploadDivider {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-subtle);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.uploadDivider::before,
+.uploadDivider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
+.uploadJson {
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  min-height: 90px;
+  resize: vertical;
 }
 
 .typeCard {
