@@ -7,6 +7,8 @@ and the catalog browse endpoints.
 from __future__ import annotations
 
 import sqlite3
+from dataclasses import asdict
+from pathlib import Path
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
@@ -14,13 +16,16 @@ from fastapi.responses import JSONResponse
 
 from app.api.deps import get_conn
 from app.models.comfy import (
+    ReadinessOut,
     WorkflowConflict,
     WorkflowList,
     WorkflowOut,
     WorkflowSummary,
     WorkflowUpload,
 )
+from app.services import comfy_client, comfy_readiness
 from app.storage import comfy_workflow_repo as repo
+from app.storage import session_repo, settings_repo
 
 Conn = Annotated[sqlite3.Connection, Depends(get_conn)]
 
@@ -93,6 +98,75 @@ def get_workflow(workflow_id: str, conn: Conn) -> dict:
     if row is None:
         raise HTTPException(status_code=404, detail="workflow not found")
     return _to_out(row)
+
+
+@router.get(
+    "/api/comfy/sessions/{session_id}/readiness",
+    response_model=ReadinessOut,
+)
+def get_session_readiness(session_id: str, conn: Conn) -> dict:
+    session = session_repo.get_session(conn, session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="session not found")
+    if session.get("session_type") != "comfy":
+        raise HTTPException(
+            status_code=409,
+            detail="session is not a comfy session",
+        )
+    workflow_id = session.get("comfy_workflow_id")
+    if not workflow_id:
+        raise HTTPException(
+            status_code=409,
+            detail="comfy session is not bound to a workflow",
+        )
+    workflow = repo.get_workflow(conn, workflow_id)
+    if workflow is None:
+        raise HTTPException(
+            status_code=409,
+            detail=f"bound workflow not found: {workflow_id}",
+        )
+
+    settings = settings_repo.get_comfyui(conn)
+    comfyui_url = settings.get("comfyui_url")
+    comfyui_path = settings.get("comfyui_path")
+    if not comfyui_url:
+        return {
+            "session_id": session_id,
+            "workflow_id": workflow_id,
+            "ready": False,
+            "cards": [],
+            "error": "ComfyUI URL is not configured (Settings → ComfyUI)",
+        }
+
+    endpoint = {
+        "server_root": comfyui_url,
+        "api_key": settings.get("comfyui_api_key"),
+    }
+    try:
+        object_info = comfy_client.object_info(endpoint=endpoint)
+    except comfy_client.ComfyError as exc:
+        return {
+            "session_id": session_id,
+            "workflow_id": workflow_id,
+            "ready": False,
+            "cards": [],
+            "error": str(exc),
+        }
+
+    path_obj = Path(comfyui_path) if comfyui_path else None
+    all_ready, cards = comfy_readiness.compute_readiness(
+        conn=conn,
+        graph=workflow["graph"],
+        object_info=object_info,
+        comfyui_path=path_obj,
+    )
+    return {
+        "session_id": session_id,
+        "workflow_id": workflow_id,
+        "ready": all_ready,
+        "cards": [asdict(c) for c in cards],
+        "error": None,
+    }
 
 
 @router.delete("/api/comfy/workflows/{workflow_id}")

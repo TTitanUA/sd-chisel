@@ -54,21 +54,7 @@ def system_stats(
     transport: httpx.BaseTransport | None = None,
 ) -> ComfySystemStats:
     """GET /api/system_stats — used by the settings connection check."""
-    server_root, headers = _resolve(endpoint)
-    url = f"{server_root}/api/system_stats"
-    try:
-        with httpx.Client(transport=transport, timeout=DEFAULT_TIMEOUT) as client:
-            resp = client.get(url, headers=headers)
-    except httpx.TimeoutException as exc:
-        raise ComfyError("timeout", str(exc)) from exc
-    except httpx.HTTPError as exc:
-        raise ComfyError("upstream", str(exc)) from exc
-    if resp.status_code >= 400:
-        raise ComfyError("upstream", f"{resp.status_code}: {resp.text[:200]}")
-    try:
-        body = resp.json()
-    except ValueError as exc:
-        raise ComfyError("shape", f"invalid JSON: {exc}") from exc
+    body = _get_json(endpoint, "/api/system_stats", transport)
     system = body.get("system") if isinstance(body, dict) else None
     if not isinstance(system, dict):
         raise ComfyError("shape", "missing 'system' object in response")
@@ -77,6 +63,53 @@ def system_stats(
         python_version=_str_or_none(system.get("python_version")),
         os=_str_or_none(system.get("os")),
     )
+
+
+# Larger timeout — object_info on a heavily-loaded ComfyUI can take a
+# few seconds (a couple of thousand class_types serialised).
+OBJECT_INFO_TIMEOUT = httpx.Timeout(30.0, connect=5.0)
+
+
+def object_info(
+    *,
+    endpoint: dict[str, Any],
+    transport: httpx.BaseTransport | None = None,
+) -> dict[str, Any]:
+    """GET /api/object_info — full per-class_type schema dictionary.
+
+    The response is a dict keyed by class_type. Each value carries
+    ``input``, ``output``, ``python_module``, ``display_name``,
+    ``description``, ``category`` and other fields (see ComfyUI source
+    for the full shape). Phase 1 uses ``python_module`` to map nodes to
+    packs and the rest as the raw schema for the catalog.
+    """
+    body = _get_json(endpoint, "/api/object_info", transport, OBJECT_INFO_TIMEOUT)
+    if not isinstance(body, dict):
+        raise ComfyError("shape", "object_info response is not a JSON object")
+    return body
+
+
+def _get_json(
+    endpoint: dict[str, Any],
+    path: str,
+    transport: httpx.BaseTransport | None,
+    timeout: httpx.Timeout = DEFAULT_TIMEOUT,
+) -> Any:
+    server_root, headers = _resolve(endpoint)
+    url = f"{server_root}{path}"
+    try:
+        with httpx.Client(transport=transport, timeout=timeout) as client:
+            resp = client.get(url, headers=headers)
+    except httpx.TimeoutException as exc:
+        raise ComfyError("timeout", str(exc)) from exc
+    except httpx.HTTPError as exc:
+        raise ComfyError("upstream", str(exc)) from exc
+    if resp.status_code >= 400:
+        raise ComfyError("upstream", f"{resp.status_code}: {resp.text[:200]}")
+    try:
+        return resp.json()
+    except ValueError as exc:
+        raise ComfyError("shape", f"invalid JSON: {exc}") from exc
 
 
 def _str_or_none(v: Any) -> str | None:
