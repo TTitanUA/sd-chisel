@@ -1,0 +1,320 @@
+.page {
+  display: grid;
+  grid-template-columns: 320px 1fr;
+  gap: 0;
+  height: 100%;
+  min-height: 0;
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--border);
+  min-height: 0;
+}
+
+.listHead {
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.search {
+  width: 100%;
+}
+
+.filterRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chip {
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 11px;
+  background: var(--bg);
+  color: var(--text-muted);
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.chipActive {
+  border-color: var(--accent, currentColor);
+  color: var(--accent, currentColor);
+}
+
+.scroll {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.section {
+  padding: 6px 0;
+}
+
+.sectionTitle {
+  padding: 4px 14px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-subtle);
+  background: var(--bg-raised);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border: none;
+  background: var(--bg);
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+  border-bottom: 1px solid var(--border);
+}
+
+.row:hover {
+  background: var(--bg-raised);
+}
+
+.rowActive {
+  background: var(--surface-active, var(--bg-raised));
+  border-left: 2px solid var(--accent, currentColor);
+  padding-left: 12px;
+}
+
+.rowMain {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.rowName {
+  font-weight: 500;
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rowMeta {
+  font-size: 11px;
+  color: var(--text-subtle);
+  font-family: var(--font-mono, monospace);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rowKindBadge {
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  font-weight: 600;
+  background: color-mix(in srgb, var(--accent, currentColor) 15%, transparent);
+  color: var(--accent, currentColor);
+}
+
+.rowKindBadge[data-kind="node"] {
+  background: color-mix(in srgb, var(--text-muted) 12%, transparent);
+  color: var(--text-muted);
+}
+
+.empty {
+  padding: 16px;
+  color: var(--text-subtle);
+  font-size: 13px;
+  font-style: italic;
+}
+
+.detail {
+  padding: 24px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-width: 920px;
+}
+
+.detailHead {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.detailTitle {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.detailMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  color: var(--text-subtle);
+  font-size: 12px;
+  font-family: var(--font-mono, monospace);
+}
+
+.detailDescription {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+.detailSection {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 12px 14px;
+  background: var(--bg-raised);
+}
+
+.detailSectionTitle {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-subtle);
+}
+
+.inputsTable {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 4px 12px;
+  font-size: 12px;
+}
+
+.inputsHead {
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-subtle);
+  font-weight: 600;
+}
+
+.inputsName {
+  font-family: var(--font-mono, monospace);
+}
+
+.rawSchema {
+  margin: 0;
+  padding: 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 320px;
+  overflow: auto;
+}
+
+.actionRow {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.editorButtons {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.overrideBadge {
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 10px;
+  background: color-mix(in srgb, var(--accent, #d97706) 15%, transparent);
+  color: var(--accent, #d97706);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.error {
+  color: var(--danger);
+  font-size: 12px;
+}
+
+.markdownBlock {
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.detailEmpty {
+  padding: 48px 24px;
+  color: var(--text-subtle);
+  font-size: 13px;
+  text-align: center;
+}
+
+.subNodes {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.subNodeRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  font-size: 12px;
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
+  color: inherit;
+}
+
+.subNodeRow:hover {
+  border-color: var(--border-strong, var(--border));
+}
+
+.semanticEditor {
+  display: grid;
+  grid-template-columns: minmax(140px, 1fr) minmax(160px, 1fr) 2fr;
+  gap: 6px 10px;
+  align-items: center;
+  font-size: 12px;
+}
+
+.semanticEditorHead {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-subtle);
+}
+
+.semanticEditor select,
+.semanticEditor input {
+  width: 100%;
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--bg);
+  font: inherit;
+  color: inherit;
+}

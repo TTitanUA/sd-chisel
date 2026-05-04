@@ -74,3 +74,83 @@ class ReadinessOut(StrictModel):
     """Set when the URL check failed entirely (e.g. ComfyUI down). When
     non-null, ``cards`` is empty and the UI shows a single error
     state."""
+
+
+# --- catalog (Library → Comfy Nodes) ------------------------------------
+
+
+class PackOut(StrictModel):
+    name: str
+    display_name: str
+    description: str | None
+    version: str | None
+    repo_url: str | None
+    publisher_id: str | None
+    dir_path: str | None
+    node_count: int
+    imported_at: int
+
+
+class PackDetailOut(StrictModel):
+    name: str
+    display_name: str
+    description: str | None
+    version: str | None
+    repo_url: str | None
+    publisher_id: str | None
+    dir_path: str | None
+    readme_md: str | None
+    nodes: list["NodeListItemOut"]
+    imported_at: int
+
+
+class NodeListItemOut(StrictModel):
+    """Compact summary used by the library list and pack detail."""
+    class_type: str
+    pack_name: str
+    display_name: str
+    category: str | None
+    description_md: str
+    has_override: bool
+    requires_semantic_config: bool
+    imported_at: int
+
+
+class NodeInputSemantic(StrictModel):
+    name: str
+    role_hint: str | None = None
+    notes: str | None = None
+
+
+class NodeOut(StrictModel):
+    class_type: str
+    pack_name: str
+    display_name: str
+    category: str | None
+    description_md: str
+    inputs_raw: dict | list
+    outputs_raw: list
+    inputs_semantic: list[NodeInputSemantic]
+    requires_semantic_config: bool
+    has_override: bool
+    override_updated_at: int | None
+    imported_at: int
+    last_seen_in_object_info_at: int
+
+
+class NodeUpdate(StrictModel):
+    """All fields are optional. Distinct from absent: passing ``null``
+    explicitly clears that override; omitting the field keeps the
+    existing value. The API layer uses ``model_fields_set`` to tell
+    them apart."""
+    description_md: str | None = None
+    inputs_semantic: list[NodeInputSemantic] | None = None
+    category: str | None = None
+
+
+class PackList(StrictModel):
+    packs: list[PackOut]
+
+
+class NodeList(StrictModel):
+    nodes: list[NodeListItemOut]

@@ -16,6 +16,11 @@ from fastapi.responses import JSONResponse
 
 from app.api.deps import get_conn
 from app.models.comfy import (
+    NodeList,
+    NodeOut,
+    NodeUpdate,
+    PackDetailOut,
+    PackList,
     ReadinessOut,
     WorkflowConflict,
     WorkflowList,
@@ -24,7 +29,7 @@ from app.models.comfy import (
     WorkflowUpload,
 )
 from app.services import comfy_client, comfy_readiness
-from app.storage import comfy_workflow_repo as repo
+from app.storage import comfy_catalog_repo, comfy_workflow_repo as repo
 from app.storage import session_repo, settings_repo
 
 Conn = Annotated[sqlite3.Connection, Depends(get_conn)]
@@ -181,3 +186,99 @@ def delete_workflow(workflow_id: str, conn: Conn) -> Response:
             detail="workflow is in use by one or more sessions",
         ) from exc
     return Response(status_code=204)
+
+
+# --- catalog (Library → Comfy Nodes) ----------------------------------
+
+
+def _node_summary(row: dict) -> dict:
+    return {
+        "class_type": row["class_type"],
+        "pack_name": row["pack_name"],
+        "display_name": row["display_name"],
+        "category": row["category"],
+        "description_md": row["description_md"],
+        "has_override": row["has_override"],
+        "requires_semantic_config": row["requires_semantic_config"],
+        "imported_at": row["imported_at"],
+    }
+
+
+def _pack_summary(row: dict) -> dict:
+    return {
+        "name": row["name"],
+        "display_name": row["display_name"],
+        "description": row["description"],
+        "version": row["version"],
+        "repo_url": row["repo_url"],
+        "publisher_id": row["publisher_id"],
+        "dir_path": row["dir_path"],
+        "node_count": row["node_count"],
+        "imported_at": row["imported_at"],
+    }
+
+
+@router.get("/api/comfy/packs", response_model=PackList)
+def list_packs(conn: Conn) -> dict:
+    return {"packs": [_pack_summary(p) for p in comfy_catalog_repo.list_packs(conn)]}
+
+
+@router.get("/api/comfy/packs/{name}", response_model=PackDetailOut)
+def get_pack(name: str, conn: Conn) -> dict:
+    pack = comfy_catalog_repo.get_pack(conn, name)
+    if pack is None:
+        raise HTTPException(status_code=404, detail="pack not found")
+    nodes = comfy_catalog_repo.list_nodes(conn, pack=name)
+    return {**pack, "nodes": [_node_summary(n) for n in nodes]}
+
+
+@router.get("/api/comfy/nodes", response_model=NodeList)
+def list_nodes(
+    conn: Conn,
+    q: Annotated[str | None, Query(description="Substring match on class_type, display_name, description")] = None,
+    pack: Annotated[str | None, Query(description="Filter by pack name")] = None,
+    has_description: Annotated[
+        bool | None,
+        Query(description="Only nodes with (true) or without (false) a description"),
+    ] = None,
+) -> dict:
+    rows = comfy_catalog_repo.list_nodes(
+        conn, q=q, pack=pack, has_description=has_description,
+    )
+    return {"nodes": [_node_summary(r) for r in rows]}
+
+
+@router.get("/api/comfy/nodes/{class_type}", response_model=NodeOut)
+def get_node(class_type: str, conn: Conn) -> dict:
+    row = comfy_catalog_repo.get_node(conn, class_type)
+    if row is None:
+        raise HTTPException(status_code=404, detail="node not found")
+    return row
+
+
+@router.put("/api/comfy/nodes/{class_type}", response_model=NodeOut)
+def update_node(class_type: str, body: NodeUpdate, conn: Conn) -> dict:
+    sent = body.model_fields_set
+    kwargs: dict[str, object] = {}
+    if "description_md" in sent:
+        kwargs["description_md"] = body.description_md
+    if "inputs_semantic" in sent:
+        kwargs["inputs_semantic"] = (
+            None
+            if body.inputs_semantic is None
+            else [item.model_dump() for item in body.inputs_semantic]
+        )
+    if "category" in sent:
+        kwargs["category"] = body.category
+
+    if not kwargs:
+        # Nothing to update — just return current state.
+        row = comfy_catalog_repo.get_node(conn, class_type)
+        if row is None:
+            raise HTTPException(status_code=404, detail="node not found")
+        return row
+
+    row = comfy_catalog_repo.set_override(conn, class_type=class_type, **kwargs)
+    if row is None:
+        raise HTTPException(status_code=404, detail="node not found")
+    return row

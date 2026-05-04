@@ -11,6 +11,7 @@ import NewSessionRoute from "./routes/newSession";
 import FamiliesRoute from "./routes/library/families";
 import ModelsRoute from "./routes/library/models";
 import LorasRoute from "./routes/library/loras";
+import ComfyNodesRoute from "./routes/library/comfyNodes";
 import LmStudioRoute from "./routes/settings/lmstudio";
 import ComfyUiRoute from "./routes/settings/comfyui";
 import PrivacyRoute from "./routes/settings/privacy";
@@ -81,6 +82,14 @@ export function App() {
               element={
                 <LibraryLayout>
                   <LorasRoute />
+                </LibraryLayout>
+              }
+            />
+            <Route
+              path="/library/comfy-nodes/*"
+              element={
+                <LibraryLayout>
+                  <ComfyNodesRoute />
                 </LibraryLayout>
               }
             />
