@@ -206,7 +206,7 @@ def test_get_action_defaults_returns_empty_bundles_initially(client):
     # comfy_import — sane baseline that survives reasoning models that
     # otherwise eat the entire token budget on <think> blocks.
     assert body["comfy_import"]["temperature"] == 0.1
-    assert body["comfy_import"]["max_tokens"] == 2000
+    assert body["comfy_import"]["max_tokens"] == 6000
 
 
 def test_user_override_replaces_builtin_for_comfy_import(client):
@@ -231,7 +231,7 @@ def test_clearing_comfy_import_falls_back_to_builtin(client):
     # Cleared overrides resolve to the builtin baseline rather than
     # leaving the action with nothing.
     assert cleared["comfy_import"]["temperature"] == 0.1
-    assert cleared["comfy_import"]["max_tokens"] == 2000
+    assert cleared["comfy_import"]["max_tokens"] == 6000
 
 
 def test_put_action_defaults_persists_partial_update(client):
@@ -247,7 +247,7 @@ def test_put_action_defaults_persists_partial_update(client):
     assert body["analyze"] == {}
     assert body["summarize"] == {}
     assert body["generate"] == {}
-    assert body["comfy_import"]["max_tokens"] == 2000
+    assert body["comfy_import"]["max_tokens"] == 6000
 
     # GET reflects the same state.
     again = client.get("/api/settings/action-defaults").json()

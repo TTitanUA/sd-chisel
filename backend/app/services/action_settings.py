@@ -151,7 +151,9 @@ SESSION_SCOPED_ACTIONS: tuple[Action, ...] = (
 # <think> blocks). The other four happily run on the model's native
 # sampling, so we leave them empty.
 BUILTIN_DEFAULTS: dict[Action, dict[str, Any]] = {
-    "comfy_import": {"temperature": 0.1, "max_tokens": 2000},
+    # max_tokens generous enough that reasoning-distilled models can
+    # burn a chunk on <think> and still emit the full JSON answer.
+    "comfy_import": {"temperature": 0.1, "max_tokens": 6000},
 }
 
 
