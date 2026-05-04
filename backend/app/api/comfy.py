@@ -97,6 +97,13 @@ def get_workflow(workflow_id: str, conn: Conn) -> dict:
 
 @router.delete("/api/comfy/workflows/{workflow_id}")
 def delete_workflow(workflow_id: str, conn: Conn) -> Response:
-    if not repo.delete_workflow(conn, workflow_id):
+    if repo.get_workflow(conn, workflow_id) is None:
         raise HTTPException(status_code=404, detail="workflow not found")
+    try:
+        repo.delete_workflow(conn, workflow_id)
+    except sqlite3.IntegrityError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail="workflow is in use by one or more sessions",
+        ) from exc
     return Response(status_code=204)

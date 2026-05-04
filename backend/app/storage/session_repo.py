@@ -142,15 +142,17 @@ def create_session(
     name: str | None = None,
     model_name: str | None = None,
     use_negative: bool = True,
+    comfy_workflow_id: str | None = None,
 ) -> dict[str, Any]:
     now = _now()
     sid = new_id()
     conn.execute(
         "INSERT INTO sessions(id, project_id, name, session_type, model_name, "
-        "use_negative, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        "use_negative, comfy_workflow_id, created_at, updated_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             sid, project_id, name, session_type, model_name,
-            1 if use_negative else 0, now, now,
+            1 if use_negative else 0, comfy_workflow_id, now, now,
         ),
     )
     conn.execute(

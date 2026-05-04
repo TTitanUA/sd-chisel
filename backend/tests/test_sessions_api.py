@@ -207,3 +207,137 @@ def test_session_type_is_immutable_via_patch(client):
         },
     )
     assert resp.status_code == 422
+
+
+# --- comfy session creation ---
+
+_SAMPLE_GRAPH = {
+    "3": {"class_type": "KSampler", "inputs": {"seed": 0}},
+    "4": {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": "x"}},
+}
+
+
+def _make_workflow(client, name="W"):
+    return client.post(
+        "/api/comfy/workflows",
+        json={"name": name, "graph": _SAMPLE_GRAPH},
+    ).json()
+
+
+def test_create_comfy_session_binds_workflow(client):
+    pid = client.post("/api/projects", json={"name": "P"}).json()["id"]
+    wf = _make_workflow(client)
+    resp = client.post(
+        f"/api/projects/{pid}/sessions",
+        json={
+            "session_type": "comfy",
+            "name": "render",
+            "model_name": None,
+            "use_negative": True,
+            "comfy_workflow_id": wf["id"],
+        },
+    )
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    assert body["session_type"] == "comfy"
+    assert body["comfy_workflow_id"] == wf["id"]
+
+
+def test_comfy_session_requires_workflow_id(client):
+    pid = client.post("/api/projects", json={"name": "P"}).json()["id"]
+    resp = client.post(
+        f"/api/projects/{pid}/sessions",
+        json={
+            "session_type": "comfy",
+            "name": "x",
+            "model_name": None,
+            "use_negative": True,
+        },
+    )
+    assert resp.status_code == 422
+    assert "comfy_workflow_id" in resp.json()["detail"]
+
+
+def test_comfy_session_rejects_unknown_workflow_id(client):
+    pid = client.post("/api/projects", json={"name": "P"}).json()["id"]
+    resp = client.post(
+        f"/api/projects/{pid}/sessions",
+        json={
+            "session_type": "comfy",
+            "name": "x",
+            "model_name": None,
+            "use_negative": True,
+            "comfy_workflow_id": "deadbeef00",
+        },
+    )
+    assert resp.status_code == 422
+    assert "not found" in resp.json()["detail"]
+
+
+def test_non_comfy_session_rejects_workflow_id(client):
+    pid = client.post("/api/projects", json={"name": "P"}).json()["id"]
+    wf = _make_workflow(client)
+    resp = client.post(
+        f"/api/projects/{pid}/sessions",
+        json={
+            "session_type": "i2i",
+            "name": "x",
+            "model_name": None,
+            "use_negative": True,
+            "comfy_workflow_id": wf["id"],
+        },
+    )
+    assert resp.status_code == 422
+
+
+def test_delete_workflow_in_use_returns_409(client):
+    pid = client.post("/api/projects", json={"name": "P"}).json()["id"]
+    wf = _make_workflow(client)
+    client.post(
+        f"/api/projects/{pid}/sessions",
+        json={
+            "session_type": "comfy",
+            "name": "x",
+            "model_name": None,
+            "use_negative": True,
+            "comfy_workflow_id": wf["id"],
+        },
+    )
+    resp = client.delete(f"/api/comfy/workflows/{wf['id']}")
+    assert resp.status_code == 409
+    assert "in use" in resp.json()["detail"]
+
+
+def test_delete_workflow_after_session_gone_succeeds(client):
+    pid = client.post("/api/projects", json={"name": "P"}).json()["id"]
+    wf = _make_workflow(client)
+    sid = client.post(
+        f"/api/projects/{pid}/sessions",
+        json={
+            "session_type": "comfy",
+            "name": "x",
+            "model_name": None,
+            "use_negative": True,
+            "comfy_workflow_id": wf["id"],
+        },
+    ).json()["id"]
+    assert client.delete(f"/api/sessions/{sid}").status_code == 204
+    assert client.delete(f"/api/comfy/workflows/{wf['id']}").status_code == 204
+
+
+def test_session_type_constraint_no_longer_rejects_comfy_at_db_level(client):
+    """Migration 013 relaxed the CHECK to include 'comfy'; smoke-test
+    that the schema actually allows it (the API validation wraps the
+    other direction)."""
+    pid = client.post("/api/projects", json={"name": "P"}).json()["id"]
+    wf = _make_workflow(client)
+    resp = client.post(
+        f"/api/projects/{pid}/sessions",
+        json={
+            "session_type": "comfy",
+            "comfy_workflow_id": wf["id"],
+            "model_name": None,
+            "use_negative": True,
+        },
+    )
+    assert resp.status_code == 201

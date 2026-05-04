@@ -19,7 +19,13 @@ from app.models.session import (
     SourceImageOut,
 )
 from app.services import action_settings, lmstudio_client
-from app.storage import images, session_repo, settings_repo, source_image_repo
+from app.storage import (
+    comfy_workflow_repo,
+    images,
+    session_repo,
+    settings_repo,
+    source_image_repo,
+)
 from app.utils.ids import new_id
 
 Conn = Annotated[sqlite3.Connection, Depends(get_conn)]
@@ -74,6 +80,7 @@ def _session_to_api_dict(conn: sqlite3.Connection, row: dict) -> dict:
         "chat_settings": row.get("chat_settings"),
         "summarize_settings": row.get("summarize_settings"),
         "generate_settings": row.get("generate_settings"),
+        "comfy_workflow_id": row.get("comfy_workflow_id"),
         "hidden": bool(row.get("hidden", False)),
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
@@ -155,6 +162,27 @@ def list_sessions(project_id: str, conn: Conn):
 def create_session(project_id: str, body: SessionCreate, conn: Conn):
     if session_repo.get_project(conn, project_id) is None:
         raise HTTPException(status_code=409, detail=f"unknown project: {project_id}")
+
+    # session_type='comfy' must come with a valid comfy_workflow_id;
+    # other session types must omit it.
+    if body.session_type == "comfy":
+        if not body.comfy_workflow_id:
+            raise HTTPException(
+                status_code=422,
+                detail="comfy_workflow_id is required for session_type='comfy'",
+            )
+        if comfy_workflow_repo.get_workflow(conn, body.comfy_workflow_id) is None:
+            raise HTTPException(
+                status_code=422,
+                detail=f"comfy workflow not found: {body.comfy_workflow_id}",
+            )
+    else:
+        if body.comfy_workflow_id is not None:
+            raise HTTPException(
+                status_code=422,
+                detail=f"comfy_workflow_id is only valid for session_type='comfy'",
+            )
+
     try:
         row = session_repo.create_session(
             conn,
@@ -163,6 +191,7 @@ def create_session(project_id: str, body: SessionCreate, conn: Conn):
             name=body.name,
             model_name=body.model_name,
             use_negative=body.use_negative,
+            comfy_workflow_id=body.comfy_workflow_id,
         )
     except sqlite3.IntegrityError as exc:
         raise _conflict(exc) from exc

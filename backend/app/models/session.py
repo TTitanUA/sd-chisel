@@ -4,7 +4,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-SessionType = Literal["i2i", "t2i"]
+SessionType = Literal["i2i", "t2i", "comfy"]
 
 
 class StrictModel(BaseModel):
@@ -67,6 +67,7 @@ class SessionOut(StrictModel):
     chat_settings: dict | None = None
     summarize_settings: dict | None = None
     generate_settings: dict | None = None
+    comfy_workflow_id: str | None = None
     hidden: bool = False
     created_at: int
     updated_at: int
@@ -85,6 +86,9 @@ class SessionCreate(StrictModel):
     name: str | None = Field(default=None, max_length=160)
     model_name: str | None = None
     use_negative: bool = True
+    # Required when session_type == 'comfy'; must be omitted otherwise.
+    # API enforces both directions.
+    comfy_workflow_id: str | None = None
 
 
 class SessionUpdate(StrictModel):
