@@ -115,6 +115,14 @@ applies them to an empty or existing DB.
   - `vl_model_name` and `prompt_model_name` — *names* of the LMStudio
     models picked for the VL call and for the prompt-writer call. Base URL
     and API key are global (see §3.3).
+  - `analyze_settings`, `chat_settings`, `summarize_settings`,
+    `generate_settings` — per-action sampling-bundle JSON columns
+    (nullable). Each holds an open-ended object whose keys are a subset
+    of `temperature`, `top_p`, `top_k`, `max_tokens`,
+    `presence_penalty`, `frequency_penalty`, `repeat_penalty`, `seed`.
+    A NULL column means "inherit the entire app default" for that
+    action; a non-NULL column inherits only the keys it does not
+    specify (per-key fallback). See §4.4.
   - `result_image_path` — relative path to the rendered result binary
     (placeholder for step 6).
 - **`session_source_images`** — child rows under a session (`ON DELETE
@@ -162,6 +170,11 @@ applies them to an empty or existing DB.
   - `lmstudio_url`, `lmstudio_api_key` — the global LMStudio endpoint.
   - `show_hidden` — UI flag: whether to show hidden items across all
     lists.
+  - `default_analyze_settings`, `default_chat_settings`,
+    `default_summarize_settings`, `default_generate_settings` —
+    app-wide default sampling bundles per action (JSON, nullable).
+    Used as the live fallback for any session column left as
+    inherit; see §4.4.
 - **`lm_models`** — a cache of models known to LMStudio. Populated via a
   manual refresh from the UI:
   - `enabled` — hides the model from per-session dropdowns without
@@ -437,7 +450,38 @@ It returns `GeneratedPrompt`:
   are resolved in favor of the LoRA (trigger words win over general rules)
   — this is stated inside the prompt_guide itself.
 
-### 4.4. Library assistants
+### 4.4. Per-action sampling settings
+
+Every LLM action the user can trigger — `analyze` (VL captioning),
+`chat`, `summarize`, `generate` — has its own configurable bundle of
+OpenAI-compatible sampling parameters (`temperature`, `top_p`,
+`top_k`, `max_tokens`, `presence_penalty`, `frequency_penalty`,
+`repeat_penalty`, `seed`). The schema is intentionally open-ended so
+adding a new key is a UI-only change.
+
+Two layers of storage:
+
+- **App-wide defaults** in `app_settings.default_<action>_settings`
+  (JSON, nullable). Edited from the LMStudio settings page. Empty
+  means "let the model decide".
+- **Per-session overrides** in `sessions.<action>_settings` (JSON,
+  nullable). Edited from a gear button placed next to each
+  action trigger (Send in chat, Analyze in the source-image modal,
+  Summarize and Generate in the generate modal).
+
+Resolution at request time: per-key merge — the session value wins
+when present, otherwise the matching key from the app default is used.
+A NULL session column means "inherit the full default bundle"; a
+non-NULL session column inherits only the keys it does not specify.
+The merged bundle is appended to the LMStudio chat-completions
+payload. With both bundles empty no sampling keys are sent (matches
+the historical behavior).
+
+The same `generate` bundle is applied to both internal LLM calls in
+the prompt orchestrator (intent extraction and composition) — they
+share one tunable.
+
+### 4.5. Library assistants
 
 Help populate the library without manual copy-paste. They run as background
 tasks (see §5.4) with live status streamed over SSE.
@@ -520,6 +564,15 @@ Prefix is `/api/`. Endpoints are grouped by domain.
   partial updates of model flags (`enabled`, `favorite`, `hidden`,
   manual capability overrides).
 - **Settings / Privacy:** read/write `show_hidden`.
+- **Settings / Action defaults:** `GET /api/settings/action-defaults`
+  returns the current four bundles (analyze, chat, summarize, generate).
+  `PUT` accepts a partial body — only fields the client sends are
+  persisted; passing an empty object clears all overrides for that
+  action. Validation rejects unknown keys and out-of-range values with
+  400. Per-session bundles are accepted on the regular session PATCH
+  as optional fields (`analyze_settings`, `chat_settings`,
+  `summarize_settings`, `generate_settings`); `null` clears the
+  per-session override for that action.
 - **Tasks:** `GET /api/tasks` (snapshot of all known tasks),
   `GET /api/tasks/stream` (SSE with deltas for creation / progress /
   completion).
@@ -678,6 +731,12 @@ through TanStack Query hooks in `src/api/`.
   Assistant messages render as Markdown (GFM: headings, lists, tables,
   inline / fenced code, blockquotes); user messages are rendered as plain
   text so `@Image_N` and similar literals stay verbatim.
+  A small **gear button** sits next to the Send button (chat) and next
+  to the Analyze button in the per-image analyze modal; the Generate
+  modal carries two gears in its header (one for Summarize, one for
+  Generate). Each opens an `ActionSettingsModal` over the current
+  session, where the user toggles Inherit / Override per sampling key
+  with inline help text and a doc link. See §4.4.
 - **New session** (`/projects/:p/sessions/new`) — a small form: pick
   the session type (i2i / t2i radio cards) and an optional name.
   Submitting POSTs to the sessions endpoint and navigates to the new
@@ -692,7 +751,11 @@ through TanStack Query hooks in `src/api/`.
   embedded live indicator for the corresponding task.
 - **Settings / LMStudio** (`/settings/lmstudio`) — URL/API key config,
   Refresh, Unload all, an `lm_models` table with `enabled`, `favorite`,
-  `hidden` toggles and manual capability overrides.
+  `hidden` toggles and manual capability overrides. Also hosts the
+  app-wide **default sampling per action** rows: one row per action
+  (analyze, chat, summarize, generate) with a gear button that opens
+  the same `ActionSettingsModal` used by the action triggers (see
+  §4.4).
 - **Settings / Privacy** (`/settings/privacy`) — the `show_hidden`
   toggle.
 - **SessionSettingsDrawer** — picks `model`, multi-checkbox/tag selector

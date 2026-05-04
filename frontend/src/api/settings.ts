@@ -24,10 +24,22 @@ export type Privacy = {
   updated_at: number;
 };
 
+export type SamplingBundle = Record<string, number>;
+
+export type ActionDefaults = {
+  analyze: SamplingBundle;
+  chat: SamplingBundle;
+  summarize: SamplingBundle;
+  generate: SamplingBundle;
+};
+
+export type Action = keyof ActionDefaults;
+
 export const settingsKeys = {
   lmstudio: () => ["settings", "lmstudio"] as const,
   lmModels: () => ["settings", "lmstudio", "models"] as const,
   privacy: () => ["settings", "privacy"] as const,
+  actionDefaults: () => ["settings", "action-defaults"] as const,
 };
 
 export const settingsApi = {
@@ -58,6 +70,14 @@ export const settingsApi = {
   getPrivacy: () => apiFetch<Privacy>("/api/settings/privacy"),
   putPrivacy: (body: { show_hidden: boolean }) =>
     apiFetch<Privacy>("/api/settings/privacy", {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+  getActionDefaults: () => apiFetch<ActionDefaults>("/api/settings/action-defaults"),
+  putActionDefaults: (
+    body: Partial<Record<Action, SamplingBundle>>,
+  ) =>
+    apiFetch<ActionDefaults>("/api/settings/action-defaults", {
       method: "PUT",
       body: JSON.stringify(body),
     }),
@@ -145,4 +165,22 @@ export function useLmModelsForChat() {
     ...all,
     data: (all.data ?? []).filter((m) => m.enabled),
   };
+}
+
+export function useActionDefaults() {
+  return useQuery({
+    queryKey: settingsKeys.actionDefaults(),
+    queryFn: settingsApi.getActionDefaults,
+  });
+}
+
+export function useUpdateActionDefaults() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (body: Partial<Record<Action, SamplingBundle>>) =>
+      settingsApi.putActionDefaults(body),
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: settingsKeys.actionDefaults() });
+    },
+  });
 }

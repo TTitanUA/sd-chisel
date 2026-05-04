@@ -13,6 +13,7 @@ import time
 from collections.abc import Iterable
 from typing import Any
 
+from app.services import action_settings as action_settings_svc
 from app.utils.ids import new_id
 
 
@@ -122,6 +123,9 @@ def _session_row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
     d = dict(row)
     d["use_negative"] = bool(d["use_negative"])
     d["hidden"] = bool(d.get("hidden", 0))
+    for a in action_settings_svc.ACTIONS:
+        col = f"{a}_settings"
+        d[col] = action_settings_svc.decode_bundle(d.get(col))
     return d
 
 
@@ -165,16 +169,42 @@ def update_session(
     use_negative: bool,
     vl_model_name: str | None = None,
     prompt_model_name: str | None = None,
+    action_bundles: dict[str, dict[str, Any] | None] | None = None,
 ) -> dict[str, Any] | None:
+    """Update mutable session fields.
+
+    ``action_bundles`` is a partial map of action -> validated bundle dict
+    (or ``None`` to clear the per-session override entirely). Actions
+    absent from the map are left untouched. The bundle dict itself is
+    expected to already be validated by ``action_settings.parse_bundle``.
+    """
     now = _now()
+    sets = [
+        "name = ?", "model_name = ?", "use_negative = ?",
+        "vl_model_name = ?", "prompt_model_name = ?",
+    ]
+    params: list[Any] = [
+        name, model_name, 1 if use_negative else 0,
+        vl_model_name, prompt_model_name,
+    ]
+    if action_bundles:
+        for action, bundle in action_bundles.items():
+            if action not in action_settings_svc.ACTIONS:
+                raise ValueError(f"unknown action: {action!r}")
+            col = f"{action}_settings"
+            sets.append(f"{col} = ?")
+            if bundle is None:
+                params.append(None)
+            else:
+                # bundle is expected to be already-validated; encoding is
+                # tolerant of {} -> NULL ("no overrides, but row exists").
+                params.append(action_settings_svc.encode_bundle(bundle))
+    sets.append("updated_at = ?")
+    params.append(now)
+    params.append(session_id)
     cur = conn.execute(
-        "UPDATE sessions SET name = ?, model_name = ?, use_negative = ?, "
-        "vl_model_name = ?, prompt_model_name = ?, updated_at = ? "
-        "WHERE id = ?",
-        (
-            name, model_name, 1 if use_negative else 0,
-            vl_model_name, prompt_model_name, now, session_id,
-        ),
+        f"UPDATE sessions SET {', '.join(sets)} WHERE id = ?",
+        params,
     )
     if cur.rowcount == 0:
         return None

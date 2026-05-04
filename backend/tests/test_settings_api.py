@@ -173,3 +173,51 @@ def test_refresh_updates_capabilities_preserves_enabled(client, monkeypatch):
     [m] = body["models"]
     assert m["vision"] is True   # updated from API
     assert m["enabled"] is False  # preserved
+
+
+# --- action defaults ---
+
+def test_get_action_defaults_returns_empty_bundles_initially(client):
+    body = client.get("/api/settings/action-defaults").json()
+    assert body == {"analyze": {}, "chat": {}, "summarize": {}, "generate": {}}
+
+
+def test_put_action_defaults_persists_partial_update(client):
+    res = client.put(
+        "/api/settings/action-defaults",
+        json={"chat": {"temperature": 0.9, "top_p": 0.85}},
+    )
+    assert res.status_code == 200
+    body = res.json()
+    assert body["chat"] == {"temperature": 0.9, "top_p": 0.85}
+    # Untouched actions stay empty.
+    assert body["analyze"] == {} and body["summarize"] == {} and body["generate"] == {}
+
+    # GET reflects the same state.
+    again = client.get("/api/settings/action-defaults").json()
+    assert again == body
+
+
+def test_put_action_defaults_clears_with_empty_object(client):
+    client.put("/api/settings/action-defaults", json={"chat": {"temperature": 0.5}})
+    res = client.put("/api/settings/action-defaults", json={"chat": {}})
+    assert res.status_code == 200
+    assert res.json()["chat"] == {}
+
+
+def test_put_action_defaults_rejects_unknown_key(client):
+    res = client.put(
+        "/api/settings/action-defaults",
+        json={"chat": {"foobar": 1}},
+    )
+    assert res.status_code == 400
+    assert "foobar" in res.json()["detail"]
+
+
+def test_put_action_defaults_rejects_out_of_range(client):
+    res = client.put(
+        "/api/settings/action-defaults",
+        json={"chat": {"temperature": 5.0}},
+    )
+    assert res.status_code == 400
+    assert "temperature" in res.json()["detail"]

@@ -10,7 +10,7 @@ from starlette.responses import StreamingResponse
 
 from app.api.deps import get_conn
 from app.models.chat import ChatRequest, MessageOut, MessagesResponse
-from app.services import llm_log, lmstudio_client
+from app.services import action_settings, llm_log, lmstudio_client
 from app.storage import db as db_mod
 from app.storage import session_repo, settings_repo, source_image_repo
 
@@ -235,6 +235,7 @@ def chat(session_id: str, body: ChatRequest, conn: Conn) -> Response:
     if not cfg["lmstudio_url"]:
         raise HTTPException(status_code=409, detail="LMStudio base_url is not configured")
     model = _validated_prompt_model_name(conn, session_row.get("prompt_model_name"))
+    sampling = action_settings.resolve_for_session(conn, session_row, "chat")
 
     # Edit branch: replace an existing user turn and drop everything after
     # it before assembling the payload. The edited row IS the user turn —
@@ -296,6 +297,7 @@ def chat(session_id: str, body: ChatRequest, conn: Conn) -> Response:
             try:
                 for chunk in lmstudio_client.chat_stream(
                     endpoint=endpoint, model=model, messages=payload_messages,
+                    sampling=sampling,
                 ):
                     accumulated.append(chunk)
                     yield _sse({"type": "delta", "content": chunk})

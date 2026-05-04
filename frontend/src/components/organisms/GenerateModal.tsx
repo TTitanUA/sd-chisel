@@ -10,6 +10,7 @@ import {
 } from "@/api/prompts";
 import type { Session } from "@/api/sessions";
 import { useIsReindexing } from "@/api/tasks";
+import { ActionSettingsButton } from "@/components/molecules/ActionSettingsButton";
 import styles from "./GenerateModal.module.css";
 
 type Phase = "summarizing" | "reviewing" | "generating";
@@ -104,6 +105,19 @@ export function GenerateModal({
             <Dialog.Title className={styles.title}>
               Generate prompt
             </Dialog.Title>
+            <div style={{ flex: 1 }} />
+            <ActionSettingsButton
+              action="summarize"
+              session={session}
+              disabled={phase !== "reviewing"}
+              title="Summarize sampling settings"
+            />
+            <ActionSettingsButton
+              action="generate"
+              session={session}
+              disabled={phase !== "reviewing"}
+              title="Generate sampling settings"
+            />
             <Dialog.Close asChild>
               <button
                 type="button"

@@ -58,7 +58,7 @@ def session_id(conn) -> str:
 
 def _fake_lm_responses(intent_payload: str, composition_payload: str):
     calls = {"i": 0}
-    def fake(*, endpoint, model, messages, response_format=None, transport=None):
+    def fake(*, endpoint, model, messages, response_format=None, sampling=None, transport=None):
         calls["i"] += 1
         if calls["i"] == 1:
             return intent_payload
@@ -110,7 +110,7 @@ def test_generate_with_brief_replaces_chat_history(conn, session_id, monkeypatch
     )
     captured: list[list[dict]] = []
 
-    def fake_complete(*, endpoint, model, messages, response_format=None, transport=None):
+    def fake_complete(*, endpoint, model, messages, response_format=None, sampling=None, transport=None):
         captured.append(messages)
         if len(captured) == 1:
             return json.dumps({"intents": [{"kind": "style", "query": "noir"}]})
@@ -257,7 +257,7 @@ def test_generate_includes_reference_summaries_in_composition(
     )
     captured: dict = {"calls": []}
 
-    def fake_complete(*, endpoint, model, messages, response_format=None, transport=None):
+    def fake_complete(*, endpoint, model, messages, response_format=None, sampling=None, transport=None):
         captured["calls"].append(messages)
         if len(captured["calls"]) == 1:
             return json.dumps({"intents": [{"kind": "k", "query": "q"}]})
@@ -316,7 +316,7 @@ def test_generate_excludes_hidden_loras_when_show_hidden_off(
     )
     captured: dict = {"calls": []}
 
-    def fake_complete(*, endpoint, model, messages, response_format=None, transport=None):
+    def fake_complete(*, endpoint, model, messages, response_format=None, sampling=None, transport=None):
         captured["calls"].append(messages)
         if len(captured["calls"]) == 1:
             return json.dumps({"intents": [{"kind": "k", "query": "q"}]})
@@ -357,7 +357,7 @@ def test_generate_includes_hidden_loras_when_show_hidden_on(
     )
     captured: dict = {"calls": []}
 
-    def fake_complete(*, endpoint, model, messages, response_format=None, transport=None):
+    def fake_complete(*, endpoint, model, messages, response_format=None, sampling=None, transport=None):
         captured["calls"].append(messages)
         if len(captured["calls"]) == 1:
             return json.dumps({"intents": [{"kind": "k", "query": "q"}]})
@@ -389,7 +389,7 @@ def test_generate_persists_pinned_loras_into_candidates(conn, session_id, monkey
     )
     captured: dict = {}
 
-    def fake_complete(*, endpoint, model, messages, response_format=None, transport=None):
+    def fake_complete(*, endpoint, model, messages, response_format=None, sampling=None, transport=None):
         captured.setdefault("calls", []).append(messages)
         if len(captured["calls"]) == 1:
             return json.dumps({"intents": [{"kind": "k", "query": "q"}]})
@@ -417,7 +417,7 @@ def test_generate_does_not_pass_response_format(conn, session_id, monkeypatch):
         lambda text: [0.001] * 1024,
     )
     captured: list = []
-    def fake_complete(*, endpoint, model, messages, response_format=None, transport=None):
+    def fake_complete(*, endpoint, model, messages, response_format=None, sampling=None, transport=None):
         captured.append(response_format)
         if len(captured) == 1:
             return json.dumps({"intents": [{"kind": "k", "query": "q"}]})
@@ -486,7 +486,7 @@ def test_generate_t2i_with_zero_sources(conn, session_id, monkeypatch):
     )
     captured: dict = {"calls": []}
 
-    def fake(*, endpoint, model, messages, response_format=None, transport=None):
+    def fake(*, endpoint, model, messages, response_format=None, sampling=None, transport=None):
         captured["calls"].append(messages)
         if len(captured["calls"]) == 1:
             return json.dumps({"intents": [{"kind": "k", "query": "q"}]})
@@ -521,7 +521,7 @@ def test_generate_t2i_appends_family_prompt_t2i_to_composition_system(
     )
     captured: dict = {"calls": []}
 
-    def fake_complete(*, endpoint, model, messages, response_format=None, transport=None):
+    def fake_complete(*, endpoint, model, messages, response_format=None, sampling=None, transport=None):
         captured["calls"].append(messages)
         if len(captured["calls"]) == 1:
             return json.dumps({"intents": [{"kind": "k", "query": "q"}]})
@@ -570,7 +570,7 @@ def test_generate_appends_family_prompt_i2i_to_composition_system(
     )
     captured: dict = {"calls": []}
 
-    def fake_complete(*, endpoint, model, messages, response_format=None, transport=None):
+    def fake_complete(*, endpoint, model, messages, response_format=None, sampling=None, transport=None):
         captured["calls"].append(messages)
         if len(captured["calls"]) == 1:
             return json.dumps({"intents": [{"kind": "k", "query": "q"}]})

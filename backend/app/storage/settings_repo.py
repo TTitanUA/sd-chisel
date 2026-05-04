@@ -5,6 +5,8 @@ import sqlite3
 import time
 from typing import Any
 
+from app.services import action_settings as action_settings_svc
+
 
 def _now() -> int:
     return int(time.time())
@@ -78,6 +80,71 @@ def set_privacy(
         (1 if show_hidden else 0, _now()),
     )
     return get_privacy(conn)
+
+
+# --- per-action default sampling bundles ----------------------------------
+
+
+def _column_for(action: str) -> str:
+    if action not in action_settings_svc.ACTIONS:
+        raise ValueError(f"unknown action: {action!r}")
+    return f"default_{action}_settings"
+
+
+def get_default_bundles(conn: sqlite3.Connection) -> dict[str, dict[str, Any]]:
+    """Return all four default bundles, decoded. Missing/NULL columns map to {}."""
+    cols = ", ".join(f"default_{a}_settings" for a in action_settings_svc.ACTIONS)
+    row = conn.execute(
+        f"SELECT {cols} FROM app_settings WHERE id = 1",
+    ).fetchone()
+    out: dict[str, dict[str, Any]] = {}
+    for a in action_settings_svc.ACTIONS:
+        raw = row[f"default_{a}_settings"] if row is not None else None
+        decoded = action_settings_svc.decode_bundle(raw)
+        out[a] = decoded if decoded is not None else {}
+    return out
+
+
+def get_default_bundle(
+    conn: sqlite3.Connection, action: str,
+) -> dict[str, Any]:
+    """Return the default bundle for a single action (empty dict if unset)."""
+    col = _column_for(action)
+    row = conn.execute(
+        f"SELECT {col} FROM app_settings WHERE id = 1",
+    ).fetchone()
+    raw = row[col] if row is not None else None
+    decoded = action_settings_svc.decode_bundle(raw)
+    return decoded if decoded is not None else {}
+
+
+def set_default_bundles(
+    conn: sqlite3.Connection,
+    *,
+    bundles: dict[str, dict[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    """Update one or more action default bundles. Each value is validated.
+
+    Pass ``{}`` for an action to clear all overrides for that action.
+    Actions absent from ``bundles`` are left untouched.
+    """
+    sets: list[str] = []
+    params: list[Any] = []
+    for action, bundle in bundles.items():
+        col = _column_for(action)
+        validated = action_settings_svc.parse_bundle(bundle)
+        encoded = action_settings_svc.encode_bundle(validated)
+        sets.append(f"{col} = ?")
+        params.append(encoded)
+    if sets:
+        sets.append("updated_at = ?")
+        params.append(_now())
+        params.append(1)
+        conn.execute(
+            f"UPDATE app_settings SET {', '.join(sets)} WHERE id = ?",
+            params,
+        )
+    return get_default_bundles(conn)
 
 
 # --- lm_models ------------------------------------------------------------

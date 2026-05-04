@@ -18,7 +18,7 @@ from app.models.session import (
     SessionUpdate,
     SourceImageOut,
 )
-from app.services import lmstudio_client
+from app.services import action_settings, lmstudio_client
 from app.storage import images, session_repo, settings_repo, source_image_repo
 from app.utils.ids import new_id
 
@@ -70,6 +70,10 @@ def _session_to_api_dict(conn: sqlite3.Connection, row: dict) -> dict:
         "source_images": [_source_image_to_api_dict(s) for s in sources],
         "vl_model_name": row.get("vl_model_name"),
         "prompt_model_name": row.get("prompt_model_name"),
+        "analyze_settings": row.get("analyze_settings"),
+        "chat_settings": row.get("chat_settings"),
+        "summarize_settings": row.get("summarize_settings"),
+        "generate_settings": row.get("generate_settings"),
         "hidden": bool(row.get("hidden", False)),
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
@@ -172,6 +176,26 @@ def get_session(session_id: str, conn: Conn):
 
 @router.patch("/api/sessions/{session_id}", response_model=SessionOut)
 def update_session(session_id: str, body: SessionUpdate, conn: Conn):
+    # Build the partial action_bundles map from fields the client sent.
+    # Pydantic's ``model_fields_set`` distinguishes "absent" (leave alone)
+    # from "null" (clear the override).
+    sent = body.model_fields_set
+    action_bundles: dict[str, dict | None] = {}
+    for action in action_settings.ACTIONS:
+        field = f"{action}_settings"
+        if field not in sent:
+            continue
+        raw = getattr(body, field)
+        if raw is None or raw == {}:
+            action_bundles[action] = None
+        else:
+            try:
+                action_bundles[action] = action_settings.parse_bundle(raw)
+            except action_settings.ActionSettingsError as exc:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"{field}: {exc}",
+                ) from exc
     row = session_repo.update_session(
         conn,
         session_id,
@@ -180,6 +204,7 @@ def update_session(session_id: str, body: SessionUpdate, conn: Conn):
         use_negative=body.use_negative,
         vl_model_name=body.vl_model_name,
         prompt_model_name=body.prompt_model_name,
+        action_bundles=action_bundles or None,
     )
     if row is None:
         raise _not_found("session", session_id)
@@ -394,6 +419,7 @@ def analyze_source_image(
     content_type = _content_type_from_ext(image_path.suffix.lower())
     image_bytes = image_path.read_bytes()
 
+    sampling = action_settings.resolve_for_session(conn, session_row, "analyze")
     try:
         summary = lmstudio_client.analyze_image(
             endpoint={
@@ -404,6 +430,7 @@ def analyze_source_image(
             image_bytes=image_bytes,
             content_type=content_type,
             refining_prompt=body.refining_prompt,
+            sampling=sampling,
         )
     except lmstudio_client.LmError as exc:
         if exc.kind == "timeout":

@@ -1,0 +1,229 @@
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: var(--bg-overlay);
+  z-index: 30;
+}
+
+.panel {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 31;
+  width: min(560px, 96vw);
+  max-height: 86vh;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-lg);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.title {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--text);
+}
+
+.subTitle {
+  font-size: var(--text-xs);
+  color: var(--text-subtle);
+}
+
+.body {
+  flex: 1;
+  overflow: auto;
+  padding: 12px 18px;
+  display: flex;
+  flex-direction: column;
+}
+
+.intro {
+  font-size: var(--text-xs);
+  color: var(--text-subtle);
+  line-height: 1.5;
+  margin: 0 0 14px 0;
+}
+
+.field {
+  border-top: 1px solid var(--border);
+  padding: 12px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.field:first-of-type {
+  border-top: 0;
+  padding-top: 4px;
+}
+
+.fieldHead {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.label {
+  font-size: var(--text-sm);
+  color: var(--text);
+  flex: 1;
+}
+
+.helpBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-subtle);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0;
+  line-height: 1;
+}
+
+.helpBtn:hover { color: var(--text); border-color: var(--text-subtle); }
+
+.fieldRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.modeToggle {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.modeToggle button {
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  padding: 4px 10px;
+  cursor: pointer;
+}
+
+.modeToggle button[aria-pressed="true"] {
+  background: var(--accent-subtle);
+  color: var(--text);
+}
+
+.input {
+  width: 110px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  padding: 4px 8px;
+}
+
+.input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-subtle);
+}
+
+.input:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.inheritedValue {
+  color: var(--text-subtle);
+  font-size: var(--text-xs);
+  font-family: var(--font-mono, monospace);
+}
+
+.help {
+  font-size: var(--text-xs);
+  color: var(--text-subtle);
+  line-height: 1.5;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 8px 10px;
+  margin-top: 4px;
+}
+
+.help a { color: var(--accent); text-decoration: none; }
+.help a:hover { text-decoration: underline; }
+
+.error {
+  color: var(--danger, #d04848);
+  font-size: var(--text-xs);
+  border: 1px solid var(--danger, #d04848);
+  border-radius: 4px;
+  padding: 8px 10px;
+  margin-top: 8px;
+}
+
+.foot {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 18px;
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.footActions {
+  display: flex;
+  gap: 8px;
+}
+
+.closeBtn {
+  display: inline-flex;
+  padding: 4px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.closeBtn:hover:not(:disabled) { background: var(--surface-alt); }
+.closeBtn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.gearBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 0;
+}
+
+.gearBtn:hover:not(:disabled) {
+  background: var(--surface-alt);
+  color: var(--text);
+}
+
+.gearBtn:disabled { opacity: 0.5; cursor: not-allowed; }

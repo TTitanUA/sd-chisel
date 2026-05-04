@@ -50,3 +50,24 @@ class PrivacyOut(StrictModel):
 
 class PrivacyPatch(StrictModel):
     show_hidden: bool
+
+
+class ActionDefaultsOut(StrictModel):
+    """Per-action default sampling bundles (app-wide)."""
+    analyze: dict
+    chat: dict
+    summarize: dict
+    generate: dict
+
+
+class ActionDefaultsPatch(StrictModel):
+    """Partial update — only fields the client sends are persisted.
+
+    Each value is a sampling bundle dict (e.g. {"temperature": 0.7,
+    "top_p": 0.9}). Pass an empty object to clear all overrides for an
+    action.
+    """
+    analyze: dict | None = None
+    chat: dict | None = None
+    summarize: dict | None = None
+    generate: dict | None = None

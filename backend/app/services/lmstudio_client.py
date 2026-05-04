@@ -81,6 +81,21 @@ def _elapsed_ms(t0: float) -> int:
     return int((llm_log.now_ms() - t0) * 1000)
 
 
+def _merge_sampling(
+    payload: dict[str, Any], sampling: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Merge a sampling-bundle into ``payload`` in-place. Keys with a
+    ``None`` value are skipped (the bundle should already be normalized).
+    Returns ``payload`` for call-site brevity."""
+    if not sampling:
+        return payload
+    for k, v in sampling.items():
+        if v is None:
+            continue
+        payload[k] = v
+    return payload
+
+
 # ---------------------------------------------------------------------------
 # System methods (LMStudio-native /api/v1/...)
 # ---------------------------------------------------------------------------
@@ -229,6 +244,7 @@ def analyze_image(
     image_bytes: bytes,
     content_type: str,
     refining_prompt: str | None = None,
+    sampling: dict[str, Any] | None = None,
     transport: httpx.BaseTransport | None = None,
 ) -> str:
     if not model.strip():
@@ -249,11 +265,12 @@ def analyze_image(
             {"type": "image_url", "image_url": {"url": f"data:{content_type};base64,{b64}"}},
         ],
     })
-    payload = {
+    payload: dict[str, Any] = {
         "model": model,
         "messages": messages,
         "stream": False,
     }
+    _merge_sampling(payload, sampling)
     url = f"{server_root}/v1/chat/completions"
     request_log = {"url": url, "method": "POST", "payload": payload}
     response_log: dict[str, Any] | None = None
@@ -295,6 +312,7 @@ def chat_stream(
     endpoint: dict[str, Any],
     model: str,
     messages: list[dict[str, Any]],
+    sampling: dict[str, Any] | None = None,
     transport: httpx.BaseTransport | None = None,
 ) -> Iterator[str]:
     if not model.strip():
@@ -302,7 +320,8 @@ def chat_stream(
     if not messages:
         raise LmError("config", "messages must not be empty")
     server_root, headers = _resolve(endpoint)
-    payload = {"model": model, "messages": messages, "stream": True}
+    payload: dict[str, Any] = {"model": model, "messages": messages, "stream": True}
+    _merge_sampling(payload, sampling)
     url = f"{server_root}/v1/chat/completions"
     request_log = {"url": url, "method": "POST", "payload": payload}
     deltas: list[str] = []
@@ -363,6 +382,7 @@ def chat_stream_with_tools(
     model: str,
     messages: list[dict[str, Any]],
     tools: list[dict[str, Any]],
+    sampling: dict[str, Any] | None = None,
     transport: httpx.BaseTransport | None = None,
 ) -> Iterator[dict[str, Any]]:
     if not model.strip():
@@ -370,12 +390,13 @@ def chat_stream_with_tools(
     if not messages:
         raise LmError("config", "messages must not be empty")
     server_root, headers = _resolve(endpoint)
-    payload = {
+    payload: dict[str, Any] = {
         "model": model,
         "messages": messages,
         "tools": tools,
         "stream": True,
     }
+    _merge_sampling(payload, sampling)
     url = f"{server_root}/v1/chat/completions"
     request_log = {"url": url, "method": "POST", "payload": payload}
     tool_name = ""
@@ -478,6 +499,7 @@ def chat_responses_stream(
     tools: list[dict[str, Any]] | None = None,
     integrations: list[Any] | None = None,
     previous_response_id: str | None = None,
+    sampling: dict[str, Any] | None = None,
     transport: httpx.BaseTransport | None = None,
 ) -> Iterator[dict[str, Any]]:
     """Stream events from LMStudio's /v1/responses endpoint.
@@ -505,6 +527,7 @@ def chat_responses_stream(
         payload["integrations"] = integrations
     if previous_response_id:
         payload["previous_response_id"] = previous_response_id
+    _merge_sampling(payload, sampling)
 
     fn_calls: dict[str, dict[str, Any]] = {}
     mcp_names: dict[str, str] = {}  # item_id -> tool name
@@ -650,6 +673,7 @@ def chat_complete(
     model: str,
     messages: list[dict[str, Any]],
     response_format: dict[str, Any] | None = None,
+    sampling: dict[str, Any] | None = None,
     transport: httpx.BaseTransport | None = None,
 ) -> str:
     if not model.strip():
@@ -660,6 +684,7 @@ def chat_complete(
     payload: dict[str, Any] = {"model": model, "messages": messages, "stream": False}
     if response_format is not None:
         payload["response_format"] = response_format
+    _merge_sampling(payload, sampling)
     url = f"{server_root}/v1/chat/completions"
     request_log = {"url": url, "method": "POST", "payload": payload}
     response_log: dict[str, Any] | None = None

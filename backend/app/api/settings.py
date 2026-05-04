@@ -7,6 +7,8 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.api.deps import get_conn
 from app.models.settings import (
+    ActionDefaultsOut,
+    ActionDefaultsPatch,
     LmModelOut,
     LmModelPatch,
     LmModelsOut,
@@ -15,7 +17,7 @@ from app.models.settings import (
     PrivacyOut,
     PrivacyPatch,
 )
-from app.services import lmstudio_client
+from app.services import action_settings, lmstudio_client
 from app.storage import settings_repo
 
 Conn = Annotated[sqlite3.Connection, Depends(get_conn)]
@@ -120,3 +122,28 @@ def get_privacy(conn: Conn) -> dict:
 @router.put("/api/settings/privacy", response_model=PrivacyOut)
 def put_privacy(body: PrivacyPatch, conn: Conn) -> dict:
     return settings_repo.set_privacy(conn, show_hidden=body.show_hidden)
+
+
+@router.get("/api/settings/action-defaults", response_model=ActionDefaultsOut)
+def get_action_defaults(conn: Conn) -> dict:
+    return settings_repo.get_default_bundles(conn)
+
+
+@router.put("/api/settings/action-defaults", response_model=ActionDefaultsOut)
+def put_action_defaults(body: ActionDefaultsPatch, conn: Conn) -> dict:
+    bundles: dict[str, dict] = {}
+    sent = body.model_fields_set
+    for action in action_settings.ACTIONS:
+        if action not in sent:
+            continue
+        raw = getattr(body, action)
+        if raw is None:
+            bundles[action] = {}
+        else:
+            try:
+                bundles[action] = action_settings.parse_bundle(raw)
+            except action_settings.ActionSettingsError as exc:
+                raise HTTPException(
+                    status_code=400, detail=f"{action}: {exc}",
+                ) from exc
+    return settings_repo.set_default_bundles(conn, bundles=bundles)

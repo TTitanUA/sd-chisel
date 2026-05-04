@@ -6,13 +6,21 @@ import { Icon } from "@/components/atoms/Icon";
 import { TextInput } from "@/components/molecules/FormField";
 import {
   settingsApi,
+  useActionDefaults,
   useLmModels,
   useLmStudioConfig,
   useRefreshLmStudio,
   useSettingsInvalidation,
   useShowHidden,
 } from "@/api/settings";
+import { ActionSettingsButton } from "@/components/molecules/ActionSettingsButton";
+import {
+  ACTION_LABELS,
+} from "./ActionSettingsModal/fields";
+import type { Action } from "@/api/sessions";
 import styles from "./LmStudioSettings.module.css";
+
+const ACTION_ORDER: readonly Action[] = ["analyze", "chat", "summarize", "generate"];
 
 const LM_STUDIO_DEFAULT_URL = "http://localhost:1234";
 
@@ -99,6 +107,8 @@ export function LmStudioSettings() {
           </Button>
         </div>
       </section>
+
+      <ActionDefaultsSection />
 
       <section className={styles.section}>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -202,4 +212,63 @@ export function LmStudioSettings() {
 
 function Row({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
+}
+
+function ActionDefaultsSection() {
+  const defaults = useActionDefaults();
+  return (
+    <section className={styles.section}>
+      <div className={styles.h}>Default sampling per action</div>
+      <div className={styles.sub}>
+        Applied to LLM calls when a session leaves the value as Inherit.
+        Click the gear next to any action to edit. Empty rows mean
+        "let the model decide".
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        {ACTION_ORDER.map((action) => {
+          const bundle = defaults.data?.[action] ?? {};
+          const keys = Object.keys(bundle);
+          return (
+            <div
+              key={action}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 10,
+                padding: "8px 10px",
+                border: "1px solid var(--border)",
+                borderRadius: 6,
+              }}
+            >
+              <div style={{ minWidth: 140, fontSize: "var(--text-sm)" }}>
+                {ACTION_LABELS[action]}
+              </div>
+              <div
+                style={{
+                  flex: 1,
+                  fontSize: "var(--text-xs)",
+                  color: "var(--text-subtle)",
+                  fontFamily: "var(--font-mono, monospace)",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                }}
+                title={keys.length === 0 ? "No overrides" : JSON.stringify(bundle)}
+              >
+                {keys.length === 0
+                  ? "(no overrides — model decides)"
+                  : keys
+                      .map((k) => `${k}=${(bundle as Record<string, number>)[k]}`)
+                      .join(", ")}
+              </div>
+              <ActionSettingsButton
+                action={action}
+                title={`Edit default ${ACTION_LABELS[action].toLowerCase()} settings`}
+              />
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
 }

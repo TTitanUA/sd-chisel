@@ -516,7 +516,7 @@ def test_chat_with_replace_id_truncates_after_and_does_not_append_user(client, m
 
     captured: dict = {}
 
-    def fake_stream(*, endpoint, model, messages, transport=None):
+    def fake_stream(*, endpoint, model, messages, sampling=None, transport=None):
         captured["messages"] = messages
         yield "edited reply"
 

@@ -22,6 +22,7 @@ from app.models.prompts import (
     SummarizePinnedLoraView,
 )
 from app.services import (
+    action_settings,
     chat_summarizer,
     lmstudio_client,
     prompt_orchestrator,
@@ -168,12 +169,14 @@ def summarize_chat(session_id: str, conn: Conn) -> SummarizeChatResponse:
     if session is None:
         raise _not_found(session_id)
     endpoint, model = _resolve_endpoint_and_model(conn, session)
+    sampling = action_settings.resolve_for_session(conn, session, "summarize")
     try:
         brief = chat_summarizer.summarize_session_chat(
             conn,
             session_id=session_id,
             endpoint=endpoint,
             prompt_model=model,
+            sampling=sampling,
         )
     except lmstudio_client.LmError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
@@ -198,6 +201,7 @@ def generate_prompt(
 
     _reject_if_indexing()
     endpoint, model = _resolve_endpoint_and_model(conn, session)
+    sampling = action_settings.resolve_for_session(conn, session, "generate")
 
     brief = (body.brief or "").strip() or None
     try:
@@ -207,6 +211,7 @@ def generate_prompt(
             endpoint=endpoint,
             prompt_model=model,
             brief=brief,
+            sampling=sampling,
         )
     except prompt_orchestrator.PreconditionError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc

@@ -72,6 +72,7 @@ def summarize_session_chat(
     session_id: str,
     endpoint: dict[str, Any],
     prompt_model: str,
+    sampling: dict[str, Any] | None = None,
 ) -> str:
     """Return a markdown brief for the next generation run.
 
@@ -117,5 +118,6 @@ def summarize_session_chat(
     ]
     raw = lmstudio_client.chat_complete(
         endpoint=endpoint, model=prompt_model, messages=messages,
+        sampling=sampling,
     )
     return raw.strip()

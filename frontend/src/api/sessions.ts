@@ -32,6 +32,8 @@ export function imageDisplayName(image: Pick<SourceImage, "image_number">): stri
   return `Image_${image.image_number}`;
 }
 
+export type SamplingBundle = Record<string, number>;
+
 export type Session = {
   id: string;
   project_id: string;
@@ -43,6 +45,10 @@ export type Session = {
   source_images: SourceImage[];
   vl_model_name: string | null;
   prompt_model_name: string | null;
+  analyze_settings?: SamplingBundle | null;
+  chat_settings?: SamplingBundle | null;
+  summarize_settings?: SamplingBundle | null;
+  generate_settings?: SamplingBundle | null;
   hidden: boolean;
   created_at: number;
   updated_at: number;
@@ -62,6 +68,19 @@ export type SessionUpdate = {
   pinned_loras: PinnedLora[];
   vl_model_name: string | null;
   prompt_model_name: string | null;
+  // Optional partial bundles. Absent fields = leave column alone; null/{} = clear all overrides.
+  analyze_settings?: SamplingBundle | null;
+  chat_settings?: SamplingBundle | null;
+  summarize_settings?: SamplingBundle | null;
+  generate_settings?: SamplingBundle | null;
+};
+
+export type Action = "analyze" | "chat" | "summarize" | "generate";
+export const ACTION_SETTINGS_FIELDS: Record<Action, keyof Session> = {
+  analyze: "analyze_settings",
+  chat: "chat_settings",
+  summarize: "summarize_settings",
+  generate: "generate_settings",
 };
 
 export const sessionKeys = {

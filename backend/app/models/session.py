@@ -63,6 +63,10 @@ class SessionOut(StrictModel):
     source_images: list[SourceImageOut]
     vl_model_name: str | None
     prompt_model_name: str | None
+    analyze_settings: dict | None = None
+    chat_settings: dict | None = None
+    summarize_settings: dict | None = None
+    generate_settings: dict | None = None
     hidden: bool = False
     created_at: int
     updated_at: int
@@ -90,3 +94,10 @@ class SessionUpdate(StrictModel):
     pinned_loras: list[PinnedLoraIn] = Field(default_factory=list)
     vl_model_name: str | None = None
     prompt_model_name: str | None = None
+    # Action sampling bundles. Absent fields = "leave the column alone";
+    # ``null`` = "clear all per-session overrides for this action and
+    # inherit the full app default"; ``{}`` is treated the same as null.
+    analyze_settings: dict | None = None
+    chat_settings: dict | None = None
+    summarize_settings: dict | None = None
+    generate_settings: dict | None = None

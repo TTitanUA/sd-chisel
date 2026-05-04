@@ -85,6 +85,7 @@ def generate(
     endpoint: dict[str, Any],
     prompt_model: str,
     brief: str | None = None,
+    sampling: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     with llm_log.run_context():
         return _generate_inner(
@@ -93,6 +94,7 @@ def generate(
             endpoint=endpoint,
             prompt_model=prompt_model,
             brief=brief,
+            sampling=sampling,
         )
 
 
@@ -103,6 +105,7 @@ def _generate_inner(
     endpoint: dict[str, Any],
     prompt_model: str,
     brief: str | None = None,
+    sampling: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     session = session_repo.get_session_with_pinned(conn, session_id)
     if session is None:
@@ -184,6 +187,7 @@ def _generate_inner(
         endpoint=endpoint,
         model=prompt_model,
         messages=intent_messages,
+        sampling=sampling,
     )
     intents_obj = _parse_json(intent_raw, IntentList)
 
@@ -227,6 +231,7 @@ def _generate_inner(
         endpoint=endpoint,
         model=prompt_model,
         messages=comp_messages,
+        sampling=sampling,
     )
     prompt_obj = _parse_json(comp_raw, GeneratedPrompt)
     prompt_obj = _coerce_negative(prompt_obj, use_negative=session["use_negative"])

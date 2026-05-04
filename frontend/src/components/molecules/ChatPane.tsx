@@ -11,6 +11,7 @@ import {
   type ChatMessage,
 } from "@/api/chat";
 import { imageDisplayName, type Session, type SourceImage } from "@/api/sessions";
+import { ActionSettingsButton } from "./ActionSettingsButton";
 import {
   filterMentionCandidates,
   MentionPopover,
@@ -416,6 +417,12 @@ export function ChatPane({ session }: { session: Session }) {
           <div className={styles.composerRow}>
             <span className={styles.hint}>{SEND_HINT}</span>
             <div className={styles.spacer} />
+            <ActionSettingsButton
+              action="chat"
+              session={session}
+              disabled={pending}
+              title="Chat sampling settings"
+            />
             <Button
               size="sm"
               variant="primary"

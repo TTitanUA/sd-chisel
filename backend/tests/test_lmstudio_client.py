@@ -249,6 +249,100 @@ def test_analyze_image_uses_default_user_text_when_no_refining_prompt():
     assert text_part["text"] == "Describe this image for i2i prompt building."
 
 
+# --- sampling merge ---
+
+
+def test_merge_sampling_skips_none_values():
+    payload = {"model": "m", "messages": []}
+    merged = lmstudio_client._merge_sampling(
+        payload, {"temperature": 0.7, "top_p": None},
+    )
+    assert merged is payload  # in-place
+    assert merged["temperature"] == 0.7
+    assert "top_p" not in merged
+
+
+def test_merge_sampling_no_op_for_empty_or_none():
+    payload = {"model": "m"}
+    assert lmstudio_client._merge_sampling(payload, None) is payload
+    assert "temperature" not in payload
+    assert lmstudio_client._merge_sampling(payload, {}) is payload
+    assert "temperature" not in payload
+
+
+def test_chat_stream_includes_sampling_in_payload():
+    captured: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(200, content=b"data: [DONE]\n\n")
+
+    list(lmstudio_client.chat_stream(
+        endpoint=ENDPOINT,
+        model="m",
+        messages=[{"role": "user", "content": "hi"}],
+        sampling={"temperature": 0.1, "top_p": 0.85},
+        transport=_make_transport(handler),
+    ))
+    assert captured["body"]["temperature"] == 0.1
+    assert captured["body"]["top_p"] == 0.85
+
+
+def test_chat_complete_includes_sampling_in_payload():
+    captured: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.content)
+        return _chat_response("ok")
+
+    lmstudio_client.chat_complete(
+        endpoint=ENDPOINT,
+        model="m",
+        messages=[{"role": "user", "content": "hi"}],
+        sampling={"temperature": 0.3, "max_tokens": 200},
+        transport=_make_transport(handler),
+    )
+    assert captured["body"]["temperature"] == 0.3
+    assert captured["body"]["max_tokens"] == 200
+
+
+def test_analyze_image_includes_sampling_in_payload():
+    captured: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.content)
+        return _chat_response("ok")
+
+    lmstudio_client.analyze_image(
+        endpoint=ENDPOINT,
+        model="qwen-vl",
+        image_bytes=b"x",
+        content_type="image/png",
+        sampling={"temperature": 0.2},
+        transport=_make_transport(handler),
+    )
+    assert captured["body"]["temperature"] == 0.2
+
+
+def test_chat_complete_omits_sampling_when_none():
+    captured: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.content)
+        return _chat_response("ok")
+
+    lmstudio_client.chat_complete(
+        endpoint=ENDPOINT,
+        model="m",
+        messages=[{"role": "user", "content": "hi"}],
+        transport=_make_transport(handler),
+    )
+    body = captured["body"]
+    assert "temperature" not in body
+    assert "top_p" not in body
+    assert "max_tokens" not in body
+
+
 # --- chat_complete ---
 
 def test_chat_complete_sends_to_v1_chat_completions():

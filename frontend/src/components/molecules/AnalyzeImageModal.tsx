@@ -10,6 +10,7 @@ import {
   type SourceImage,
 } from "@/api/sessions";
 import { useLmStudioConfig } from "@/api/settings";
+import { ActionSettingsButton } from "./ActionSettingsButton";
 import styles from "./AnalyzeImageModal.module.css";
 
 export function AnalyzeImageModal({
@@ -111,6 +112,12 @@ export function AnalyzeImageModal({
             >
               Cancel
             </Button>
+            <ActionSettingsButton
+              action="analyze"
+              session={session}
+              disabled={analyze.isPending}
+              title="Analyze sampling settings"
+            />
             <Button
               type="button"
               variant="primary"
