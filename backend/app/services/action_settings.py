@@ -1,23 +1,31 @@
 """Per-action LLM sampling-settings: validation, encoding, resolution.
 
-Each LLM action (analyze, chat, summarize, generate) carries a bundle of
-optional OpenAI-compat sampling parameters. Bundles are stored as JSON in
-``sessions.<action>_settings`` (per-session override) and
-``app_settings.default_<action>_settings`` (app-wide default). At call
-time, ``resolve`` merges them per-key — the session value wins when set,
-otherwise the app default is used.
+Each LLM action carries a bundle of optional OpenAI-compat sampling
+parameters. Bundles are stored as JSON in
+``app_settings.default_<action>_settings`` (app-wide default), and for
+session-scoped actions also in ``sessions.<action>_settings``
+(per-session override). At call time, ``resolve`` merges them per-key —
+the session value wins when set, otherwise the app default is used.
 
-This module is the single source of truth for which keys are allowed and
-their value ranges. Adding a new sampling parameter here automatically
-flows to all four actions and to the API validation layer.
+The ``comfy_import`` action is global rather than session-scoped: it
+drives the per-node import wizard's LLM enrichment step, which produces
+catalog rows keyed by class_type, not by session. Only the app-default
+column exists for it; ``resolve_for_session`` falls back to a
+session-less default lookup when called for this action.
+
+This module is the single source of truth for which keys are allowed
+and their value ranges. Adding a new sampling parameter here
+automatically flows to every action and to the API validation layer.
 """
 from __future__ import annotations
 
 import json
 from typing import Any, Literal
 
-Action = Literal["analyze", "chat", "summarize", "generate"]
-ACTIONS: tuple[Action, ...] = ("analyze", "chat", "summarize", "generate")
+Action = Literal["analyze", "chat", "summarize", "generate", "comfy_import"]
+ACTIONS: tuple[Action, ...] = (
+    "analyze", "chat", "summarize", "generate", "comfy_import",
+)
 
 
 class ActionSettingsError(ValueError):
@@ -130,6 +138,11 @@ def resolve(
     return base
 
 
+SESSION_SCOPED_ACTIONS: tuple[Action, ...] = (
+    "analyze", "chat", "summarize", "generate",
+)
+
+
 def resolve_for_session(
     conn: Any, session: dict[str, Any], action: Action,
 ) -> dict[str, Any]:
@@ -140,10 +153,15 @@ def resolve_for_session(
     returned by ``session_repo.get_session`` (with bundles already
     decoded). Returns the final bundle ready to pass as ``sampling=`` to
     the lmstudio_client functions.
+
+    Global actions (``comfy_import``) have no session-scope column; the
+    app-default bundle is returned directly.
     """
     # Local import keeps this module free of storage-layer cycles.
     from app.storage import settings_repo
 
     default_bundle = settings_repo.get_default_bundle(conn, action)
+    if action not in SESSION_SCOPED_ACTIONS:
+        return default_bundle
     session_bundle = session.get(f"{action}_settings")
     return resolve(session_bundle, default_bundle)

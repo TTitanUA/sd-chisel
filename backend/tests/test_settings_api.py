@@ -179,7 +179,10 @@ def test_refresh_updates_capabilities_preserves_enabled(client, monkeypatch):
 
 def test_get_action_defaults_returns_empty_bundles_initially(client):
     body = client.get("/api/settings/action-defaults").json()
-    assert body == {"analyze": {}, "chat": {}, "summarize": {}, "generate": {}}
+    assert body == {
+        "analyze": {}, "chat": {}, "summarize": {},
+        "generate": {}, "comfy_import": {},
+    }
 
 
 def test_put_action_defaults_persists_partial_update(client):
@@ -191,7 +194,10 @@ def test_put_action_defaults_persists_partial_update(client):
     body = res.json()
     assert body["chat"] == {"temperature": 0.9, "top_p": 0.85}
     # Untouched actions stay empty.
-    assert body["analyze"] == {} and body["summarize"] == {} and body["generate"] == {}
+    assert body["analyze"] == {}
+    assert body["summarize"] == {}
+    assert body["generate"] == {}
+    assert body["comfy_import"] == {}
 
     # GET reflects the same state.
     again = client.get("/api/settings/action-defaults").json()

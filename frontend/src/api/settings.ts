@@ -50,6 +50,7 @@ export type ActionDefaults = {
   chat: SamplingBundle;
   summarize: SamplingBundle;
   generate: SamplingBundle;
+  comfy_import: SamplingBundle;
 };
 
 export type Action = keyof ActionDefaults;

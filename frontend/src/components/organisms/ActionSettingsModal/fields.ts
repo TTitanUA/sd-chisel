@@ -116,4 +116,5 @@ export const ACTION_LABELS = {
   chat: "Chat",
   summarize: "Summarize",
   generate: "Generate prompt",
+  comfy_import: "Import ComfyUI node",
 } as const;

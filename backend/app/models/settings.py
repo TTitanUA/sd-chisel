@@ -84,6 +84,7 @@ class ActionDefaultsOut(StrictModel):
     chat: dict
     summarize: dict
     generate: dict
+    comfy_import: dict
 
 
 class ActionDefaultsPatch(StrictModel):
@@ -97,3 +98,4 @@ class ActionDefaultsPatch(StrictModel):
     chat: dict | None = None
     summarize: dict | None = None
     generate: dict | None = None
+    comfy_import: dict | None = None
