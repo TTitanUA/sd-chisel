@@ -43,12 +43,14 @@ def _row_to_dict(row: sqlite3.Row | None) -> dict[str, Any] | None:
         return None
     d = dict(row)
     d["graph"] = json.loads(d.pop("graph_json"))
+    raw_slot_map = d.pop("slot_map_json", None)
+    d["slot_map"] = json.loads(raw_slot_map) if raw_slot_map else None
     return d
 
 
 def get_workflow(conn: sqlite3.Connection, workflow_id: str) -> dict[str, Any] | None:
     row = conn.execute(
-        "SELECT id, name, graph_json, graph_hash, created_at "
+        "SELECT id, name, graph_json, graph_hash, slot_map_json, created_at "
         "FROM comfy_workflows WHERE id = ?",
         (workflow_id,),
     ).fetchone()
@@ -67,7 +69,7 @@ def find_by_hash(conn: sqlite3.Connection, graph_hash: str) -> dict[str, Any] | 
     """First (oldest) workflow with this hash, or None. Used for
     upload-time collision detection."""
     row = conn.execute(
-        "SELECT id, name, graph_json, graph_hash, created_at "
+        "SELECT id, name, graph_json, graph_hash, slot_map_json, created_at "
         "FROM comfy_workflows WHERE graph_hash = ? ORDER BY created_at LIMIT 1",
         (graph_hash,),
     ).fetchone()
@@ -129,3 +131,35 @@ def delete_workflow(conn: sqlite3.Connection, workflow_id: str) -> bool:
         "DELETE FROM comfy_workflows WHERE id = ?", (workflow_id,),
     )
     return cur.rowcount > 0
+
+
+def set_slot_map(
+    conn: sqlite3.Connection,
+    *,
+    workflow_id: str,
+    slot_map: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    """Persist a slot map for the workflow. Returns the refreshed row,
+    or None if the workflow id is unknown.
+
+    ``slot_map`` shape: a dict whose keys are sd-chisel logical slot
+    names (``positive_prompt``, ``negative_prompt``, ``main_image``,
+    …) and whose values are either ``None`` (slot left unassigned) or
+    ``{"node_id": str, "input_name": str}``. The repo doesn't validate
+    those references against the graph — the API layer does that.
+    Passing ``None`` clears the column.
+    """
+    if conn.execute(
+        "SELECT 1 FROM comfy_workflows WHERE id = ?", (workflow_id,),
+    ).fetchone() is None:
+        return None
+    encoded = (
+        None
+        if slot_map is None
+        else json.dumps(slot_map, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    )
+    conn.execute(
+        "UPDATE comfy_workflows SET slot_map_json = ? WHERE id = ?",
+        (encoded, workflow_id),
+    )
+    return get_workflow(conn, workflow_id)

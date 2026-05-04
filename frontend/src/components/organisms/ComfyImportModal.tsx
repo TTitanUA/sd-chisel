@@ -144,9 +144,9 @@ export function ComfyImportModal({
           </Dialog.Title>
           <p className={styles.subtitle}>
             The wizard locates the pack on disk, fetches the live INPUT_TYPES
-            from ComfyUI, asks LMStudio for a description and per-input role
-            hints, then writes a row to the catalog. You can edit the result
-            from the Library afterward.
+            from ComfyUI, asks LMStudio for a short description, then writes
+            a row to the catalog. You can edit the description and per-input
+            notes from the Library afterward.
           </p>
 
           <div className={styles.stages}>
@@ -248,9 +248,9 @@ function summariseSuccess(
       return `${names.length} input${names.length === 1 ? "" : "s"} discovered`;
     }
     case "enrich_llm": {
-      const semantic = data.inputs_semantic as { role_hint: string | null }[] | undefined;
-      const annotated = (semantic ?? []).filter((s) => s.role_hint !== null).length;
-      return `${annotated} role hint${annotated === 1 ? "" : "s"} assigned by the LLM`;
+      const semantic = data.inputs_semantic as { notes: string | null }[] | undefined;
+      const annotated = (semantic ?? []).filter((s) => s.notes !== null).length;
+      return `${annotated} input note${annotated === 1 ? "" : "s"} captured`;
     }
     case "persist":
       return "row written to catalog";

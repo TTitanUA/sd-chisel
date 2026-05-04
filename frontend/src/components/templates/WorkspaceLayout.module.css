@@ -87,3 +87,9 @@
   color: var(--text-subtle);
   padding: 24px;
 }
+
+.body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}

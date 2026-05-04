@@ -107,8 +107,8 @@ def test_import_runs_all_four_stages_and_persists(client, monkeypatch):
         return json.dumps({
             "description_md": "Loads the Z-Image Turbo weights via ModelScope.",
             "inputs": [
-                {"name": "model_name", "role_hint": "checkpoint_name", "notes": None},
-                {"name": "device", "role_hint": None, "notes": "GPU device"},
+                {"name": "model_name", "notes": "Path on disk."},
+                {"name": "device", "notes": "GPU device"},
             ],
         })
 
@@ -145,7 +145,8 @@ def test_import_runs_all_four_stages_and_persists(client, monkeypatch):
 
     enrich = next(e for e in events if e["type"] == "stage_succeeded" and e["stage"] == "enrich_llm")
     assert enrich["data"]["description_md"].startswith("Loads")
-    assert any(i["role_hint"] == "checkpoint_name" for i in enrich["data"]["inputs_semantic"])
+    notes_by_name = {i["name"]: i["notes"] for i in enrich["data"]["inputs_semantic"]}
+    assert notes_by_name == {"model_name": "Path on disk.", "device": "GPU device"}
 
     done = events[-1]
     assert done["type"] == "done"
@@ -154,7 +155,9 @@ def test_import_runs_all_four_stages_and_persists(client, monkeypatch):
     # Persisted in the catalog.
     listed = client.get("/api/comfy/nodes").json()["nodes"]
     assert [n["class_type"] for n in listed] == ["ZImageLoader"]
-    assert client.get("/api/comfy/nodes/ZImageLoader").json()["description_md"].startswith("Loads")
+    body = client.get("/api/comfy/nodes/ZImageLoader").json()
+    assert body["description_md"].startswith("Loads")
+    assert all(set(item) == {"name", "notes"} for item in body["inputs_semantic"])
 
 
 def test_import_fails_when_class_type_unknown(client, monkeypatch):
@@ -193,8 +196,8 @@ def test_import_rejects_hallucinated_input_names(client, monkeypatch):
         lambda **_: json.dumps({
             "description_md": "x",
             "inputs": [
-                {"name": "model_name", "role_hint": None, "notes": None},
-                {"name": "made_up_input", "role_hint": None, "notes": None},
+                {"name": "model_name", "notes": None},
+                {"name": "made_up_input", "notes": None},
             ],
         }),
     )
@@ -204,31 +207,35 @@ def test_import_rejects_hallucinated_input_names(client, monkeypatch):
     assert "made_up_input" in events[-1]["error"]
 
 
-def test_import_rejects_unknown_role_hint(client, monkeypatch):
+def test_import_ignores_legacy_role_hint_keys(client, monkeypatch):
+    """Phase 1 imports asked the LLM for ``role_hint`` per input. Phase 2
+    drops that field; the wizard now accepts (and silently ignores) any
+    ``role_hint`` key the LLM emits, so older system prompts and
+    reasoning-distilled models don't break the import path."""
     monkeypatch.setattr(comfy_client, "object_info", lambda **_: _FAKE_NODE_INFO)
     monkeypatch.setattr(
         lmstudio_client, "chat_complete",
         lambda **_: json.dumps({
             "description_md": "x",
-            "inputs": [{"name": "model_name", "role_hint": "weird-role", "notes": None}],
+            "inputs": [{"name": "model_name", "role_hint": "weird-role", "notes": "ok"}],
         }),
     )
     events = _read_sse_events(client.post("/api/comfy/nodes/ZImageLoader/import"))
-    assert events[-1]["type"] == "stage_failed"
-    assert events[-1]["stage"] == "enrich_llm"
-    assert "weird-role" in events[-1]["error"]
+    assert events[-1]["type"] == "done"
+    body = client.get("/api/comfy/nodes/ZImageLoader").json()
+    assert all("role_hint" not in item for item in body["inputs_semantic"])
 
 
 def test_import_fills_defaults_for_unmentioned_inputs(client, monkeypatch):
     """When the LLM mentions only a subset of inputs, the rest get
-    role_hint=null defaults so the catalog row covers every input."""
+    notes=null defaults so the catalog row covers every input."""
     monkeypatch.setattr(comfy_client, "object_info", lambda **_: _FAKE_NODE_INFO)
     monkeypatch.setattr(
         lmstudio_client, "chat_complete",
         lambda **_: json.dumps({
             "description_md": "x",
             "inputs": [
-                {"name": "model_name", "role_hint": "checkpoint_name", "notes": None},
+                {"name": "model_name", "notes": "Path on disk."},
             ],
         }),
     )

@@ -31,8 +31,10 @@ generate → copy structured prompt` works. Post-MVP work already in the tree:
 LMStudio model capability detection, library assistants, Civitai import,
 background tasks, privacy flags, rename flow for models and LoRAs.
 
-**Out of MVP:** direct ComfyUI integration, VL critique of the result
-(step 6 — only an architectural placeholder).
+**Out of MVP:** generation execution against ComfyUI (Phase 3 — node
+catalog and slot mapping shipped, the queue/websocket cycle is
+pending — see §10), VL critique of the result (step 6 — only an
+architectural placeholder).
 
 ---
 
@@ -879,6 +881,10 @@ public API for importing LoRA metadata.
 
 **Shipped post-MVP, already in this tree:**
 
+- ComfyUI integration — Phase 1 (node-readiness gate + on-demand
+  catalog growth) and Phase 2 (workflow slot mapping). Phase 3
+  (generation execution) is still pending. See §10.
+
 - LMStudio settings + capability detection (`vision`, `tool_use`,
   `reasoning`) + the `lm_models` cache + Unload all.
 - Mode-specific prompt guides (`prompt_i2i`, `prompt_t2i`) — appended
@@ -913,3 +919,192 @@ public API for importing LoRA metadata.
 - Normalizing `tags` / `trigger_words` into junction tables — only when
   performance or features demand it.
 - LoRA usage stats, ratings, "last used" tracking.
+
+---
+
+## 10. ComfyUI integration
+
+A separate session type sits next to `i2i` and `t2i`: the **comfy
+session** binds a sd-chisel session to a user-uploaded ComfyUI
+workflow (API-format JSON, the format ComfyUI's "Save (API Format)"
+produces — UI-format graphs are rejected at upload). The end goal
+is a single click that takes the prompt orchestrator's output and
+renders an image in the bound workflow. Two phases have shipped;
+the third (queue + websocket cycle) is still pending.
+
+### 10.1. Settings
+
+ComfyUI configuration lives on the singleton `app_settings` row,
+exposed through its own settings card on the page (sibling of the
+LM Studio card):
+
+- `comfyui_url` — HTTP base URL of the running ComfyUI (default
+  `http://127.0.0.1:8188`).
+- `comfyui_path` — filesystem path to the ComfyUI install. Required
+  for the import wizard's pack-locator stage.
+- `comfyui_api_key` — optional auth header for reverse-proxied or
+  cloud ComfyUI. Read but not yet attached to outbound requests
+  outside the connection check (Phase 3 will use it).
+
+Endpoints: `GET /api/settings/comfyui`, `PUT /api/settings/comfyui`,
+`POST /api/settings/comfyui/check`. The check runs `GET /system_stats`
+against the URL and verifies the install path contains `custom_nodes/`,
+in parallel.
+
+### 10.2. Comfy session lifecycle
+
+`session_type = "comfy"` on `sessions`, with a non-null
+`comfy_workflow_id` referencing `comfy_workflows(id)` (`ON DELETE
+RESTRICT`). The session screen is a two-step navigator inside the
+workspace shell:
+
+- **Step 1 — Nodes (readiness panel).** One card per distinct
+  `class_type` referenced in the bound workflow's graph, bucketed
+  into `ready` / `needs_config` / `not_installed`. The user walks
+  any `needs_config` cards through the per-node import wizard
+  (§10.5) and resolves `not_installed` ones by installing packs in
+  ComfyUI then pressing Refresh.
+- **Step 2 — Slot mapping.** Maps sd-chisel's logical slots
+  (positive prompt, negative prompt, main image) onto specific
+  literal-valued inputs in the workflow graph (§10.6).
+
+The two steps are freely navigable — readiness isn't a hard gate.
+Generation (Phase 3) will gate on something like "every slot the
+session needs is filled" once it ships.
+
+### 10.3. Workflow uploads
+
+`comfy_workflows` stores API-format graphs alongside `graph_hash`
+(sha256 of the canonicalised graph) and `slot_map_json` (Phase 2,
+see §10.6). Endpoints:
+
+- `POST /api/comfy/workflows` — upload. `?on_conflict=error|replace
+  |rename` controls duplicate-hash behaviour; the `error` default
+  returns 409 with the existing summary so the client can prompt
+  the user.
+- `GET /api/comfy/workflows`, `GET /api/comfy/workflows/{id}` —
+  list/detail.
+- `DELETE /api/comfy/workflows/{id}` — 409 if any session still
+  references the workflow.
+
+Mode (`t2i` / `i2i`) is **not** stored on the workflow row; mode is
+inferred at slot-mapping time from whether `main_image` resolves to
+a `LoadImage` slot.
+
+### 10.4. Catalog (`comfy_packs`, `comfy_nodes`)
+
+Catalog rows grow on demand through the import wizard, never via a
+bulk sync. The schema:
+
+- **`comfy_packs`** — one row per pack discovered under
+  `<comfyui_path>/custom_nodes/`, plus a synthetic `ComfyUI` row
+  for built-in nodes. Metadata sourced from `pyproject.toml`
+  (`name`, `display_name`, `description`, `version`, `repo_url`,
+  `publisher_id`) plus the cached `readme_md`.
+- **`comfy_nodes`** — one row per imported `class_type`. Stores
+  the raw `INPUT_TYPES` schema from `/api/object_info`
+  (`inputs_raw_json`, `outputs_raw_json`) alongside the catalog's
+  enriched view: `display_name`, `category`, `description_md`,
+  and `inputs_semantic_json` (a `[{name, notes}]` list of optional
+  per-input notes; older rows may carry a `role_hint` key from
+  Phase 1 which the read path silently strips). The
+  `requires_semantic_config` boolean is a forward-compat flag for a
+  not-yet-implemented "auto-ready" detector — Phase 1/2 always
+  write `1`.
+- **`comfy_node_overrides`** — sparse table holding user edits to
+  `description_md`, `inputs_semantic_json`, `category`. Overlaid
+  on read; survives re-import.
+
+The library gains a **Comfy Nodes** section that lists packs and
+nodes side by side, with detail panes for each. The node-detail
+editor lets the user edit description and per-input notes; edits
+land in `comfy_node_overrides`. Endpoints: `GET /api/comfy/packs`,
+`GET /api/comfy/packs/{name}`, `GET /api/comfy/nodes`,
+`GET /api/comfy/nodes/{class_type}`, `PUT /api/comfy/nodes/{class_type}`.
+
+### 10.5. Per-node import wizard
+
+`POST /api/comfy/nodes/{class_type}/import` runs four stages and
+streams them as Server-Sent Events
+(`stage_started` / `stage_succeeded` / `stage_failed` / `done`):
+
+1. **Locate pack.** Reads `python_module` from `/api/object_info`,
+   resolves it to a directory under `custom_nodes/` (or to the
+   built-in pack), parses the matching `pyproject.toml` and reads
+   the `README.md`.
+2. **Fetch raw schema.** Pulls `INPUT_TYPES` and outputs from
+   `/api/object_info` for the class_type.
+3. **LLM enrichment.** Sends `(pack README + raw schema + display
+   name + class_type)` to LMStudio. Asks for a short markdown
+   description (`description_md`) and an optional list of
+   per-input `notes`. The system prompt is strict enough to use
+   `response_format = "text"` with a brace-matching JSON
+   extractor (LMStudio's `json_schema` mode silently produces
+   empty content on reasoning-distilled models). Validates that
+   every `name` exists in the raw schema.
+4. **Persist.** Upserts `comfy_packs` and `comfy_nodes` atomically.
+
+Failures abort the run; retry re-POSTs the endpoint and re-runs all
+four stages from scratch — there's no per-stage resume bookkeeping
+on the server.
+
+The wizard uses a dedicated `comfy_import` action in the
+per-action sampling-bundle system (§4 alongside `analyze`, `chat`,
+`summarize`, `generate`). Defaults live on
+`app_settings.default_comfy_import_settings`; a code-level
+`BUILTIN_DEFAULTS` baseline (`temperature 0.1`, `max_tokens 6000`)
+makes a fresh install runnable without manual tuning. The model
+itself is the user's favourite LMStudio model — a dedicated
+`comfy_import_model_name` setting is parked for Phase 1 polish.
+
+### 10.6. Workflow slot mapping
+
+The slot map binds sd-chisel's logical injection slots to concrete
+`(node_id, input_name)` pairs in the bound workflow's graph.
+sd-chisel only ever injects values it owns — text (positive /
+negative prompt) and images (i2i source). Everything else (seed,
+steps, cfg, sampler, dimensions, checkpoint, VAE, …) is the
+user's responsibility, set inside the workflow at export time.
+
+The current slot list:
+
+- `positive_prompt` (text)
+- `negative_prompt` (text)
+- `main_image` (image)
+
+The map is **user-driven** — no LLM-based auto-proposal. The UI
+narrows the candidate list by computing *eligible* inputs:
+
+- An input is eligible if its value in `graph_json` is a literal
+  (not a `[node_id, output_idx]` wire).
+- Its raw type must be one sd-chisel can supply: `STRING` (text
+  bucket) or a combo with `image_upload=true` (image bucket — i.e.
+  a `LoadImage`-style picker).
+- Class types not yet imported into the catalog still produce text
+  candidates (best-effort: any literal string), flagged with
+  `node_in_catalog=false` so the editor can hint that import
+  would help.
+
+Persistence: `comfy_workflows.slot_map_json` holds the saved map as
+`{slot: null | {node_id, input_name}}`. Endpoints:
+
+- `GET /api/comfy/sessions/{id}/slot_map` — recomputes candidates
+  every call and merges them with the saved assignments. Returns
+  `{session_id, workflow_id, slot_map, candidates}`.
+- `PUT /api/comfy/sessions/{id}/slot_map` — full-replace write.
+  Returns 422 if any assignment names a `(node_id, input_name)`
+  that isn't an eligible candidate of the slot's expected kind.
+
+All slots are optional. Saving partial maps is fine; Phase 3 will
+simply skip slots that are still `null` instead of touching the
+graph.
+
+### 10.7. Phase 3 — pending
+
+The catalogue, readiness gate, and slot-map editor are in place;
+what remains is the actual generation cycle: a `comfy_client`
+service mirroring `lmstudio_client.py`, image upload, workflow
+patching per `slot_map_json`, queueing via `/api/prompt`, the
+websocket consumer for progress events, and result fetching +
+persistence. None of this exists yet — the comfy session screen
+ends at slot mapping for now.

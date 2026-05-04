@@ -75,7 +75,6 @@ export type PackDetail = Omit<Pack, "node_count"> & {
 
 export type NodeInputSemantic = {
   name: string;
-  role_hint: string | null;
   notes: string | null;
 };
 
@@ -169,35 +168,59 @@ export async function runImport(
 }
 
 
-/** Closed enum mirrored from docs/comfy-workflow-plan.md. */
-export const ROLE_HINTS = [
+// --- Phase 2: workflow slot mapping --------------------------------------
+
+/** Logical injection slots sd-chisel knows how to fill. Two text
+ *  slots and one image slot — see docs/comfy-workflow-plan.md
+ *  Phase 2 sketch. */
+export const SLOT_NAMES = [
   "positive_prompt",
   "negative_prompt",
-  "seed",
-  "steps",
-  "cfg",
-  "sampler",
-  "scheduler",
-  "denoise",
-  "width",
-  "height",
   "main_image",
-  "mask_image",
-  "lora_name",
-  "lora_weight",
-  "lora_chain_anchor",
-  "checkpoint_name",
-  "vae_name",
-  "clip_skip",
 ] as const;
+export type SlotName = (typeof SLOT_NAMES)[number];
 
-export type RoleHint = (typeof ROLE_HINTS)[number];
+export const SLOT_KIND: Record<SlotName, "text" | "image"> = {
+  positive_prompt: "text",
+  negative_prompt: "text",
+  main_image: "image",
+};
+
+export const SLOT_LABEL: Record<SlotName, string> = {
+  positive_prompt: "Positive prompt",
+  negative_prompt: "Negative prompt",
+  main_image: "Main image (i2i)",
+};
+
+export type SlotAssignment = { node_id: string; input_name: string };
+
+export type CandidateInput = {
+  node_id: string;
+  input_name: string;
+  node_class_type: string;
+  node_display_name: string | null;
+  node_title: string | null;
+  node_in_catalog: boolean;
+  current_value: unknown;
+  multiline: boolean;
+};
+
+export type SlotMap = Record<SlotName, SlotAssignment | null>;
+
+export type SlotMapResponse = {
+  session_id: string;
+  workflow_id: string;
+  slot_map: SlotMap;
+  candidates: { text: CandidateInput[]; image: CandidateInput[] };
+};
 
 export const comfyKeys = {
   workflows: () => ["comfy", "workflows"] as const,
   workflow: (id: string) => ["comfy", "workflows", id] as const,
   readiness: (sessionId: string) =>
     ["comfy", "sessions", sessionId, "readiness"] as const,
+  slotMap: (sessionId: string) =>
+    ["comfy", "sessions", sessionId, "slot_map"] as const,
   packs: () => ["comfy", "packs"] as const,
   pack: (name: string) => ["comfy", "packs", name] as const,
   nodes: (q?: string, pack?: string, hasDescription?: boolean) =>
@@ -250,6 +273,15 @@ export const comfyApi = {
       method: "PUT",
       body: JSON.stringify(body),
     }),
+  getSlotMap: (sessionId: string) =>
+    apiFetch<SlotMapResponse>(
+      `/api/comfy/sessions/${encodeURIComponent(sessionId)}/slot_map`,
+    ),
+  putSlotMap: (sessionId: string, slot_map: SlotMap) =>
+    apiFetch<SlotMapResponse>(
+      `/api/comfy/sessions/${encodeURIComponent(sessionId)}/slot_map`,
+      { method: "PUT", body: JSON.stringify({ slot_map }) },
+    ),
 };
 
 /** Parse a 409 conflict body returned from createWorkflow. */
@@ -352,4 +384,25 @@ export function useCatalogInvalidation() {
     void client.invalidateQueries({ queryKey: ["comfy", "packs"] });
     void client.invalidateQueries({ queryKey: ["comfy", "nodes"] });
   };
+}
+
+export function useSlotMap(sessionId: string | null | undefined) {
+  return useQuery({
+    queryKey: sessionId ? comfyKeys.slotMap(sessionId) : ["comfy", "slot_map", "unset"],
+    queryFn: () => comfyApi.getSlotMap(sessionId as string),
+    enabled: !!sessionId,
+  });
+}
+
+export function useSaveSlotMap(sessionId: string | null | undefined) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (slot_map: SlotMap) =>
+      comfyApi.putSlotMap(sessionId as string, slot_map),
+    onSuccess: (data) => {
+      if (sessionId) {
+        client.setQueryData(comfyKeys.slotMap(sessionId), data);
+      }
+    },
+  });
 }

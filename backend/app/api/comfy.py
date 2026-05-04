@@ -18,19 +18,28 @@ from starlette.responses import StreamingResponse
 
 from app.api.deps import get_conn
 from app.models.comfy import (
+    SLOT_NAMES,
     NodeList,
     NodeOut,
     NodeUpdate,
     PackDetailOut,
     PackList,
     ReadinessOut,
+    SlotMapOut,
+    SlotMapUpdate,
     WorkflowConflict,
     WorkflowList,
     WorkflowOut,
     WorkflowSummary,
     WorkflowUpload,
 )
-from app.services import action_settings, comfy_client, comfy_import_service, comfy_readiness
+from app.services import (
+    action_settings,
+    comfy_client,
+    comfy_import_service,
+    comfy_readiness,
+    comfy_slot_map_service,
+)
 from app.storage import comfy_catalog_repo, comfy_workflow_repo as repo
 from app.storage import db as db_mod, session_repo, settings_repo
 
@@ -55,6 +64,7 @@ def _to_out(row: dict) -> dict:
         "graph": row["graph"],
         "graph_hash": row["graph_hash"],
         "created_at": row["created_at"],
+        "slot_map": row.get("slot_map"),
     }
 
 
@@ -173,6 +183,94 @@ def get_session_readiness(session_id: str, conn: Conn) -> dict:
         "ready": all_ready,
         "cards": [asdict(c) for c in cards],
         "error": None,
+    }
+
+
+def _resolve_comfy_session_workflow(
+    conn: sqlite3.Connection, session_id: str,
+) -> dict:
+    """Shared lookup for session-scoped comfy endpoints. Raises the
+    same HTTP errors the readiness endpoint already uses so the API
+    stays consistent."""
+    session = session_repo.get_session(conn, session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="session not found")
+    if session.get("session_type") != "comfy":
+        raise HTTPException(
+            status_code=409, detail="session is not a comfy session",
+        )
+    workflow_id = session.get("comfy_workflow_id")
+    if not workflow_id:
+        raise HTTPException(
+            status_code=409,
+            detail="comfy session is not bound to a workflow",
+        )
+    workflow = repo.get_workflow(conn, workflow_id)
+    if workflow is None:
+        raise HTTPException(
+            status_code=409,
+            detail=f"bound workflow not found: {workflow_id}",
+        )
+    return workflow
+
+
+def _empty_slot_map() -> dict[str, None]:
+    return {slot: None for slot in SLOT_NAMES}
+
+
+@router.get(
+    "/api/comfy/sessions/{session_id}/slot_map",
+    response_model=SlotMapOut,
+)
+def get_session_slot_map(session_id: str, conn: Conn) -> dict:
+    workflow = _resolve_comfy_session_workflow(conn, session_id)
+    candidates = comfy_slot_map_service.compute_candidates(
+        conn=conn, graph=workflow["graph"],
+    )
+    saved = workflow.get("slot_map") or {}
+    slot_map = _empty_slot_map()
+    slot_map.update({k: v for k, v in saved.items() if k in slot_map})
+    return {
+        "session_id": session_id,
+        "workflow_id": workflow["id"],
+        "slot_map": slot_map,
+        "candidates": candidates,
+    }
+
+
+@router.put(
+    "/api/comfy/sessions/{session_id}/slot_map",
+    response_model=SlotMapOut,
+)
+def put_session_slot_map(
+    session_id: str, body: SlotMapUpdate, conn: Conn,
+) -> dict:
+    workflow = _resolve_comfy_session_workflow(conn, session_id)
+    candidates = comfy_slot_map_service.compute_candidates(
+        conn=conn, graph=workflow["graph"],
+    )
+    incoming = {
+        slot: (assignment.model_dump() if assignment is not None else None)
+        for slot, assignment in body.slot_map.items()
+    }
+    try:
+        normalised = comfy_slot_map_service.validate_slot_map(
+            slot_map=incoming, candidates=candidates,
+        )
+    except comfy_slot_map_service.SlotMapValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    repo.set_slot_map(
+        conn,
+        workflow_id=workflow["id"],
+        slot_map=normalised,
+    )
+    slot_map = _empty_slot_map()
+    slot_map.update(normalised)
+    return {
+        "session_id": session_id,
+        "workflow_id": workflow["id"],
+        "slot_map": slot_map,
+        "candidates": candidates,
     }
 
 

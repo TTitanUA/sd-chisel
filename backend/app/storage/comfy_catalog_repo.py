@@ -124,13 +124,32 @@ def _decode_node_row(row: sqlite3.Row) -> dict[str, Any]:
         "description_md":           description,
         "inputs_raw":               json.loads(base["inputs_raw_json"]),
         "outputs_raw":              json.loads(base["outputs_raw_json"]),
-        "inputs_semantic":          json.loads(inputs_semantic_raw),
+        "inputs_semantic":          _decode_inputs_semantic(inputs_semantic_raw),
         "requires_semantic_config": bool(base["requires_semantic_config"]),
         "imported_at":              base["imported_at"],
         "last_seen_in_object_info_at": base["last_seen_in_object_info_at"],
         "has_override":             override_at is not None,
         "override_updated_at":      override_at,
     }
+
+
+def _decode_inputs_semantic(raw: str) -> list[dict[str, Any]]:
+    """Decode the inputs_semantic JSON and strip any legacy ``role_hint``
+    keys. Phase 1 wrote those; Phase 2 dropped the field but we leave
+    the existing rows alone — read-side normalisation keeps the API
+    schema clean without a data migration."""
+    items = json.loads(raw)
+    if not isinstance(items, list):
+        return []
+    cleaned: list[dict[str, Any]] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        cleaned.append({
+            "name": item.get("name"),
+            "notes": item.get("notes"),
+        })
+    return cleaned
 
 
 def list_nodes(

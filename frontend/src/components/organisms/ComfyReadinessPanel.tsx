@@ -7,6 +7,7 @@ import {
   type ReadinessCard,
   type ReadinessStatus,
 } from "@/api/comfy";
+import { ComfyBulkImportModal } from "./ComfyBulkImportModal";
 import { ComfyImportModal } from "./ComfyImportModal";
 import styles from "./ComfyReadinessPanel.module.css";
 
@@ -16,10 +17,21 @@ const STATUS_LABEL: Record<ReadinessStatus, string> = {
   not_installed: "Not installed",
 };
 
-export function ComfyReadinessPanel({ sessionId }: { sessionId: string }) {
+export function ComfyReadinessPanel({
+  sessionId,
+  onContinue,
+}: {
+  sessionId: string;
+  onContinue?: () => void;
+}) {
   const readiness = useReadiness(sessionId);
   const refresh = useRefreshReadiness(sessionId);
   const [importTarget, setImportTarget] = useState<ReadinessCard | null>(null);
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const ready = readiness.data?.ready === true;
+  const needsConfigCards = (readiness.data?.cards ?? []).filter(
+    (c) => c.status === "needs_config",
+  );
 
   return (
     <div className={styles.page}>
@@ -37,6 +49,12 @@ export function ComfyReadinessPanel({ sessionId }: { sessionId: string }) {
           }}
         />
       )}
+      <ComfyBulkImportModal
+        targets={needsConfigCards}
+        open={bulkOpen}
+        onOpenChange={setBulkOpen}
+        onCompleted={() => refresh.mutate()}
+      />
       <div className={styles.head}>
         <div className={styles.headBody}>
           <h2 className={styles.title}>Workflow readiness</h2>
@@ -68,12 +86,12 @@ export function ComfyReadinessPanel({ sessionId }: { sessionId: string }) {
       {readiness.data && !readiness.data.error && (
         <div
           className={styles.gateBanner}
-          data-tone={readiness.data.ready ? "ready" : undefined}
+          data-tone={ready ? "ready" : undefined}
         >
-          <Icon name={readiness.data.ready ? "Check" : "AlertCircle"} size={14} />
+          <Icon name={ready ? "Check" : "AlertCircle"} size={14} />
           <span>
-            {readiness.data.ready
-              ? `All ${readiness.data.cards.length} node classes are ready. (Slot mapping and generation arrive in later phases.)`
+            {ready
+              ? `All ${readiness.data.cards.length} node classes are ready.`
               : `${readiness.data.cards.filter((c) => c.status !== "ready").length} of ${readiness.data.cards.length} node classes still need attention.`}
           </span>
         </div>
@@ -94,6 +112,35 @@ export function ComfyReadinessPanel({ sessionId }: { sessionId: string }) {
           />
         ))}
       </div>
+
+      {(onContinue || needsConfigCards.length > 0) && (
+        <div className={styles.foot}>
+          {needsConfigCards.length > 0 && (
+            <Button
+              icon={<Icon name="Sparkles" size={12} />}
+              onClick={() => setBulkOpen(true)}
+              title="Run the per-node import wizard against every node class still marked needs config."
+            >
+              Import all ({needsConfigCards.length})
+            </Button>
+          )}
+          {onContinue && (
+            <Button
+              variant="primary"
+              disabled={!ready}
+              onClick={onContinue}
+              title={
+                ready
+                  ? "Move on to slot mapping."
+                  : "Resolve every node class above before continuing."
+              }
+              icon={<Icon name="ChevronRight" size={12} />}
+            >
+              Continue to slot mapping
+            </Button>
+          )}
+        </div>
+      )}
     </div>
   );
 }

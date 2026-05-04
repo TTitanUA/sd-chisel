@@ -15,15 +15,44 @@ ComfyUI 0.15.1 + LMStudio. Each subsection below is annotated with
 **✅ shipped**, **⏭ deferred** (with rationale), or no marker (still
 planned).
 
-Open Phase 1 polish noted by the user:
-- Visual огрехи across the new screens — to be polished later.
+**Phase 2 — shipped.** `comfy_workflows.slot_map_json` plus
+`GET/PUT /api/comfy/sessions/{id}/slot_map` endpoints; a manual
+slot-map editor on a separate screen reachable via a Continue button
+that's gated on full readiness; eligibility computed from
+graph + catalog raw schema (literal-valued `STRING` → text bucket,
+literal `image_upload` combo → image bucket); user-set
+`graph[node]._meta.title` surfaced in the dropdown alongside a
+`current_value` preview so two same-class nodes stay distinguishable.
+A bulk-import affordance on the readiness panel runs the per-node
+wizard against every `needs_config` card, skipping failures, with a
+spinning row + pulsing background while each runs. Verified
+end-to-end against a real Flux 2 workflow with 18 node classes.
+
+`role_hint` cleanup landed alongside Phase 2: Stage 3 of the import
+wizard now asks the LLM only for `description_md` + optional notes
+(closed enum gone), the library editor dropped the role_hint
+dropdown, and the catalog read-path silently strips legacy
+`role_hint` keys from older rows. Schema columns remain (sparse,
+harmless) — a future migration can drop them outright.
+
+Open polish carried forward:
+- Visual огрехи across the new screens — still to be polished later.
 - LM Studio model selection for `comfy_import` is implicit (favourite
   model). Reasoning-distilled models can still produce empty content
   even with the bumped `max_tokens=6000` baseline; consider a
   dedicated `comfy_import_model_name` setting later.
+- Library `comfy-nodes` sidebar should match the visual treatment of
+  `library/models` — same layout, spacing, and component structure as
+  the models view. Currently diverges; align it.
+- Node import wizard modal should expose model + sampling parameter
+  selection for the `comfy_import` action (override the implicit
+  favourite-model default per import). Additionally, the wizard
+  should **not** kick off the analysis automatically on open — the
+  user picks the model / params first, then presses an explicit
+  **Run** button in the modal to start the four-stage flow.
 
-**Phase 2 (slot mapping)** and **Phase 3 (generation execution)** are
-untouched — sketches at the bottom of this doc are still the design.
+**Phase 3 (generation execution)** is the remaining piece — sketch
+at the bottom of this doc is still the intended design.
 
 ## Context and end goal
 
@@ -55,11 +84,11 @@ on-demand, gated by the workflow the user actually wants to run.
    grows as a side effect of import. The library gained a Comfy Nodes
    section as a secondary view of what has been imported.
 
-2. **Workflow slot mapping.** Pending. Once a workflow's nodes are
-   all ready, propose a mapping from logical slots (positive prompt,
-   negative prompt, seed, width / height, main image, LoRA stack,
-   sampler params) onto specific node ids using the catalog's role
-   hints. User confirms or edits.
+2. **Workflow slot mapping.** ✅ shipped. Once a workflow's nodes are
+   all ready, the user picks per-slot assignments from a type-filtered
+   list of literal-valued inputs. No automatic proposal — see Q7. The
+   slot list is narrower than the original sketch (text + image only;
+   sampler params, dimensions, etc. stay baked into the workflow).
 
 3. **Generation execution.** Pending. `comfy_client` service, the
    actual queue + websocket cycle, image fetching, persistence,
@@ -362,24 +391,82 @@ vs what was simplified.
 
 ---
 
-## Phase 2 — Workflow slot mapping (sketch, pending)
+## Phase 2 — Workflow slot mapping ✅ shipped
 
-The catalog supplies `role_hint` annotations for every input of every
-node in any imported workflow. Phase 2:
+sd-chisel only injects values it actually has: text (positive /
+negative prompts) and images (i2i source). Everything else (seed,
+steps, cfg, sampler, scheduler, denoise, width, height, checkpoint,
+VAE, clip_skip) is already baked into the workflow by the user when
+they exported it from ComfyUI — Phase 2 deliberately does not touch
+those. Slot list shipped: `positive_prompt`, `negative_prompt`,
+`main_image`. LoRA slots still pending Q3.
 
-- Walk the workflow's `graph_json`; for each node, look up
-  `comfy_nodes.inputs_semantic_json` to learn the role hints. Propose
-  a `slot_map` linking logical slots to concrete `(node_id, input_name)`
-  pairs. Heuristics (e.g. "positive_prompt = the longest text
-  CLIPTextEncode") supplement role hints when several candidates exist.
-- Slot map editor: per logical slot, dropdown of candidates with
-  rationale. User confirms / edits / saves.
-- Mode (`t2i` / `i2i`) is inferred from whether a `main_image` slot is
-  required and resolves to a `LoadImage` node.
-- Stored on `comfy_workflows.slot_map_json`. Illustrative shape:
-  `{"positive_prompt": {"node": "6", "input": "text"},
-    "seed": {"node": "3", "input": "seed"},
-    "main_image": {"node": "10", "input": "image"}, …}`.
+The slot map is **user-driven**. No `role_hint`-based auto-proposal
+(see Q7). The UI narrows candidates by *injectability*:
+
+- An input is **eligible** if its value in `graph_json` is a literal
+  (not a `[node_id, output_idx]` wire reference) AND its type in the
+  catalog's `inputs_raw_json` is one sd-chisel can supply:
+  - `STRING` (with `multiline` carried through) → text bucket.
+  - Combo with `image_upload=true` (LoadImage-style picker) →
+    image bucket. Other combos (sampler_name, ckpt list) stay off
+    the list — those are the user's choice baked into the
+    workflow.
+- Class types not yet in the catalog still produce text candidates
+  via a softer fallback (any literal string), flagged with
+  `node_in_catalog=false` so the editor can hint that finishing
+  import would help. Image candidates need the catalog (no way to
+  detect `image_upload` without it).
+- Each candidate carries the user's per-node title from the canvas
+  (`graph[node]._meta.title`) when set, plus a short preview of the
+  current literal value — together they distinguish two nodes of
+  the same class (the canonical "positive vs negative
+  CLIPTextEncode" case).
+- Mode (`t2i` / `i2i`) is inferred from whether `main_image` is
+  assigned.
+
+UI:
+
+- The slot-map editor lives on a separate screen reachable from the
+  readiness panel via a primary **Continue to slot mapping** button
+  at the bottom. The button is disabled until every node class is
+  `ready`. A **Back to nodes** button on the slot-map screen
+  returns. No step-tab nav at the top of the workspace (was tried
+  and removed — felt wrong).
+- A secondary **Import all (N)** button on the readiness panel
+  runs the per-node wizard against every `needs_config` card in a
+  loop, with a modal showing per-row progress (spinning icon +
+  pulsing accent background while running). Failures are skipped,
+  the rest continues; cancel aborts.
+- Slot-map editor: one row per logical slot, each a `<select>`
+  whose options come from the matching candidate bucket. Option
+  label is
+  `<title|display_name|class_type>.<input> (#<node_id>) — "<value preview>"`.
+
+API:
+
+- `GET /api/comfy/sessions/{id}/slot_map` — recomputes candidates
+  every call, merges with the saved slot_map. Returns
+  `{session_id, workflow_id, slot_map, candidates: {text, image}}`.
+- `PUT /api/comfy/sessions/{id}/slot_map` — full-replace write,
+  422 on a `(node_id, input_name)` that isn't a candidate of the
+  slot's expected kind.
+
+Storage: `comfy_workflows.slot_map_json` (added in migration 014),
+shape `{slot: null | {node_id, input_name}}`. All slots are optional;
+saving partial maps is fine — Phase 3 will skip null slots when
+patching the graph.
+
+LoRA injection is still parked under Q3 — once the approach is
+chosen, the slot list and candidate-bucket plumbing here extend
+naturally (e.g. an `lora_chain_anchor` slot or a stack-node-targeted
+`lora_N`/`strength_N` set).
+
+Auto-mapping was tempting for the simple SDXL t2i path but degraded
+quickly on real graphs (HiRes-fix, refiners, ControlNet, multiple
+`LoadImage`). Manual selection from a type-filtered list with
+canvas-title + value preview keeps the editor honest and worked
+cleanly on a real 18-node Flux 2 workflow during smoke-testing.
 
 ## Phase 3 — Generation execution (sketch, pending)
 
@@ -411,6 +498,16 @@ Resolved since previous revisions:
   non-LLM stages cost ~50 ms each; building a job-state machine just
   for them was over-engineering. Section above flags this as worth
   revisiting if the LLM step ever costs real money.
+- **Q7 — Scope of `role_hint`** — dropped entirely. The catalog
+  stores raw schema + descriptions only; no per-input role enum.
+  Slot mapping is purely manual at the workflow level (Phase 2
+  sketch above), with the editor narrowing candidates by
+  *injectability* (literal-valued inputs of types sd-chisel can
+  supply: `STRING` for text, `LoadImage.image` filename for images).
+  Stage 3 of the import wizard now produces `description_md` only
+  and no longer validates a role_hint enum. The shipped Phase 1
+  schema's `inputs_semantic_json` field stays in place but is
+  effectively dead weight — see polish item in the Status section.
 
 Still parked:
 
@@ -504,25 +601,15 @@ tests against `python_module` once that path was chosen.
   (mock LLM responses), assert the all-ready transition unlocks the
   session.
 
-## Spec impact ⏳ pending
+## Spec impact ✅ landed
 
-Phase 1 shipped but `docs/spec/technical_specifications.md` has not
-been updated yet. Backlog for the next session:
+`docs/spec/technical_specifications.md` §10 ("ComfyUI integration")
+covers Phase 1 + Phase 2 cohesively: settings, comfy session
+lifecycle, workflow upload, catalog tables, the per-node import
+wizard, and the slot-map editor / endpoints. §9 ("MVP scope") was
+updated to mark ComfyUI Phase 1 + 2 as shipped post-MVP and to call
+out Phase 3 (generation execution) as the remaining piece.
 
-- Add `comfy` to the session_type enum, with its `unready` /
-  `ready` lifecycle.
-- Add `comfy_packs`, `comfy_nodes`, `comfy_node_overrides`,
-  `comfy_workflows` to the data model.
-- Add `comfyui_url`, `comfyui_path`, and `comfyui_api_key` to settings.
-- Add the new `comfy_import` action (alongside `analyze`, `chat`,
-  `summarize`, `generate`), its `default_comfy_import_settings`
-  app-level column, and the code-level `BUILTIN_DEFAULTS` baseline.
-- Document the workflow-bound session creation flow and the per-node
-  import wizard (4 stages, SSE event types, retry-from-scratch
-  semantics).
-- Add the Comfy Nodes library section.
-- Note Phases 2 and 3 are still planned but not in scope.
-
-This document remains for ongoing planning of Phases 2 and 3, the
-parked open questions, and the polish items called out in the
-**Status** section at the top.
+This document remains for ongoing planning of Phase 3, the parked
+open questions, and the polish items called out in the **Status**
+section at the top.

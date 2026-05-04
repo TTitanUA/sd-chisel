@@ -5,7 +5,6 @@ import { Icon } from "@/components/atoms/Icon";
 import { TextInput } from "@/components/molecules/FormField";
 import { MarkdownView } from "@/components/molecules/MarkdownField";
 import {
-  ROLE_HINTS,
   useNode,
   useNodes,
   usePack,
@@ -382,17 +381,16 @@ function NodeDetailPane({ classType }: { classType: string }) {
 
       <div className={styles.detailSection}>
         <div className={styles.detailSectionTitle}>
-          Inputs (semantic) — assign role hints used by slot mapping
+          Inputs — optional notes shown in the slot-map editor
         </div>
         {draftSemantic.length === 0 ? (
           <div className={styles.empty}>
-            No semantic inputs recorded. (Inputs come from the per-node import
+            No inputs recorded. (Inputs come from the per-node import
             wizard, which writes them to the catalog alongside the raw schema.)
           </div>
         ) : (
           <div className={styles.semanticEditor}>
             <span className={styles.semanticEditorHead}>name</span>
-            <span className={styles.semanticEditorHead}>role hint</span>
             <span className={styles.semanticEditorHead}>notes</span>
             {draftSemantic.map((row, idx) => (
               <SemanticRow
@@ -480,22 +478,6 @@ function SemanticRow({
   return (
     <>
       <span className={styles.inputsName}>{row.name}</span>
-      <select
-        value={row.role_hint ?? ""}
-        onChange={(e) =>
-          onChange({
-            ...row,
-            role_hint: e.currentTarget.value || null,
-          })
-        }
-      >
-        <option value="">— none —</option>
-        {ROLE_HINTS.map((hint) => (
-          <option key={hint} value={hint}>
-            {hint}
-          </option>
-        ))}
-      </select>
       <input
         type="text"
         value={row.notes ?? ""}
@@ -505,7 +487,7 @@ function SemanticRow({
             notes: e.currentTarget.value || null,
           })
         }
-        placeholder="optional"
+        placeholder="optional notes"
       />
     </>
   );

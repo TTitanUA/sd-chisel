@@ -6,10 +6,13 @@ import { Button } from "@/components/atoms/Button";
 import { Icon } from "@/components/atoms/Icon";
 import { ChatPane } from "@/components/molecules/ChatPane";
 import { ComfyReadinessPanel } from "@/components/organisms/ComfyReadinessPanel";
+import { ComfySlotMappingPanel } from "@/components/organisms/ComfySlotMappingPanel";
 import { PromptPane } from "@/components/organisms/PromptPane";
 import { SessionSettingsDrawer } from "@/components/organisms/SessionSettingsDrawer";
 import { SourceImagesPane } from "@/components/organisms/SourceImagesPane";
 import styles from "@/components/templates/WorkspaceLayout.module.css";
+
+type ComfyStep = "nodes" | "slot_map";
 
 export function ProjectLanding() {
   const { projectId } = useParams();
@@ -31,6 +34,7 @@ export default function WorkspaceRoute() {
   const session = useSession(sessionId);
   const projects = useProjects();
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [comfyStep, setComfyStep] = useState<ComfyStep>("nodes");
 
   if (!projectId || !sessionId) {
     return <div className={styles.empty}>Pick a session from the sidebar.</div>;
@@ -72,7 +76,20 @@ export default function WorkspaceRoute() {
         </div>
       </header>
       {isComfy ? (
-        <ComfyReadinessPanel sessionId={s.id} />
+        <div className={styles.body}>
+          {comfyStep === "nodes" && (
+            <ComfyReadinessPanel
+              sessionId={s.id}
+              onContinue={() => setComfyStep("slot_map")}
+            />
+          )}
+          {comfyStep === "slot_map" && (
+            <ComfySlotMappingPanel
+              sessionId={s.id}
+              onBack={() => setComfyStep("nodes")}
+            />
+          )}
+        </div>
       ) : (
         <div className={styles.grid}>
           <SourceImagesPane session={s} />
@@ -91,3 +108,5 @@ export default function WorkspaceRoute() {
     </>
   );
 }
+
+

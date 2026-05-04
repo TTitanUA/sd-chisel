@@ -140,14 +140,32 @@ def test_get_node_returns_full_schema(client, conn):
     _seed_pack(conn, name="ComfyUI")
     _seed_node(
         conn, class_type="KSampler", pack_name="ComfyUI",
-        inputs_semantic=[{"name": "seed", "role_hint": "seed"}],
+        inputs_semantic=[{"name": "seed", "notes": "Random seed."}],
         description="Samples.",
     )
     body = client.get("/api/comfy/nodes/KSampler").json()
     assert body["class_type"] == "KSampler"
-    assert body["inputs_semantic"] == [{"name": "seed", "role_hint": "seed", "notes": None}]
+    assert body["inputs_semantic"] == [{"name": "seed", "notes": "Random seed."}]
     assert body["has_override"] is False
     assert body["inputs_raw"] == {"required": {}}
+
+
+def test_get_node_strips_legacy_role_hint_keys(client, conn):
+    """Phase 1 catalog rows persisted role_hint per input. Phase 2
+    drops the field; the read path must silently strip it so older
+    rows still serialise cleanly."""
+    _seed_pack(conn, name="ComfyUI")
+    _seed_node(
+        conn, class_type="KSampler", pack_name="ComfyUI",
+        inputs_semantic=[
+            {"name": "seed", "role_hint": "seed", "notes": "from a phase-1 row"},
+        ],
+        description="Samples.",
+    )
+    body = client.get("/api/comfy/nodes/KSampler").json()
+    assert body["inputs_semantic"] == [
+        {"name": "seed", "notes": "from a phase-1 row"},
+    ]
 
 
 def test_get_node_404_for_unknown(client):
@@ -174,7 +192,7 @@ def test_put_node_writes_override_and_merges_on_read(client, conn):
     assert again["description_md"] == "User edit."
 
     # Non-overridden fields stay on the canonical row.
-    assert again["inputs_semantic"] == [{"name": "seed", "role_hint": None, "notes": None}]
+    assert again["inputs_semantic"] == [{"name": "seed", "notes": None}]
 
 
 def test_put_node_clears_override_when_set_to_null(client, conn):
@@ -214,17 +232,18 @@ def test_put_node_can_replace_inputs_semantic(client, conn):
     _seed_pack(conn, name="ComfyUI")
     _seed_node(
         conn, class_type="KSampler", pack_name="ComfyUI",
-        inputs_semantic=[{"name": "seed", "role_hint": "seed"}],
+        inputs_semantic=[{"name": "seed", "notes": "old"}],
     )
     body = client.put(
         "/api/comfy/nodes/KSampler",
         json={"inputs_semantic": [
-            {"name": "seed", "role_hint": "seed", "notes": "primary seed"},
-            {"name": "steps", "role_hint": "steps", "notes": None},
+            {"name": "seed", "notes": "primary seed"},
+            {"name": "steps", "notes": None},
         ]},
     ).json()
     assert len(body["inputs_semantic"]) == 2
-    assert body["inputs_semantic"][1]["role_hint"] == "steps"
+    assert body["inputs_semantic"][1]["name"] == "steps"
+    assert body["inputs_semantic"][0]["notes"] == "primary seed"
     assert body["has_override"] is True
 
 

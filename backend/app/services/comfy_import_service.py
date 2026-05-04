@@ -6,8 +6,8 @@ Stages:
                      and README for the resolved pack.
   2. fetch_schema  — pull the class_type's INPUT_TYPES from /api/object_info.
   3. enrich_llm    — feed (README + raw schema + display_name) to LMStudio,
-                     get a description and a per-input role_hint annotation,
-                     validate against the raw schema.
+                     get a short markdown description for the node, validate
+                     the response shape.
   4. persist       — upsert comfy_packs + comfy_nodes with all four stages'
                      outputs.
 
@@ -16,6 +16,12 @@ client gets an error event; to retry, the user re-POSTs and stages run
 from scratch. Per-stage retry that preserves earlier outputs is parked
 for a later iteration — every stage is fast except the LLM call, and
 that's the one most likely to need a redo anyway.
+
+Phase 2 cleanup: the wizard previously asked the LLM for a per-input
+``role_hint`` from a closed enum. That field is unused — slot mapping
+is workflow-level and manual (see Q7 in docs/comfy-workflow-plan.md),
+so the LLM is now asked only for ``description_md``. ``inputs_semantic``
+is still written to the catalog but only carries optional notes.
 """
 from __future__ import annotations
 
@@ -28,39 +34,22 @@ from app.services import comfy_client, comfy_packs, lmstudio_client
 from app.storage import comfy_catalog_repo
 
 
-# Closed enum mirrored from docs/comfy-workflow-plan.md and the frontend
-# (api/comfy.ts ROLE_HINTS).
-ROLE_HINTS = frozenset((
-    "positive_prompt", "negative_prompt", "seed", "steps", "cfg",
-    "sampler", "scheduler", "denoise", "width", "height",
-    "main_image", "mask_image",
-    "lora_name", "lora_weight", "lora_chain_anchor",
-    "checkpoint_name", "vae_name", "clip_skip",
-))
-
-
 _LLM_SYSTEM = (
-    "You analyse a ComfyUI custom node and produce a structured summary "
-    "as a single JSON object. Output VALID JSON ONLY — no prose, no "
-    "<think> block, no markdown fences. ALL string values, including "
-    "role_hint enum values, MUST be wrapped in double quotes. Example:\n"
+    "You analyse a ComfyUI custom node and produce a short structured "
+    "summary as a single JSON object. Output VALID JSON ONLY — no prose, "
+    "no <think> block, no markdown fences. Example:\n"
     '{\n'
     '  "description_md": "Samples a latent image from a model.",\n'
     '  "inputs": [\n'
-    '    {"name": "seed", "role_hint": "seed", "notes": "Random seed."},\n'
-    '    {"name": "model", "role_hint": null, "notes": null}\n'
+    '    {"name": "seed", "notes": "Random seed."},\n'
+    '    {"name": "model", "notes": null}\n'
     '  ]\n'
     '}\n'
-    "Rules: every input 'name' MUST match an input name from the schema "
-    "verbatim — do not rename, translate, or invent inputs. role_hint "
-    "is a STRING IN DOUBLE QUOTES from this closed set: "
-    '"positive_prompt", "negative_prompt", "seed", "steps", "cfg", '
-    '"sampler", "scheduler", "denoise", "width", "height", '
-    '"main_image", "mask_image", "lora_name", "lora_weight", '
-    '"lora_chain_anchor", "checkpoint_name", "vae_name", "clip_skip" '
-    "— OR the bare keyword null when no canonical role applies "
-    "(model wires, passthroughs, untyped numbers). Keep notes short "
-    "(or null)."
+    "Rules: ``description_md`` is one or two sentences in markdown. "
+    "Every input 'name' MUST match an input name from the schema "
+    "verbatim — do not rename, translate, or invent inputs. ``notes`` "
+    "is a short string or null. You may omit inputs entirely; the "
+    "schema is canonical. Do not output any other fields."
 )
 
 
@@ -161,13 +150,21 @@ def _validate_llm_response(
     body: dict[str, Any], known_input_names: set[str],
 ) -> tuple[str, list[dict[str, Any]]]:
     """Returns (description_md, inputs_semantic). Raises ImportError_ on
-    bad shape / hallucinated input names / unknown role_hint values."""
+    bad shape or hallucinated input names.
+
+    ``inputs_semantic`` is now a sparse ``[{name, notes}]`` list — the
+    role_hint enum is gone (Phase 2 cleanup). Inputs the LLM didn't
+    mention are still emitted with ``notes=None`` so the catalog row
+    enumerates the full schema for the library node-detail editor.
+    """
     description = body.get("description_md")
     if not isinstance(description, str):
         raise ImportError_("LLM response is missing a string description_md")
     raw_inputs = body.get("inputs")
+    if raw_inputs is None:
+        raw_inputs = []
     if not isinstance(raw_inputs, list):
-        raise ImportError_("LLM response is missing an 'inputs' list")
+        raise ImportError_("LLM response 'inputs' must be a list or omitted")
 
     seen: set[str] = set()
     out: list[dict[str, Any]] = []
@@ -184,25 +181,13 @@ def _validate_llm_response(
         if name in seen:
             raise ImportError_(f"duplicate input '{name}' in LLM response")
         seen.add(name)
-        role_hint = item.get("role_hint")
-        if role_hint is not None and role_hint not in ROLE_HINTS:
-            raise ImportError_(
-                f"unknown role_hint '{role_hint}' for input '{name}'",
-            )
         notes = item.get("notes")
         if notes is not None and not isinstance(notes, str):
             raise ImportError_(f"notes for '{name}' must be a string or null")
-        out.append({
-            "name": name,
-            "role_hint": role_hint,
-            "notes": (notes or None),
-        })
-    # Inputs the LLM didn't mention get a default (no role hint).
+        out.append({"name": name, "notes": (notes or None)})
     for name in known_input_names:
         if name not in seen:
-            out.append({"name": name, "role_hint": None, "notes": None})
-    # Sort to a stable order — known names come first in the schema's order
-    # but the LLM may have rearranged them, so re-sort by the schema list.
+            out.append({"name": name, "notes": None})
     return description.strip(), out
 
 
