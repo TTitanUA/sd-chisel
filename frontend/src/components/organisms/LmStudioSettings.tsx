@@ -17,10 +17,12 @@ import { ActionSettingsButton } from "@/components/molecules/ActionSettingsButto
 import {
   ACTION_LABELS,
 } from "./ActionSettingsModal/fields";
-import type { Action } from "@/api/sessions";
+import type { DefaultAction } from "@/api/settings";
 import styles from "./LmStudioSettings.module.css";
 
-const ACTION_ORDER: readonly Action[] = ["analyze", "chat", "summarize", "generate"];
+const ACTION_ORDER: readonly DefaultAction[] = [
+  "analyze", "chat", "summarize", "generate", "comfy_import",
+];
 
 const LM_STUDIO_DEFAULT_URL = "http://localhost:1234";
 

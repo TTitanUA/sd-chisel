@@ -13,13 +13,16 @@ import {
 import {
   useActionDefaults,
   useUpdateActionDefaults,
+  type DefaultAction,
 } from "@/api/settings";
 import { ACTION_LABELS, FIELDS, type FieldDef } from "./fields";
 import styles from "./ActionSettingsModal.module.css";
 
+// Session-mode targets one of the four session-scoped action columns;
+// default-mode covers all five (those four plus comfy_import).
 type Mode =
   | { kind: "session"; session: Session; action: Action }
-  | { kind: "default"; action: Action };
+  | { kind: "default"; action: DefaultAction };
 
 type DraftField = {
   override: boolean;
@@ -30,14 +33,20 @@ type DraftField = {
 
 type Draft = Record<string, DraftField>;
 
-function readBundle(mode: Mode): SamplingBundle {
+function readBundle(
+  mode: Mode,
+  appDefaults: Record<string, SamplingBundle> | undefined,
+): SamplingBundle {
   if (mode.kind === "session") {
     const field = (`${mode.action}_settings`) as keyof Session;
     const raw = mode.session[field];
     if (raw && typeof raw === "object") return raw as SamplingBundle;
     return {};
   }
-  return {};
+  // default-mode: pre-populate with the currently stored app-default
+  // bundle so the user can tweak existing values instead of starting
+  // every Edit from a blank slate.
+  return (appDefaults?.[mode.action] ?? {}) as SamplingBundle;
 }
 
 function bundleToDraft(bundle: SamplingBundle): Draft {
@@ -101,7 +110,10 @@ export function ActionSettingsModal({
   const [openHelp, setOpenHelp] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const initialBundle = useMemo(() => readBundle(mode), [mode]);
+  const initialBundle = useMemo(
+    () => readBundle(mode, defaults.data),
+    [mode, defaults.data],
+  );
 
   useEffect(() => {
     if (!open) return;

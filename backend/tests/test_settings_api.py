@@ -195,11 +195,43 @@ def test_refresh_updates_capabilities_preserves_enabled(client, monkeypatch):
 # --- action defaults ---
 
 def test_get_action_defaults_returns_empty_bundles_initially(client):
+    """Session-scoped actions ship without baked defaults; comfy_import
+    carries a builtin baseline so the import wizard runs end-to-end on
+    a fresh install."""
     body = client.get("/api/settings/action-defaults").json()
-    assert body == {
-        "analyze": {}, "chat": {}, "summarize": {},
-        "generate": {}, "comfy_import": {},
-    }
+    assert body["analyze"] == {}
+    assert body["chat"] == {}
+    assert body["summarize"] == {}
+    assert body["generate"] == {}
+    # comfy_import — sane baseline that survives reasoning models that
+    # otherwise eat the entire token budget on <think> blocks.
+    assert body["comfy_import"]["temperature"] == 0.1
+    assert body["comfy_import"]["max_tokens"] == 2000
+
+
+def test_user_override_replaces_builtin_for_comfy_import(client):
+    res = client.put(
+        "/api/settings/action-defaults",
+        json={"comfy_import": {"temperature": 0.5, "max_tokens": 4000}},
+    )
+    assert res.status_code == 200
+    body = res.json()
+    assert body["comfy_import"] == {"temperature": 0.5, "max_tokens": 4000}
+
+
+def test_clearing_comfy_import_falls_back_to_builtin(client):
+    client.put(
+        "/api/settings/action-defaults",
+        json={"comfy_import": {"temperature": 0.5}},
+    )
+    cleared = client.put(
+        "/api/settings/action-defaults",
+        json={"comfy_import": {}},
+    ).json()
+    # Cleared overrides resolve to the builtin baseline rather than
+    # leaving the action with nothing.
+    assert cleared["comfy_import"]["temperature"] == 0.1
+    assert cleared["comfy_import"]["max_tokens"] == 2000
 
 
 def test_put_action_defaults_persists_partial_update(client):
@@ -210,11 +242,12 @@ def test_put_action_defaults_persists_partial_update(client):
     assert res.status_code == 200
     body = res.json()
     assert body["chat"] == {"temperature": 0.9, "top_p": 0.85}
-    # Untouched actions stay empty.
+    # Untouched session-scoped actions stay empty; the global
+    # comfy_import action retains its builtin baseline.
     assert body["analyze"] == {}
     assert body["summarize"] == {}
     assert body["generate"] == {}
-    assert body["comfy_import"] == {}
+    assert body["comfy_import"]["max_tokens"] == 2000
 
     # GET reflects the same state.
     again = client.get("/api/settings/action-defaults").json()

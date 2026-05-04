@@ -143,6 +143,18 @@ SESSION_SCOPED_ACTIONS: tuple[Action, ...] = (
 )
 
 
+# Builtin baseline used when neither the user nor the migration set a
+# default — ``settings_repo.get_default_bundle`` folds these in when the
+# stored column is NULL. Only ``comfy_import`` carries baked-in
+# defaults: it's the one action where running with no overrides
+# produces unusable output (reasoning models burn the token budget on
+# <think> blocks). The other four happily run on the model's native
+# sampling, so we leave them empty.
+BUILTIN_DEFAULTS: dict[Action, dict[str, Any]] = {
+    "comfy_import": {"temperature": 0.1, "max_tokens": 2000},
+}
+
+
 def resolve_for_session(
     conn: Any, session: dict[str, Any], action: Action,
 ) -> dict[str, Any]:

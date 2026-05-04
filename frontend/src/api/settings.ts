@@ -53,7 +53,11 @@ export type ActionDefaults = {
   comfy_import: SamplingBundle;
 };
 
-export type Action = keyof ActionDefaults;
+/** Every action that has an app-level default sampling bundle, including
+ * the global ``comfy_import`` action. Distinct from the narrow ``Action``
+ * type in api/sessions.ts (which only enumerates the four session-scoped
+ * actions). */
+export type DefaultAction = keyof ActionDefaults;
 
 export const settingsKeys = {
   lmstudio: () => ["settings", "lmstudio"] as const,
@@ -105,7 +109,7 @@ export const settingsApi = {
     }),
   getActionDefaults: () => apiFetch<ActionDefaults>("/api/settings/action-defaults"),
   putActionDefaults: (
-    body: Partial<Record<Action, SamplingBundle>>,
+    body: Partial<Record<DefaultAction, SamplingBundle>>,
   ) =>
     apiFetch<ActionDefaults>("/api/settings/action-defaults", {
       method: "PUT",
@@ -223,7 +227,7 @@ export function useActionDefaults() {
 export function useUpdateActionDefaults() {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: (body: Partial<Record<Action, SamplingBundle>>) =>
+    mutationFn: (body: Partial<Record<DefaultAction, SamplingBundle>>) =>
       settingsApi.putActionDefaults(body),
     onSuccess: () => {
       void client.invalidateQueries({ queryKey: settingsKeys.actionDefaults() });

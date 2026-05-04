@@ -121,8 +121,20 @@ def _column_for(action: str) -> str:
     return f"default_{action}_settings"
 
 
+def _fallback_for(action: str) -> dict[str, Any]:
+    """Builtin baseline returned when the stored column is NULL.
+
+    Mostly empty — only ``comfy_import`` carries non-trivial defaults
+    (see ``action_settings.BUILTIN_DEFAULTS`` for the rationale)."""
+    return dict(action_settings_svc.BUILTIN_DEFAULTS.get(action, {}))
+
+
 def get_default_bundles(conn: sqlite3.Connection) -> dict[str, dict[str, Any]]:
-    """Return all four default bundles, decoded. Missing/NULL columns map to {}."""
+    """Return every default bundle, decoded. Missing/NULL columns map
+    to the builtin baseline (empty for most actions, sane sampling for
+    ``comfy_import``). An explicit ``{}`` stored in the column means
+    "user cleared all overrides" and also resolves to the baseline —
+    we don't preserve that distinction in storage today."""
     cols = ", ".join(f"default_{a}_settings" for a in action_settings_svc.ACTIONS)
     row = conn.execute(
         f"SELECT {cols} FROM app_settings WHERE id = 1",
@@ -131,21 +143,29 @@ def get_default_bundles(conn: sqlite3.Connection) -> dict[str, dict[str, Any]]:
     for a in action_settings_svc.ACTIONS:
         raw = row[f"default_{a}_settings"] if row is not None else None
         decoded = action_settings_svc.decode_bundle(raw)
-        out[a] = decoded if decoded is not None else {}
+        if not decoded:
+            out[a] = _fallback_for(a)
+        else:
+            out[a] = decoded
     return out
 
 
 def get_default_bundle(
     conn: sqlite3.Connection, action: str,
 ) -> dict[str, Any]:
-    """Return the default bundle for a single action (empty dict if unset)."""
+    """Return the default bundle for a single action.
+
+    Falls back to the builtin baseline when the stored column is NULL
+    or has been explicitly cleared to ``{}``."""
     col = _column_for(action)
     row = conn.execute(
         f"SELECT {col} FROM app_settings WHERE id = 1",
     ).fetchone()
     raw = row[col] if row is not None else None
     decoded = action_settings_svc.decode_bundle(raw)
-    return decoded if decoded is not None else {}
+    if not decoded:
+        return _fallback_for(action)
+    return decoded
 
 
 def set_default_bundles(
