@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ApiError, apiFetch } from "./client";
+import { API_BASE, ApiError, apiFetch } from "./client";
 
 export type WorkflowSummary = {
   id: string;
@@ -100,6 +100,74 @@ export type NodeUpdateBody = {
   inputs_semantic?: NodeInputSemantic[] | null;
   category?: string | null;
 };
+
+// --- per-node import wizard (SSE) ---------------------------------------
+
+export const IMPORT_STAGES = [
+  "locate_pack",
+  "fetch_schema",
+  "enrich_llm",
+  "persist",
+] as const;
+export type ImportStage = (typeof IMPORT_STAGES)[number];
+
+export const IMPORT_STAGE_LABEL: Record<ImportStage, string> = {
+  locate_pack: "Locate pack",
+  fetch_schema: "Fetch schema",
+  enrich_llm: "Generate description",
+  persist: "Save to catalog",
+};
+
+export type ImportEvent =
+  | { type: "stage_started"; stage: ImportStage | "internal" }
+  | { type: "stage_succeeded"; stage: ImportStage; data: Record<string, unknown> }
+  | { type: "stage_failed"; stage: ImportStage | "internal"; error: string }
+  | { type: "done"; class_type: string; node: Node };
+
+/** Stream the SSE events from a per-node import. The promise resolves
+ * once the stream ends; events are reported through the callback. */
+export async function runImport(
+  classType: string,
+  onEvent: (event: ImportEvent) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  const res = await fetch(
+    `${API_BASE}/api/comfy/nodes/${encodeURIComponent(classType)}/import`,
+    { method: "POST", signal },
+  );
+  if (!res.ok || !res.body) {
+    const body = res.body ? await res.text() : "";
+    throw new ApiError(res.status, body || "import endpoint failed");
+  }
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      // SSE frames end with a blank line.
+      let idx;
+      while ((idx = buffer.indexOf("\n\n")) >= 0) {
+        const frame = buffer.slice(0, idx);
+        buffer = buffer.slice(idx + 2);
+        for (const line of frame.split("\n")) {
+          const trimmed = line.replace(/^data:\s?/, "");
+          if (!trimmed || trimmed === line) continue;
+          try {
+            onEvent(JSON.parse(trimmed) as ImportEvent);
+          } catch {
+            // Skip malformed lines; the server-side schema is strict.
+          }
+        }
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+}
+
 
 /** Closed enum mirrored from docs/comfy-workflow-plan.md. */
 export const ROLE_HINTS = [

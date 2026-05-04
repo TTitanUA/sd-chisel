@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Button } from "@/components/atoms/Button";
 import { Icon } from "@/components/atoms/Icon";
 import {
@@ -6,6 +7,7 @@ import {
   type ReadinessCard,
   type ReadinessStatus,
 } from "@/api/comfy";
+import { ComfyImportModal } from "./ComfyImportModal";
 import styles from "./ComfyReadinessPanel.module.css";
 
 const STATUS_LABEL: Record<ReadinessStatus, string> = {
@@ -17,9 +19,24 @@ const STATUS_LABEL: Record<ReadinessStatus, string> = {
 export function ComfyReadinessPanel({ sessionId }: { sessionId: string }) {
   const readiness = useReadiness(sessionId);
   const refresh = useRefreshReadiness(sessionId);
+  const [importTarget, setImportTarget] = useState<ReadinessCard | null>(null);
 
   return (
     <div className={styles.page}>
+      {importTarget && (
+        <ComfyImportModal
+          classType={importTarget.class_type}
+          classDisplayName={importTarget.display_name ?? importTarget.class_type}
+          open={true}
+          onOpenChange={(o) => {
+            if (!o) setImportTarget(null);
+          }}
+          onImported={() => {
+            // Re-fetch readiness so the card flips to "ready".
+            refresh.mutate();
+          }}
+        />
+      )}
       <div className={styles.head}>
         <div className={styles.headBody}>
           <h2 className={styles.title}>Workflow readiness</h2>
@@ -70,7 +87,11 @@ export function ComfyReadinessPanel({ sessionId }: { sessionId: string }) {
 
       <div className={styles.cards}>
         {readiness.data?.cards.map((card) => (
-          <Card key={card.class_type} card={card} />
+          <Card
+            key={card.class_type}
+            card={card}
+            onImport={() => setImportTarget(card)}
+          />
         ))}
       </div>
     </div>
@@ -78,7 +99,12 @@ export function ComfyReadinessPanel({ sessionId }: { sessionId: string }) {
 }
 
 
-function Card({ card }: { card: ReadinessCard }) {
+function Card({
+  card, onImport,
+}: {
+  card: ReadinessCard;
+  onImport: () => void;
+}) {
   return (
     <div className={styles.card} data-status={card.status}>
       <div>
@@ -109,10 +135,7 @@ function Card({ card }: { card: ReadinessCard }) {
       </div>
       <div className={styles.cardActions}>
         {card.status === "needs_config" && (
-          <Button
-            disabled
-            title="Per-node import wizard arrives in the next iteration."
-          >
+          <Button variant="primary" onClick={onImport}>
             Import…
           </Button>
         )}
