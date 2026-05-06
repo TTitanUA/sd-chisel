@@ -10,9 +10,15 @@ from starlette.responses import StreamingResponse
 
 from app.api.deps import get_conn
 from app.models.chat import ChatRequest, MessageOut, MessagesResponse
-from app.services import action_settings, llm_log, lmstudio_client
+from app.services import (
+    action_settings,
+    comfy_payload,
+    comfy_slot_map_service,
+    llm_log,
+    lmstudio_client,
+)
+from app.storage import comfy_workflow_repo, session_repo, settings_repo, source_image_repo
 from app.storage import db as db_mod
-from app.storage import session_repo, settings_repo, source_image_repo
 
 Conn = Annotated[sqlite3.Connection, Depends(get_conn)]
 
@@ -61,10 +67,45 @@ def _validated_prompt_model_name(
     return name
 
 
+def _resolve_chat_mode_and_slots(
+    conn: sqlite3.Connection, session_row: dict,
+) -> tuple[str, list[dict]]:
+    """For comfy sessions, derive the chat-time mode (i2i / t2i) from
+    the bound workflow's slot map and return the slot list for the
+    Q9 slot-awareness block. For legacy sessions, returns the
+    session's explicit ``session_type`` and an empty slot list.
+
+    Errors during slot resolution are swallowed — chat must keep
+    working even if the workflow row is missing or the slot map is
+    corrupt; we just degrade to a slot-unaware system prompt.
+    """
+    if session_row.get("session_type") != "comfy":
+        return session_row.get("session_type") or "i2i", []
+    workflow_id = session_row.get("comfy_workflow_id")
+    if not workflow_id:
+        return "t2i", []
+    try:
+        workflow = comfy_workflow_repo.get_workflow(conn, workflow_id)
+        if workflow is None:
+            return "t2i", []
+        candidates = comfy_slot_map_service.compute_candidates(
+            conn=conn, graph=workflow["graph"],
+        )
+        slot_map_v2 = comfy_slot_map_service.upgrade_slot_map(
+            raw=workflow.get("slot_map"), candidates=candidates,
+        )
+    except Exception:  # noqa: BLE001 — chat must not crash on a bad workflow row
+        return "t2i", []
+    return (
+        comfy_slot_map_service.infer_mode(slot_map_v2),
+        list(slot_map_v2.get("slots") or []),
+    )
+
+
 def _build_system_messages(
     conn: sqlite3.Connection, session_row: dict,
 ) -> list[dict]:
-    mode = session_row.get("session_type") or "i2i"
+    mode, comfy_slots = _resolve_chat_mode_and_slots(conn, session_row)
     system_prompt = (
         CHAT_SYSTEM_PROMPT_T2I if mode == "t2i" else CHAT_SYSTEM_PROMPT_I2I
     )
@@ -85,25 +126,32 @@ def _build_system_messages(
         if ref_lines:
             block = "# Reference images\n" + "\n".join(ref_lines) + analysis_trailer
             msgs.append({"role": "system", "content": block})
-        return msgs
+    else:
+        main_image = next((s for s in sources if s["is_main"]), None)
+        if main_image is not None and (main_image.get("analysis") or "").strip():
+            main_label = f"Image_{main_image['image_number']}"
+            block = (
+                f"# Source image analysis ({main_label}, main)\n"
+                f"{main_image['analysis']}"
+            )
+            ref_lines = []
+            for s in sources:
+                if s["is_main"] or not (s.get("analysis") or "").strip():
+                    continue
+                text = s["analysis"].strip().replace("\n", " ")
+                ref_lines.append(f"- Image_{s['image_number']}: {text}")
+            if ref_lines:
+                block += "\n\n# Reference images\n" + "\n".join(ref_lines)
+            block += analysis_trailer
+            msgs.append({"role": "system", "content": block})
 
-    main_image = next((s for s in sources if s["is_main"]), None)
-    if main_image is not None and (main_image.get("analysis") or "").strip():
-        main_label = f"Image_{main_image['image_number']}"
-        block = (
-            f"# Source image analysis ({main_label}, main)\n"
-            f"{main_image['analysis']}"
-        )
-        ref_lines = []
-        for s in sources:
-            if s["is_main"] or not (s.get("analysis") or "").strip():
-                continue
-            text = s["analysis"].strip().replace("\n", " ")
-            ref_lines.append(f"- Image_{s['image_number']}: {text}")
-        if ref_lines:
-            block += "\n\n# Reference images\n" + "\n".join(ref_lines)
-        block += analysis_trailer
-        msgs.append({"role": "system", "content": block})
+    # Q9: slot-aware chat for comfy sessions with a non-empty slot map.
+    # Empty slot maps (fresh upload, not yet labelled) and legacy
+    # i2i / t2i sessions skip the block entirely.
+    if comfy_slots:
+        slot_block = comfy_payload.build_chat_slot_block(comfy_slots)
+        if slot_block:
+            msgs.append({"role": "system", "content": slot_block})
     return msgs
 
 

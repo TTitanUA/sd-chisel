@@ -373,26 +373,47 @@ def append_prompt(
     conn: sqlite3.Connection,
     *,
     session_id: str,
-    positive: str,
-    negative: str | None,
     loras: list[dict[str, Any]],
     intents: list[dict[str, Any]] | None,
     retrieved: list[dict[str, Any]] | None,
     brief: str | None = None,
+    positive: str | None = None,
+    negative: str | None = None,
+    payload: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    """Append one row to ``prompts`` for either a legacy or comfy session.
+
+    Legacy callers (i2i / t2i) pass ``positive`` (required) and may
+    pass ``negative``. Comfy callers pass ``payload`` and leave
+    ``positive`` / ``negative`` unset — the row stores ``positive=""``
+    + ``negative=NULL`` so the NOT NULL constraint on ``positive``
+    holds without leaking blank prompts into the legacy read path
+    (``payload_json`` being non-NULL is the discriminator). ``loras``
+    is persisted into the legacy ``loras_json`` column for both
+    paths so the prompt panel's LoRA widget is shape-agnostic.
+    """
+    if payload is not None:
+        positive_val = ""
+        negative_val: str | None = None
+    else:
+        if positive is None:
+            raise ValueError("either positive or payload must be set")
+        positive_val = positive
+        negative_val = negative
     now = _now()
     cur = conn.execute(
         "INSERT INTO prompts(session_id, positive, negative, loras_json, "
-        "intents_json, retrieved_loras_json, brief, created_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        "intents_json, retrieved_loras_json, brief, payload_json, created_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             session_id,
-            positive,
-            negative,
+            positive_val,
+            negative_val,
             json.dumps(loras, ensure_ascii=False),
             json.dumps(intents, ensure_ascii=False) if intents is not None else None,
             json.dumps(retrieved, ensure_ascii=False) if retrieved is not None else None,
             brief,
+            json.dumps(payload, ensure_ascii=False) if payload is not None else None,
             now,
         ),
     )

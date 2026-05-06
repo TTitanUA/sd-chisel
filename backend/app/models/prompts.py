@@ -8,9 +8,14 @@ Naming notes:
   raw model output, so we don't lose information either way.
 - ``RetrievedLora`` / ``RetrievedIntent`` are pure server-side debug payloads.
 - ``PromptOut`` / ``GeneratePromptResponse`` / ``PromptsResponse`` are the API
-  envelopes.
+  envelopes. Each row carries either ``prompt`` (legacy i2i / t2i sessions
+  produce ``GeneratedPrompt``) or ``payload`` (comfy sessions produce a
+  per-workflow JSON object keyed by slot label, see Phase 3 prep in
+  docs/comfy-workflow-plan.md), never both.
 """
 from __future__ import annotations
+
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -53,7 +58,10 @@ class RetrievedIntent(BaseModel):
 class PromptOut(BaseModel):
     id: int
     session_id: str
-    prompt: GeneratedPrompt
+    prompt: GeneratedPrompt | None = None
+    payload: dict[str, Any] | None = None
+    """For comfy sessions only. Keyed by slot label; ``__loras``
+    carries the LoRA list (same shape as legacy ``loras``)."""
     intents: list[Intent] | None
     retrieved: list[RetrievedIntent] | None
     brief: str | None = None
@@ -76,7 +84,8 @@ class GeneratePromptRequest(BaseModel):
 
 class GeneratePromptResponse(BaseModel):
     prompt_id: int
-    prompt: GeneratedPrompt
+    prompt: GeneratedPrompt | None = None
+    payload: dict[str, Any] | None = None
     intents: list[Intent]
     retrieved: list[RetrievedIntent]
     brief: str | None = None
@@ -97,6 +106,23 @@ class SummarizePinnedLoraView(BaseModel):
     weight: float | None = None
 
 
+class SummarizeSlotView(BaseModel):
+    """Comfy-only: one row in the modal's slot context preview.
+
+    Mirrors the per-slot fields ``GenerateModal``'s comfy section
+    needs to render — ``frozen_value`` is non-null only for
+    ``binding=frozen`` slots (the modal renders it inline). Edits
+    happen in the slot-map editor, not the modal (Phase 3 prep
+    keeps the modal read-only).
+    """
+    label: str
+    group: str | None = None
+    kind: str
+    binding: str
+    description: str | None = None
+    frozen_value: Any | None = None
+
+
 class SummarizeContext(BaseModel):
     """Read-only preview of what the orchestrator will see (minus
     family prompt guides). Powers the Generate modal so the user sees
@@ -111,6 +137,9 @@ class SummarizeContext(BaseModel):
     use_negative: bool = True
     main_image: SummarizeImageView | None = None
     reference_images: list[SummarizeImageView] = Field(default_factory=list)
+    comfy_slots: list[SummarizeSlotView] | None = None
+    """Non-null only for comfy sessions. Empty list means the workflow
+    has no slot map saved yet — the modal renders a placeholder."""
 
 
 class SummarizeChatResponse(BaseModel):

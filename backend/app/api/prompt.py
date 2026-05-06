@@ -20,15 +20,19 @@ from app.models.prompts import (
     SummarizeContext,
     SummarizeImageView,
     SummarizePinnedLoraView,
+    SummarizeSlotView,
 )
 from app.services import (
     action_settings,
     chat_summarizer,
+    comfy_payload,
+    comfy_slot_map_service,
     lmstudio_client,
     prompt_orchestrator,
     task_runner,
 )
 from app.storage import (
+    comfy_workflow_repo,
     library_repo,
     session_repo,
     settings_repo,
@@ -147,8 +151,35 @@ def _build_summarize_context(
         if not s["is_main"] and (s.get("analysis") or "").strip()
     ]
 
+    is_comfy = session.get("session_type") == "comfy"
+    comfy_slots: list[SummarizeSlotView] | None = None
+    mode = session.get("session_type") or "i2i"
+    if is_comfy:
+        slot_map_v2 = _resolve_comfy_slot_map(conn, session)
+        slots = list(slot_map_v2.get("slots") or [])
+        # Modal shows mode = the inferred mode (i2i / t2i), not the
+        # raw "comfy" session type — that's what drives the family
+        # guide append in the orchestrator and matches what the user
+        # cares about ("am I doing image-to-image or text-to-image").
+        mode = comfy_slot_map_service.infer_mode(slot_map_v2)
+        comfy_slots = [
+            SummarizeSlotView(
+                label=s["label"],
+                group=s.get("group"),
+                kind=s["kind"],
+                binding=s["binding"],
+                description=s.get("description"),
+                frozen_value=(
+                    (s.get("metadata") or {}).get("value")
+                    if s.get("binding") == "frozen"
+                    else None
+                ),
+            )
+            for s in comfy_payload.sorted_slots(slots)
+        ]
+
     return SummarizeContext(
-        mode=session.get("session_type") or "i2i",
+        mode=mode,
         model_name=session.get("model_name"),
         model_description=model_description,
         family_id=family_id,
@@ -157,6 +188,28 @@ def _build_summarize_context(
         use_negative=bool(session.get("use_negative", True)),
         main_image=main_view,
         reference_images=refs,
+        comfy_slots=comfy_slots,
+    )
+
+
+def _resolve_comfy_slot_map(
+    conn: sqlite3.Connection, session: dict[str, Any],
+) -> dict[str, Any]:
+    """Slot-map fetch shared by the summarize-context builder and the
+    orchestrator. Returns an empty v2 envelope when the comfy session
+    has no workflow bound or the workflow row is missing — both states
+    are recoverable from the workspace UI, not server errors."""
+    workflow_id = session.get("comfy_workflow_id")
+    if not workflow_id:
+        return {"version": 2, "slots": []}
+    workflow = comfy_workflow_repo.get_workflow(conn, workflow_id)
+    if workflow is None:
+        return {"version": 2, "slots": []}
+    candidates = comfy_slot_map_service.compute_candidates(
+        conn=conn, graph=workflow["graph"],
+    )
+    return comfy_slot_map_service.upgrade_slot_map(
+        raw=workflow.get("slot_map"), candidates=candidates,
     )
 
 
@@ -228,9 +281,14 @@ def generate_prompt(
         except sqlite3.DatabaseError:
             pass
 
+    prompt_out = (
+        GeneratedPrompt.model_validate(out["prompt"])
+        if out.get("prompt") is not None else None
+    )
     return GeneratePromptResponse(
         prompt_id=out["prompt_id"],
-        prompt=GeneratedPrompt.model_validate(out["prompt"]),
+        prompt=prompt_out,
+        payload=out.get("payload"),
         intents=[Intent.model_validate(i) for i in out["intents"]],
         retrieved=[RetrievedIntent.model_validate(r) for r in out["retrieved"]],
         brief=out.get("brief"),
@@ -239,14 +297,29 @@ def generate_prompt(
 
 
 def _row_to_prompt_out(row: dict[str, Any]) -> PromptOut:
-    return PromptOut(
-        id=row["id"],
-        session_id=row["session_id"],
-        prompt=GeneratedPrompt.model_validate({
+    payload_json = row.get("payload_json")
+    if payload_json:
+        payload = json.loads(payload_json)
+        # The legacy ``loras_json`` column also carries the LoRA list
+        # for comfy sessions (see ``session_repo.append_prompt``) so
+        # the prompt panel's LoRA widget can stay shape-agnostic.
+        # Re-attach it under :data:`comfy_payload.LORAS_KEY` so the
+        # API response is fully self-describing without a join.
+        loras_raw = json.loads(row["loras_json"]) if row["loras_json"] else []
+        payload[comfy_payload.LORAS_KEY] = loras_raw
+        prompt = None
+    else:
+        payload = None
+        prompt = GeneratedPrompt.model_validate({
             "positive": row["positive"],
             "negative": row["negative"],
             "loras": json.loads(row["loras_json"]),
-        }),
+        })
+    return PromptOut(
+        id=row["id"],
+        session_id=row["session_id"],
+        prompt=prompt,
+        payload=payload,
         intents=(
             [Intent.model_validate(i) for i in json.loads(row["intents_json"])]
             if row["intents_json"] else None

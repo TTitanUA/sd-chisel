@@ -12,36 +12,44 @@ readiness gate, per-node import wizard, on-demand catalog growth,
 Comfy Nodes library section, dedicated ComfyUI settings card. Live
 against ComfyUI 0.15.1 + LMStudio. Detail in spec §10.1–10.5.
 
-**Phase 2 — shipped, design widening.** A fixed three-slot map
-(`positive_prompt`, `negative_prompt`, `main_image`) with a manual
-candidate-from-graph editor. Works for canonical single-sampler
-SD/SDXL pipelines. **Cannot express** workflows with two or more
-positive prompts — Base+Refiner SDXL, Flux 2 two-stage, HiRes-fix
-with its own prompt, regional / Attention-Couple / multi-character
-graphs, ConditioningCombine blends. Real graphs the user runs go
-to ten or more text inputs each, and the current model collapses
-all of them onto a single string.
+**Phase 2 — shipped, superseded.** A fixed three-slot map
+(`positive_prompt`, `negative_prompt`, `main_image`). Replaced by
+Phase 2.5 — kept here only as historical context for why the
+redirect happened.
 
-**New direction.** This document below redesigns the slot system
-around **workflow-declared, labelled, typed slots** with a
-**dynamic orchestrator schema** derived per session. The decision
-follows a survey of how the wider ComfyUI ecosystem handles the
-same problem (ComfyDeploy, SwarmUI, Krita AI Diffusion, ViewComfy,
+**Phase 2.5 — shipped.** Per-workflow list of labelled, typed slots
+(ten kinds, four bindings, candidate discovery from `graph_json` +
+catalog, lazy v1→v2 upgrade on read). New slot-map editor.
+Generation still gated by Phase 3. Detail in spec §10.6.
+
+**Phase 3 prep — shipped.** Comfy sessions produce
+`GeneratedPayload` keyed by slot label (dynamic schema derived per
+session at composition time, validated per-slot by
+`comfy_payload`). Mode for comfy is inferred from the slot map
+(any wired `binding=user_image` ⇒ i2i, else t2i). Chat for comfy
+sessions is slot-aware (Q9). Generate modal renders comfy slot
+context. PromptPane handles the new `payload` shape alongside
+legacy `GeneratedPrompt`. New `comfy_jobs`-style execution still
+out — that's Phase 3. Workspace gained a third comfy-session step
+(`compose`) so this is reachable from the UI. Detail in spec §10.7.
+
+**New direction (rationale).** This document originally redesigned
+the slot system around workflow-declared, labelled, typed slots
+with a dynamic orchestrator schema. That redesign is now landed
+through Phase 2.5 + Phase 3 prep. The decision followed a survey
+of how the wider ComfyUI ecosystem handles the same problem
+(ComfyDeploy, SwarmUI, Krita AI Diffusion, ViewComfy,
 ComfyUI-Workflow-Component, native Subgraph) — every serious tool
 treats workflow inputs as a per-workflow contract; none model
-multi-prompt structure semantically. The reflection that produced
-this redirect lives in chat history; the salient summary sits in
+multi-prompt structure semantically. The salient summary sits in
 **Context** below.
 
 **Coming up:**
 
-- **Phase 2.5** — typed labelled slots: data model rewrite,
-  candidate-discovery widening, slot-map editor evolution.
-- **Phase 3 prep** — dynamic orchestrator schema, composition call
-  restructure, legacy i2i/t2i path preserved.
 - **Phase 3** — generation execution: `comfy_client`, image upload,
   graph patching with slot bindings, queue + websocket cycle,
-  result persistence.
+  result persistence, per-slot image binding + frozen overrides
+  in the Generate modal.
 
 LLM auto-suggest labels (originally Phase 2.6) is parked in
 [backlog.md](backlog.md) — manual labelling in the slot-map
@@ -57,6 +65,10 @@ this redirect:
   override, sampling-bundle gear (parked under Q6).
 - Drop the dead `comfy_nodes.role_hint` schema bit in a future
   migration (read path already strips it).
+- Smoke-test Q9 (slot-aware chat instruction "no JSON") on two or
+  three local models with a worked example before locking the
+  prompt — the soft middle that landed has not been verified
+  against drift-prone reasoning models yet.
 
 ## Context: why workflow-declared slots
 
@@ -145,358 +157,17 @@ and is wired. Otherwise it's t2i. The family-guide append logic
 to work the same way; the family guide stays in the
 **composition system message**, not per-slot.
 
-## Phase 2.5 — typed labelled slots
+## Phases 2.5 and 3 prep — shipped
 
-Replaces the fixed-three-slot model with a labelled, typed slot
-list per workflow. No new external behaviour — the wizard, library,
-catalog, settings stay as they are. Generation is still gated
-(Phase 3 not done). The point is to land the data model and
-editor that Phase 3 prep / 3 plug into.
-
-### Slot kinds — taxonomy
-
-Closed enum, shipped as one column on the slot row plus per-kind
-validation in Pydantic:
-
-| Kind             | Source eligibility (literal-valued input)                   | Default binding | Metadata                          |
-| ---------------- | ----------------------------------------------------------- | --------------- | --------------------------------- |
-| `text`           | `STRING` widget, `multiline=false`                          | `llm`           | `default_value`                   |
-| `multiline_text` | `STRING` widget, `multiline=true`                           | `llm`           | `default_value`                   |
-| `image`          | combo with `image_upload=true` (LoadImage-style)            | `user_image`    | —                                 |
-| `image_alpha`    | LoadImage-mask-style combo                                  | `user_image`    | —                                 |
-| `number_int`     | `INT` widget                                                | `frozen`        | `min`, `max`, `step`, `default`   |
-| `number_float`   | `FLOAT` widget                                              | `frozen`        | `min`, `max`, `step`, `default`   |
-| `boolean`        | `BOOLEAN` widget                                            | `frozen`        | `default`                         |
-| `enum`           | combo with a known options array (sampler, scheduler, etc.) | `frozen`        | `options[]`, `default`            |
-| `lora_name`      | combo whose options match `comfyui_path/loras/*`            | `frozen`        | `default`                         |
-| `checkpoint_name`| combo whose options match `comfyui_path/checkpoints/*`      | `frozen`        | `default`                         |
-
-`text_any` (ComfyDeploy's polymorphic input) is **not** added in
-2.5 — every slot is strictly typed. We can revisit if real
-workflows force the issue.
-
-LoRA-stack / lora-chain bindings (Q3) are **out of scope for
-2.5** — the data model leaves room (`binding=library_loras` is in
-the enum) but no editor path or generation patching exists for it.
-
-### Candidate discovery — widened
-
-The current Phase 2 "eligible inputs" computation already does the
-right thing for `STRING` and `image_upload` combos. Extend it:
-
-- For every node in `graph_json` look at every input that is a
-  literal (not a `[node_id, output_idx]` wire) and intersect
-  with the catalog's `inputs_raw_json` for the class_type.
-- For each literal input, derive a candidate kind from the raw
-  type:
-  - `STRING` → `text` if `multiline=false`, else `multiline_text`.
-  - `INT` → `number_int`.
-  - `FLOAT` → `number_float`.
-  - `BOOLEAN` → `boolean`.
-  - Combo: branch on the options shape — `image_upload=true`
-    means `image`; `mask=true` means `image_alpha`; options
-    matching `*.safetensors` filenames in
-    `<comfyui_path>/loras/` means `lora_name`; same for
-    `checkpoints/` → `checkpoint_name`; otherwise generic
-    `enum`.
-- Class types not yet imported still produce candidates from
-  literal types alone (best-effort), flagged
-  `node_in_catalog=false` like today. Combo subtypes are only
-  detected with the catalog (no `image_upload` / `mask` flag
-  without raw schema).
-- Each candidate carries `display_name`, `node_meta_title`
-  (`graph[node]._meta.title`), `current_value` preview, and
-  `node_in_catalog`.
-
-The output bucket on the API becomes
-`candidates: { <kind>: [...] }` rather than the current
-`{ text, image }`.
-
-### Storage migration
-
-`comfy_workflows.slot_map_json` swaps shape from a
-`{slot_label: pair | null}` map to:
-
-```json
-{
-  "version": 2,
-  "slots": [
-    {
-      "label": "main_positive",
-      "group": null,
-      "ordinal": 1,
-      "description": null,
-      "kind": "multiline_text",
-      "origin": {"node_id": "6", "input_name": "text"},
-      "binding": "llm",
-      "metadata": {}
-    },
-    {
-      "label": "main_negative",
-      "group": null,
-      "ordinal": 2,
-      "description": null,
-      "kind": "multiline_text",
-      "origin": {"node_id": "7", "input_name": "text"},
-      "binding": "llm",
-      "metadata": {}
-    },
-    {
-      "label": "main_image",
-      "group": null,
-      "ordinal": 3,
-      "description": null,
-      "kind": "image",
-      "origin": {"node_id": "12", "input_name": "image"},
-      "binding": "user_image",
-      "metadata": {}
-    }
-  ]
-}
-```
-
-A `version: 1` payload (or a payload missing the `version` key
-entirely — older rows) is upgraded **lazily on read** by the
-session repo: every non-null assignment of the legacy
-`positive_prompt` / `negative_prompt` / `main_image` keys becomes
-a slot with the matching default label, kind, and binding. The
-upgraded shape is written back the first time the slot map is
-saved through `PUT /slot_map`. No migration SQL needed; the
-column is JSON.
-
-For sessions whose graph has no obvious match (e.g. a multi-prompt
-workflow imported before 2.5), the upgrade just produces an empty
-slot list — the user re-labels from the editor.
-
-### Frontend slot-map editor — rewrite
-
-Replaces the fixed three-row table. New layout:
-
-- **Top toolbar.** "Add slot" (opens candidate picker filtered
-  by kind), a mode badge (live i2i / t2i from the slot list),
-  and a slot-count badge.
-- **Slot list**, grouped by `group`, sorted by
-  `(group, ordinal, label)`. Each row shows:
-  - `label` — inline editable, validated (unique, no whitespace
-    edge cases, max 64 chars).
-  - `group` — small text input or null.
-  - `kind` — read-only badge (kind is set when the candidate is
-    chosen; changing kind means picking a different candidate).
-  - `description` — collapsible textarea, used both as tooltip
-    in the workspace and as LLM hint at composition time.
-  - `binding` — dropdown of valid bindings for the slot's kind.
-    Default per the kind table above; `frozen` slots show their
-    frozen value editor (per-kind widget).
-  - `origin` — dropdown of catalog candidates of the chosen kind,
-    showing
-    `<title|display_name|class_type>.<input> (#<node_id>) — "<value preview>"`.
-    Picking a candidate sets `kind` from the candidate.
-  - Per-row Delete button.
-- **"Add slot" picker.** Modal with a kind selector at top, then
-  a filtered candidate list. Picking inserts a new slot with a
-  default label (`<class_type>_<input>` lowercased) for the user
-  to rename.
-- **Mode badge.** Recomputed live from the slot list — shows
-  `i2i` if any wired `image` slot has `binding=user_image`,
-  else `t2i`.
-
-The "Continue to slot mapping" button on the readiness panel
-keeps its meaning. The "Back to nodes" button on the slot-map
-screen stays.
-
-### API surface (Phase 2.5)
-
-- `GET /api/comfy/sessions/{id}/slot_map` — same path. Response
-  shape changes:
-  ```json
-  {
-    "session_id": "…",
-    "workflow_id": "…",
-    "slot_map": { "version": 2, "slots": [...] },
-    "candidates": {
-      "text": [...], "multiline_text": [...],
-      "image": [...], "image_alpha": [...],
-      "number_int": [...], "number_float": [...],
-      "boolean": [...], "enum": [...],
-      "lora_name": [...], "checkpoint_name": [...]
-    },
-    "inferred_mode": "i2i" | "t2i"
-  }
-  ```
-- `PUT /api/comfy/sessions/{id}/slot_map` — accepts `{slots: [...]}`.
-  Validation:
-  - Every slot's `(origin.node_id, origin.input_name)` must be a
-    candidate of the slot's `kind`.
-  - Labels unique within `slots`.
-  - `binding` ∈ valid set for the kind.
-  - For `frozen` slots, `metadata.value` must validate against
-    the candidate's raw type/options.
-  - 422 on any failure with a per-slot error array.
-
-The legacy `positive_prompt` / `negative_prompt` / `main_image`
-keys are removed from the API contract — clients always send and
-receive the slot list. The upgrade path is server-side only.
-
-### Out of scope for 2.5
-
-- Auto-suggest labels — parked in [backlog.md](backlog.md).
-- LLM composition consuming the schema (lands in 3-prep).
-- Generation execution (Phase 3).
-- LoRA-stack binding (Q3).
-- Slot-level overrides per generation call (Phase 3 may add
-  per-call patches like "use this seed this time only" — out of
-  scope for the slot-map editor itself).
-
-## Phase 3 prep — dynamic orchestrator schema
-
-Lands the orchestrator-side changes that turn a labelled slot
-list into actual LLM payloads, **without** queueing anything to
-ComfyUI yet. Verified end-to-end by inspecting the produced
-payload (no execution, no image).
-
-### Goal
-
-Comfy sessions stop producing the legacy
-`GeneratedPrompt = {positive, negative, loras}`. They produce a
-`GeneratedPayload`: a JSON object keyed by the session's slot
-labels, validated against the session's dynamic schema. Existing
-i2i / t2i sessions (the non-comfy session types) keep producing
-`GeneratedPrompt` — no change to that path.
-
-### Schema generation per session
-
-Resolved at request time from `slot_map_json` and the catalog:
-
-- For every slot with `binding=llm`:
-  - Field name = `label`.
-  - Field type derived from `kind` (`text` / `multiline_text`
-    → string; `number_int` → integer; `number_float` → number;
-    `boolean` → boolean; `enum` → string-enum with `options`
-    inlined; `image*` / `lora_name` / `checkpoint_name` are not
-    `llm`-bindable, so they're skipped here).
-  - Field description = the slot's `description` (the LLM uses
-    it as the per-field hint).
-  - Optional / required: required for required-by-kind
-    text/numbers; optional for everything else.
-- Slots with `binding=frozen` / `binding=user_image` /
-  `binding=library_loras` are not part of the LLM-facing
-  schema. They're rendered into a separate `non_llm_slots`
-  context block that the composition system message describes
-  for awareness ("the workflow also has a frozen sampler set to
-  euler_a — keep this in mind") but the LLM doesn't fill them.
-
-### Composition call restructure
-
-Today the composition system message hard-codes "return
-GeneratedPrompt JSON". After 3-prep:
-
-- The system message has the same anatomy (family `prompt_guide`
-  + mode-specific append + model description + LoRA candidates +
-  brief / chat tail) but the schema instruction is replaced by a
-  per-session schema rendered inline. The composition message
-  also lists every slot's `(label, group, description, kind)` so
-  the LLM understands context for each.
-- LMStudio call uses `response_format = "text"` plus the
-  brace-matching JSON extractor (same approach `comfy_import`
-  uses — `json_schema` mode is unreliable on reasoning-distilled
-  models). Validation against the dynamic schema after extraction.
-- LoRA list output: kept on the side. The orchestrator
-  continues to produce a LoRA list alongside the new
-  `GeneratedPayload`, stored in `prompts.loras_json` exactly
-  like legacy sessions — for inspection, copy-paste, and the
-  prompt pane's `<lora:name:weight>` widget. No graph
-  patching happens here (Phase 3-prep does not touch the
-  graph). The L4 milestone (Q3) will eventually consume this
-  list into `binding=library_loras` slots; until then no
-  slot of that binding can be created.
-
-### Persistence
-
-`prompts` table grows compatibly: keep the existing `positive`,
-`negative`, `loras_json` columns for legacy sessions; add a
-nullable `payload_json` column for comfy-session generations
-(stores the raw `GeneratedPayload`). The `intents_json`,
-`retrieved_loras_json`, `brief` debug fields keep their meaning
-unchanged. Read-side keeps both shapes; UI inspects `payload_json`
-when present, else falls back to the legacy triple. One small
-migration adds the column.
-
-### Mode inference
-
-The session's mode (`i2i` / `t2i`) for the purposes of
-`prompt_i2i` / `prompt_t2i` family-guide selection becomes:
-
-- For comfy sessions: derived from the slot list at composition
-  time. Any wired `binding=user_image` slot ⇒ `i2i`. Otherwise
-  `t2i`. Computed on demand — the slot map is the source of
-  truth, no cached column on `sessions`. (This generalises
-  spec §10.3's existing "mode is inferred at slot-mapping
-  time" rule from the fixed `main_image` slot to any
-  `binding=user_image` slot.)
-- For legacy i2i / t2i sessions: unchanged — the
-  `session_type` column already drives this.
-
-### Generate-modal UX
-
-The Generate modal flow (summarize → brief → compose) stays the
-same shape. Differences:
-
-- The context preview the modal shows now lists slots by
-  group with their `kind` / `binding`, instead of a single
-  positive/negative/loras column.
-- The "result" view inside the modal switches: legacy sessions
-  keep showing the `{positive, negative, loras}` block; comfy
-  sessions show every produced label with its value, grouped
-  the same way as the editor.
-
-### Chat system prompt — slot awareness (resolves Q9)
-
-For comfy sessions with a saved non-empty slot map, the chat
-system prompt builder appends a one-line slot list right
-after the existing i2i / t2i framing block and before the
-context block. Shape:
-
-```text
-The workflow exposes these labelled slots:
-- <group>/<label> (<kind>): <description>
-- <label> (<kind>): <description>
-...
-
-Reply in plain prose. Do not emit JSON, schemas, or
-"slot: value" structures — a separate composition step
-fills the slots. The user may reference slots by label;
-acknowledge them in prose.
-```
-
-Groupless slots render without the `<group>/` prefix.
-Slots without a `description` render with the kind-only tail
-(`(<kind>)`, no trailing description text).
-
-For comfy sessions whose slot map is empty (fresh upload, not
-yet labelled) and for legacy `i2i` / `t2i` sessions, the slot
-block is omitted — chat behaves exactly like today.
-
-The chat *user* prompt and the existing `@Image_N` reference
-mechanism stay unchanged. The composer (still `generate-prompt`)
-is the only component that consumes the structured schema; the
-chat just gets context awareness.
-
-Smoke-test caveat called out by Q9: if local models drift to
-structured replies even with the explicit "no JSON"
-instruction, the fallback is to drop the slot block entirely
-(go full unaware) and rely on the composer alone. Verify on
-Phase 3 prep with two or three local models on a worked
-example before locking the prompt in.
-
-### Out of scope for 3-prep
-
-- Patching the actual workflow graph (Phase 3).
-- Queue / WS / image fetch (Phase 3).
-- Editable frozen overrides and per-slot image binding inside
-  the modal — design resolved (Q4 / Q7), but the editing UI
-  ships in Phase 3 alongside actual execution. The 3-prep
-  modal stays read-only across all bindings; refinement still
-  goes through chat.
+Full behaviour now lives in spec §10.6 (Phase 2.5: slot kinds,
+bindings, candidate discovery, persistence + lazy upgrade,
+endpoint contract) and §10.7 (Phase 3 prep: dynamic schema,
+composition restructure, mode inference, persistence,
+slot-aware chat). The original design notes were trimmed once
+shipped per this doc's preamble — git history is the
+changelog. The Worked example, Design decisions, and
+Verification plan sections below stay as the live record for
+Phase 3.
 
 ## Phase 3 — generation execution
 
@@ -957,37 +628,12 @@ revision. Future open questions land here as they arise.
 
 ## Verification plan
 
-Phase 2.5:
-
-- Unit tests for the slot model: validation of each kind's
-  metadata, binding eligibility per kind, label uniqueness,
-  origin-must-match-candidate-kind.
-- Unit tests for the candidate discoverer: every kind detected
-  correctly from the raw schema, including the catalog-gated
-  kinds (`image`, `image_alpha`, `lora_name`, etc.).
-- Unit test for the legacy `slot_map_json` upgrade path:
-  `version=1` (or absent) becomes a `version=2` payload with
-  three default slots; empty / null cells produce empty slot
-  list.
-- Integration test on a fixture workflow: GET returns the new
-  shape, PUT round-trips, validation errors render per-slot.
-- Browser test (chrome-devtools MCP): create a comfy session,
-  upload a multi-prompt fixture workflow, walk the readiness
-  gate (mocked), open the slot-map editor, add slots, save,
-  reload, slots persist.
-
-Phase 3 prep:
-
-- Unit tests for the dynamic-schema generator: every kind maps
-  to the right Pydantic / JSON-schema type, descriptions
-  carried through, optional-vs-required rules.
-- Unit tests for the composition-call restructure: legacy
-  sessions still produce `GeneratedPrompt`; comfy sessions
-  produce `GeneratedPayload`; mode inference works for graphs
-  with / without wired image slots.
-- Integration test with a faked LMStudio: end-to-end produce a
-  payload for the eight-slot worked example, validate
-  conformance.
+Phases 2.5 and 3 prep test suites have shipped (see
+`backend/tests/test_comfy_slot_map_*.py`,
+`test_comfy_payload.py`, `test_comfy_prompt_orchestrator.py`,
+`test_comfy_chat_and_prompts.py`). Browser smoke for the
+compose-step flow done with chrome-devtools MCP against a real
+session.
 
 Phase 3:
 
@@ -1002,17 +648,14 @@ Phase 3:
 
 ## Spec impact
 
-Phase 2.5: spec §10.6 is rewritten end-to-end. Slot kinds /
-binding taxonomy, candidate-bucket shape, storage shape,
-endpoint contracts. Mode-inference paragraph in §3.2 / §10.2
-is updated to reflect the new derivation.
+Phases 2.5 and 3 prep landed in spec §3.2 (`prompts.payload_json`
+column + comfy/legacy split), §4.2 (slot-aware chat for comfy),
+§4.3 (two-shape composition), §10.3 (mode inference rule), §10.6
+(slot taxonomy + bindings + candidate discovery + persistence),
+and §10.7 (rewritten from "pending" to dynamic-schema /
+composition / persistence).
 
-Phase 3 prep: spec §4.3 (Generate flow) grows a paragraph
-distinguishing legacy `GeneratedPrompt` from comfy
-`GeneratedPayload`. New sub-section in §10 covers the dynamic
-schema. §3.2 grows the new `prompts.payload_json` column.
-
-Phase 3: spec §10.7 graduates from "pending" to a full
+Phase 3: spec §10.7 will graduate from "Phase 3 prep" to a full
 generation-execution section. §3.x grows tables `comfy_jobs` and
 `comfy_job_outputs`. §5.1 grows the new `/api/comfy/jobs*` and
 `/api/comfy/sessions/{id}/generate` endpoints. §9 ("MVP scope")

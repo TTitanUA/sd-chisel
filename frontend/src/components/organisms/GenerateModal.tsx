@@ -229,6 +229,8 @@ function ContextPreview({ context }: { context: SummarizeContext }) {
   const main = context.main_image;
   const refs = context.reference_images;
   const pinned = context.pinned_loras;
+  const slots = context.comfy_slots;
+  const isComfy = slots !== null && slots !== undefined;
   return (
     <section className={styles.contextSection}>
       <div className={styles.sectionHeader}>
@@ -250,8 +252,12 @@ function ContextPreview({ context }: { context: SummarizeContext }) {
             </span>
           )}
         </dd>
-        <dt>Negative</dt>
-        <dd>{context.use_negative ? "enabled" : "disabled"}</dd>
+        {!isComfy && (
+          <>
+            <dt>Negative</dt>
+            <dd>{context.use_negative ? "enabled" : "disabled"}</dd>
+          </>
+        )}
         <dt>Pinned LoRAs</dt>
         <dd>
           {pinned.length === 0 ? (
@@ -273,6 +279,7 @@ function ContextPreview({ context }: { context: SummarizeContext }) {
           )}
         </dd>
       </dl>
+      {isComfy && <ComfySlotsPreview slots={slots!} />}
       {main && (
         <div className={styles.imageBlock}>
           <div className={styles.imageHead}>
@@ -291,7 +298,7 @@ function ContextPreview({ context }: { context: SummarizeContext }) {
           <p className={styles.imageBody}>{r.analysis}</p>
         </div>
       ))}
-      {!main && refs.length === 0 && (
+      {!isComfy && !main && refs.length === 0 && (
         <div className={styles.faint}>No source-image analyses yet.</div>
       )}
       {context.model_description && (
@@ -301,5 +308,61 @@ function ContextPreview({ context }: { context: SummarizeContext }) {
         </div>
       )}
     </section>
+  );
+}
+
+function ComfySlotsPreview({
+  slots,
+}: {
+  slots: NonNullable<SummarizeContext["comfy_slots"]>;
+}) {
+  if (slots.length === 0) {
+    return (
+      <div className={styles.faint}>
+        No slots labelled yet — open the slot mapping screen for this
+        comfy session and add at least one.
+      </div>
+    );
+  }
+  // Group by `group`, groupless first.
+  const groups = new Map<string, typeof slots>();
+  for (const s of slots) {
+    const key = s.group ?? "";
+    const arr = groups.get(key) ?? [];
+    arr.push(s);
+    groups.set(key, arr);
+  }
+  return (
+    <div className={styles.modelDesc}>
+      <div className={styles.sectionHint}>
+        Workflow slots ({slots.length})
+      </div>
+      {[...groups.entries()].map(([groupName, groupSlots]) => (
+        <div key={groupName || "(ungrouped)"}>
+          {groupName && (
+            <div className={styles.imageHead}>
+              <span className={styles.imageLabel}>{groupName}</span>
+            </div>
+          )}
+          <ul className={styles.loraList}>
+            {groupSlots.map((s) => (
+              <li key={`${groupName}/${s.label}`}>
+                <code>{s.label}</code>
+                <span className={styles.faint}>
+                  {" — "}
+                  {s.kind} · {s.binding}
+                  {s.binding === "frozen" && s.frozen_value !== undefined && (
+                    <> · = {JSON.stringify(s.frozen_value)}</>
+                  )}
+                </span>
+                {s.description && (
+                  <div className={styles.faint}>{s.description}</div>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ))}
+    </div>
   );
 }

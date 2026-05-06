@@ -27,9 +27,11 @@ import styles from "./ComfySlotMappingPanel.module.css";
 export function ComfySlotMappingPanel({
   sessionId,
   onBack,
+  onContinue,
 }: {
   sessionId: string;
   onBack?: () => void;
+  onContinue?: () => void;
 }) {
   const query = useSlotMap(sessionId);
   const save = useSaveSlotMap(sessionId);
@@ -109,6 +111,21 @@ export function ComfySlotMappingPanel({
             be left out — generation just won't touch those inputs.
           </p>
         </div>
+        {onContinue && (
+          <Button
+            size="sm"
+            variant="primary"
+            onClick={onContinue}
+            disabled={dirty}
+            title={
+              dirty
+                ? "Save the slot map before continuing"
+                : "Continue to chat + payload composition"
+            }
+          >
+            Continue to compose
+          </Button>
+        )}
       </div>
 
       <div className={styles.toolbar}>

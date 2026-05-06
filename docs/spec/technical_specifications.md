@@ -155,12 +155,23 @@ applies them to an empty or existing DB.
   brief that fed the just-completed generation, prefixed with `Summary
   of previous discussion:`. The point is to keep the chat-context
   payload small for local models on subsequent turns.
-- **`prompts`** — append-only history of final prompts: `positive`,
-  `negative` (NULL when `use_negative=0`), `loras_json` (what the LLM
-  actually returned, verbatim, with no filtering of unknowns), plus the
-  debug fields `intents_json`, `retrieved_loras_json`, and `brief` (the
-  chat summary that fed this run, when one was supplied — NULL for
-  manual generate calls without a brief).
+- **`prompts`** — append-only history of final prompts. Two shapes
+  share the same row:
+  - **Legacy i2i / t2i** rows carry `positive` (required, possibly
+    empty for `use_negative=0`), `negative` (NULL when
+    `use_negative=0`), and `loras_json` (the LLM's verbatim LoRA
+    list, no filtering of unknowns). `payload_json` is NULL.
+  - **Comfy** rows carry `payload_json` — a JSON object keyed by the
+    session's slot labels (each value matches the slot's `kind`) plus
+    a reserved `__loras` key holding the LoRA list. `loras_json`
+    mirrors `__loras` so the prompt panel's LoRA widget is
+    shape-agnostic; `positive` is stored as `""` (the column is NOT
+    NULL); `negative` is NULL. The read path treats `payload_json IS
+    NOT NULL` as the discriminator.
+  - Debug fields shared by both shapes: `intents_json`,
+    `retrieved_loras_json`, and `brief` (the chat summary that fed
+    this run, when one was supplied — NULL for manual generate calls
+    without a brief).
 
 **Session deletion** is transactional on both sides: cascade in the DB
 (messages, prompts, pins) plus an application-level hook removes
@@ -267,7 +278,7 @@ selected on the session is the only model used — `tool_use` capability
 is no longer a requirement for chat (the field still exists on
 `lm_models` and is consulted by library assistants).
 
-The chat system prompt has two variants picked by `session_type`: an
+The chat system prompt has two variants picked by mode: an
 `i2i` framing ("iterate on a Stable-Diffusion image-to-image idea")
 and a `t2i` framing ("iterate on a text-to-image idea"). For `i2i` the
 context block emits a labelled "Source image analysis (Image_N, main)"
@@ -275,6 +286,16 @@ followed by an optional "Reference images" bullet list. For `t2i` the
 context block has no main label — every analysed source image goes
 into a single "Reference images" block. With zero analysed sources
 the context block is omitted entirely.
+
+For comfy sessions mode is **inferred** from the bound workflow's
+slot map (any wired `binding=user_image` slot ⇒ `i2i`, otherwise
+`t2i`) — same rule the generate flow uses. Chat against a comfy
+session also gets a slot-awareness block appended after the
+mode framing: a one-line-per-slot list of `(group/label, kind,
+description)` plus an explicit instruction to keep replies in plain
+prose and never emit JSON or `slot: value` structures (composition
+is a separate step). The block is omitted for comfy sessions whose
+slot map is empty or unsaved, and for legacy `i2i` / `t2i` sessions.
 
 The user message is persisted before streaming begins, but **rolled
 back on any upstream failure** (LMStudio error or empty response). This
@@ -415,26 +436,48 @@ returns a structured list of intents: `[{kind, query}]`, where:
   `# User brief` block when the orchestrator was invoked with a brief.
 - The instruction to return JSON conforming to a fixed schema.
 
-It returns `GeneratedPrompt`:
+The orchestrator branches on `session_type` for both the schema
+shape and the precondition rules:
 
-- `positive` — required non-empty string.
-- `negative` — string or `null` (when `session.use_negative = 0`).
-- `loras` — array of `{name, weight}` with weight in `[-2.0, 2.0]`; may be
-  empty.
+- **Legacy i2i / t2i sessions** return `GeneratedPrompt`:
+  - `positive` — required non-empty string.
+  - `negative` — string or `null` (when `session.use_negative = 0`).
+  - `loras` — array of `{name, weight}` with weight in `[-2.0, 2.0]`;
+    may be empty.
+- **Comfy sessions** return `GeneratedPayload` — a JSON object whose
+  keys are the session's slot labels (one field per `binding=llm`
+  slot, typed by the slot's `kind`) plus a reserved `__loras` field
+  with the same `[{name, weight}]` shape as the legacy LoRA list.
+  The schema is built per-session from the workflow's slot map at
+  composition time; the system message inlines a per-slot
+  description (label, group, kind, binding) so the LLM understands
+  the full workflow context, including frozen / image / lora slots
+  it does not fill itself. See §10.7 for the dynamic-schema
+  derivation rules. As with legacy composition, the response is
+  parsed with the brace-matching JSON extractor (LMStudio's
+  `json_schema` mode is unreliable on reasoning-distilled models).
 
-**Mode handling.** The orchestrator branches on `session_type`:
+**Mode handling.**
 
-- **i2i** — requires a main source image with a completed analysis;
-  the main analysis is rendered as the primary "Source image
-  analysis" block, and any other analysed sources are appended as
-  references.
-- **t2i** — no main image is required; the orchestrator may even run
-  with zero source images (pure text-to-image). Every analysed
-  source goes under "Reference images". The composition system
-  prompt picks up `# Mode: t2i` and the family's `prompt_t2i`
+- **Legacy i2i** — requires a main source image with a completed
+  analysis; the main analysis is rendered as the primary "Source
+  image analysis" block, and any other analysed sources are
+  appended as references.
+- **Legacy t2i** — no main image is required; the orchestrator may
+  even run with zero source images (pure text-to-image). Every
+  analysed source goes under "Reference images". The composition
+  system prompt picks up `# Mode: t2i` and the family's `prompt_t2i`
   appended on top of `prompt_guide` (vs. `prompt_i2i` for i2i). The
   intent-step system message also has a t2i-specific framing
   ("planner that turns a text-to-image brief…").
+- **Comfy** — the mode (`i2i` / `t2i`) is **inferred** from the
+  bound workflow's slot map at composition time: any wired
+  `binding=user_image` slot ⇒ `i2i`, otherwise `t2i`. The same
+  family-guide append rule applies (mode-specific text on top of
+  `prompt_guide`). Comfy sessions never gate on a main source image
+  — image bindings are wired by the patcher (Phase 3) — but any
+  source-image analyses still feed the composition message when
+  available.
 
 **Conventions:**
 
@@ -840,8 +883,8 @@ public API for importing LoRA metadata.
     civitai, lora_reindex, task_runner, library_service.
   - `app/storage/` — db init/migrations, library_repo, session_repo,
     settings_repo, images.
-  - `app/models/` — Pydantic schemas (including `GeneratedPrompt` and
-    `IntentList`).
+  - `app/models/` — Pydantic schemas (including `GeneratedPrompt`,
+    `IntentList`, and the comfy slot / payload shapes).
   - `app/cli/` — `init_db`, `dev`, `reindex_all`.
   - `tests/` — pytest, plus a fake-embedder fixture for hermetic tests.
 - `frontend/` — Vite SPA.
@@ -882,11 +925,15 @@ public API for importing LoRA metadata.
 **Shipped post-MVP, already in this tree:**
 
 - ComfyUI integration — Phase 1 (node-readiness gate + on-demand
-  catalog growth), Phase 2, and Phase 2.5 (workflow-declared,
-  typed, labelled slot list with per-slot bindings — replaces
-  Phase 2's fixed three-key model; data-model + editor only,
-  generation still gated). Phase 3 (generation execution) is still
-  pending. See §10.
+  catalog growth), Phase 2, Phase 2.5 (workflow-declared, typed,
+  labelled slot list with per-slot bindings — replaces Phase 2's
+  fixed three-key model), and Phase 3 prep (dynamic orchestrator
+  schema: comfy sessions produce a per-workflow `GeneratedPayload`
+  keyed by slot label; chat is slot-aware; persistence keeps both
+  legacy `GeneratedPrompt` and comfy `GeneratedPayload` shapes side
+  by side via `prompts.payload_json`). Phase 3 (generation
+  execution: graph patching, queue, websocket, result persistence)
+  is still pending. See §10.
 
 - LMStudio settings + capability detection (`vision`, `tool_use`,
   `reasoning`) + the `lm_models` cache + Unload all.
@@ -996,9 +1043,9 @@ see §10.6). Endpoints:
 - `DELETE /api/comfy/workflows/{id}` — 409 if any session still
   references the workflow.
 
-Mode (`t2i` / `i2i`) is **not** stored on the workflow row; mode is
-inferred at slot-mapping time from whether `main_image` resolves to
-a `LoadImage` slot.
+Mode (`t2i` / `i2i`) is **not** stored on the workflow row; it is
+inferred from the slot list at composition / chat time — any wired
+`binding=user_image` slot ⇒ `i2i`, otherwise `t2i`. See §10.6 / §10.7.
 
 ### 10.4. Catalog (`comfy_packs`, `comfy_nodes`)
 
@@ -1164,12 +1211,78 @@ Slots are independent: saving partial lists is fine; generation
 (Phase 3) will simply skip the unbound graph inputs and let the
 workflow's baked literals stand.
 
-### 10.7. Phase 3 — pending
+### 10.7. Phase 3 prep — dynamic orchestrator schema
 
-The catalogue, readiness gate, and slot-map editor are in place;
-what remains is the actual generation cycle: a `comfy_client`
+The orchestrator (§4.3) branches on `session_type`. Comfy sessions
+produce a `GeneratedPayload` rather than the legacy
+`GeneratedPrompt`; the rest of the pipeline (intents, retrieval,
+LoRA candidates, brief / chat tail) is shared.
+
+**Dynamic schema.** At composition time, the orchestrator loads the
+bound workflow's slot map (upgraded to v2 by §10.6's lazy upgrade)
+and derives:
+
+- A schema-hint block enumerating each `binding=llm` slot's label and
+  JSON shape (string / integer / number / boolean / enum-with-
+  options) plus a reserved `__loras` field carrying the same
+  `[{name, weight}]` list legacy `loras` had. The block is inlined
+  into the composition system message. Slots with `binding=frozen`,
+  `binding=user_image`, or `binding=library_loras` are NOT part of
+  the LLM-facing schema.
+- A workflow-slots context block listing every slot (including the
+  non-llm ones) so the LLM sees the full graph shape: each row
+  shows the binding tag (`[fill]` / `[frozen=<value>]` /
+  `[user image]` / `[library loras]`), label (with optional
+  `<group>/` prefix), kind chip, and description.
+
+**Validation.** The composition response is parsed with the same
+brace-matching JSON extractor `comfy_import` uses, then validated
+per-slot: every `binding=llm` slot must be present and its value
+must match the slot's kind (booleans rejected for int slots,
+numbers checked against any `min` / `max`, enum values checked
+against the candidate's options). Malformed payloads bubble up as
+`LmError("shape", ...)` the same way malformed `GeneratedPrompt`
+responses do today.
+
+**LoRA strategy (L1).** The reserved `__loras` field is split off
+the validated payload and persisted into the legacy `loras_json`
+column so the prompt-pane LoRA widget stays shape-agnostic. No
+graph mutation happens — LoRAs surface for inspection / copy-paste
+only, exactly like legacy sessions. L4 (binding `library_loras`
+into stack-capable nodes) is deferred per the comfy plan's LoRA
+section; the binding stays in the enum but is not selectable from
+the editor and rejected by the slot-map validator.
+
+**Mode inference.** The orchestrator and chat both derive the comfy
+session's mode (`i2i` / `t2i`) from the bound workflow's slot map:
+any wired `binding=user_image` slot ⇒ `i2i`, otherwise `t2i`.
+Computed on demand — no cached column on `sessions`. Generalises
+the inference rule §10.3 already established for the fixed
+`main_image` slot to any `binding=user_image` slot.
+
+**Generate modal preview.** When the modal opens against a comfy
+session, the read-only context preview renders the slot list
+grouped by `group` instead of (or alongside) the legacy
+positive / negative / loras column. Each row shows the slot's
+label, kind, binding, and frozen value where applicable. The
+brief, source-image analyses, and pinned-LoRA blocks render the
+same as legacy sessions. Editing slot values from the modal is
+out of scope for 3-prep — the modal stays read-only across all
+bindings; refinement still goes through chat.
+
+**Persistence.** A row in `prompts` for a comfy session carries
+`payload_json` (the validated payload, sans `__loras`) and the
+mirrored LoRA list in `loras_json` (the discriminator is
+`payload_json IS NOT NULL`). The `intents_json`,
+`retrieved_loras_json`, and `brief` debug fields keep their
+meaning unchanged. One migration adds the column.
+
+**What's still pending (Phase 3).** The catalogue, readiness gate,
+slot-map editor, dynamic-schema composition, and persistence are in
+place; what remains is the actual generation cycle: a `comfy_client`
 service mirroring `lmstudio_client.py`, image upload, workflow
 patching per `slot_map_json`, queueing via `/api/prompt`, the
-websocket consumer for progress events, and result fetching +
-persistence. None of this exists yet — the comfy session screen
-ends at slot mapping for now.
+websocket consumer for progress events, result fetching +
+persistence, and the per-slot image-binding / frozen-overrides UI
+inside the Generate modal. None of this exists yet — the comfy
+session screen ends at slot mapping plus payload composition for now.

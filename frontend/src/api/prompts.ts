@@ -11,6 +11,16 @@ export type GeneratedPrompt = {
   loras: LoraSpec[];
 };
 
+/**
+ * Comfy session composition output (Phase 3 prep). Keys are slot
+ * labels declared in the workflow's slot map; values match the slot's
+ * `kind`. The reserved `__loras` key carries the LoRA list (mirrored
+ * into the legacy `loras_json` column for the prompt panel).
+ */
+export type GeneratedPayload = Record<string, unknown> & {
+  __loras?: LoraSpec[];
+};
+
 export type Intent = { kind: string; query: string };
 
 export type RetrievedLora = { name: string; distance: number };
@@ -24,7 +34,8 @@ export type RetrievedIntent = {
 export type Prompt = {
   id: number;
   session_id: string;
-  prompt: GeneratedPrompt;
+  prompt: GeneratedPrompt | null;
+  payload: GeneratedPayload | null;
   intents: Intent[] | null;
   retrieved: RetrievedIntent[] | null;
   brief: string | null;
@@ -33,7 +44,8 @@ export type Prompt = {
 
 export type GeneratePromptResponse = {
   prompt_id: number;
-  prompt: GeneratedPrompt;
+  prompt: GeneratedPrompt | null;
+  payload: GeneratedPayload | null;
   intents: Intent[];
   retrieved: RetrievedIntent[];
   brief: string | null;
@@ -43,6 +55,15 @@ export type GeneratePromptResponse = {
 export type SummarizeImageView = { label: string; analysis: string };
 
 export type SummarizePinnedLoraView = { name: string; weight: number | null };
+
+export type SummarizeSlotView = {
+  label: string;
+  group: string | null;
+  kind: string;
+  binding: string;
+  description: string | null;
+  frozen_value: unknown;
+};
 
 export type SummarizeContext = {
   mode: string;
@@ -54,6 +75,7 @@ export type SummarizeContext = {
   use_negative: boolean;
   main_image: SummarizeImageView | null;
   reference_images: SummarizeImageView[];
+  comfy_slots: SummarizeSlotView[] | null;
 };
 
 export type SummarizeChatResponse = {

@@ -5,6 +5,7 @@ import { useLoras } from "@/api/library";
 import type { Lora } from "@/api/library";
 import {
   usePrompts,
+  type GeneratedPayload,
   type GeneratedPrompt,
   type Intent,
   type LoraSpec,
@@ -17,6 +18,19 @@ import { GenerateModal } from "./GenerateModal";
 import { classifyLora, PromptLoraRow } from "./PromptLoraRow";
 import styles from "./PromptPane.module.css";
 
+const LORAS_KEY = "__loras";
+
+function payloadLoras(payload: GeneratedPayload | null | undefined): LoraSpec[] {
+  const raw = payload?.[LORAS_KEY];
+  return Array.isArray(raw) ? (raw as LoraSpec[]) : [];
+}
+
+function visibleLoras(p: Prompt | null): LoraSpec[] {
+  if (!p) return [];
+  if (p.prompt) return p.prompt.loras;
+  return payloadLoras(p.payload);
+}
+
 export function PromptPane({ session }: { session: Session }) {
   const prompts = usePrompts(session.id);
   const loras = useLoras();
@@ -26,11 +40,14 @@ export function PromptPane({ session }: { session: Session }) {
 
   const isReindexing = useIsReindexing();
   const isT2I = session.session_type === "t2i";
-  // i2i requires a main image with analysis; t2i has no main and may
-  // generate from text alone, so the gate does not depend on sources.
+  const isComfy = session.session_type === "comfy";
+  // i2i requires a main image with analysis. t2i and comfy don't —
+  // t2i runs from text alone; comfy infers mode from its slot map at
+  // composition time and the orchestrator handles its own preconditions.
   const mainSourceAnalysis =
     session.source_images.find((i) => i.is_main)?.analysis ?? null;
-  const generateBlocked = !isT2I && !mainSourceAnalysis;
+  const generateBlocked =
+    session.session_type === "i2i" && !mainSourceAnalysis;
   const list = prompts.data ?? [];
   const head: Prompt | null = list[0] ?? null;
   const visible: Prompt | null =
@@ -65,7 +82,7 @@ export function PromptPane({ session }: { session: Session }) {
 
   const loraString = useMemo(
     () =>
-      (visible?.prompt.loras ?? [])
+      visibleLoras(visible)
         .map((l) => `<lora:${l.name}:${effectiveWeight(l).toFixed(2)}>`)
         .join(" "),
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -75,6 +92,11 @@ export function PromptPane({ session }: { session: Session }) {
   const fullString = useMemo(() => {
     if (!visible) return "";
     const p = visible.prompt;
+    if (!p) {
+      // Comfy session: full string is just the LoRA stack — slot
+      // payload is rendered inline below, no single concatenated form.
+      return loraString;
+    }
     const parts = [p.positive, loraString].filter(Boolean);
     return parts.join("\n\n") + (p.negative ? `\n\nNEGATIVE:\n${p.negative}` : "");
   }, [visible, loraString]);
@@ -116,18 +138,44 @@ export function PromptPane({ session }: { session: Session }) {
       {!visible && (
         <div className={styles.empty}>
           No prompt yet. Click <b>Generate</b> to produce one from the current
-          chat{isT2I ? " (and any reference images)." : " + source analysis."}
+          chat
+          {isComfy
+            ? " — the workflow's slot map drives the schema."
+            : isT2I
+              ? " (and any reference images)."
+              : " + source analysis."}
         </div>
       )}
 
-      {visible && (
+      {visible && !visible.prompt && visible.payload && (
+        <>
+          <ComfyPayloadSection payload={visible.payload} onCopy={copy} />
+          <LoraSection
+            loras={payloadLoras(visible.payload)}
+            knownByName={knownByName}
+            pinnedNames={pinnedNames}
+            retrievedNames={retrievedNames}
+            weights={weights}
+            onWeightChange={(name, w) =>
+              setWeights((prev) => ({ ...prev, [name]: w }))
+            }
+          />
+          <div className={styles.copyRow}>
+            <Button size="sm" onClick={() => copy(loraString)} disabled={!loraString}>
+              Copy LoRA string
+            </Button>
+          </div>
+        </>
+      )}
+
+      {visible && visible.prompt && (
         <>
           <PositiveSection prompt={visible.prompt} onCopy={copy} />
           {visible.prompt.negative !== null && (
             <NegativeSection prompt={visible.prompt} onCopy={copy} />
           )}
           <LoraSection
-            prompt={visible.prompt}
+            loras={visible.prompt.loras}
             knownByName={knownByName}
             pinnedNames={pinnedNames}
             retrievedNames={retrievedNames}
@@ -165,20 +213,65 @@ export function PromptPane({ session }: { session: Session }) {
         <div className={styles.section}>
           <div className={styles.sectionHeader}>History</div>
           <div className={styles.history}>
-            {list.map((p) => (
-              <button
-                key={p.id}
-                className={styles.historyItem}
-                aria-selected={(visible?.id ?? -1) === p.id}
-                onClick={() => setSelectedId(p.id)}
-              >
-                #{p.id} · {new Date(p.created_at * 1000).toLocaleTimeString()} ·{" "}
-                {p.prompt.loras.length} lora
-                {p.prompt.loras.length === 1 ? "" : "s"}
-              </button>
-            ))}
+            {list.map((p) => {
+              const loras = visibleLoras(p);
+              return (
+                <button
+                  key={p.id}
+                  className={styles.historyItem}
+                  aria-selected={(visible?.id ?? -1) === p.id}
+                  onClick={() => setSelectedId(p.id)}
+                >
+                  #{p.id} · {new Date(p.created_at * 1000).toLocaleTimeString()} ·{" "}
+                  {loras.length} lora{loras.length === 1 ? "" : "s"}
+                </button>
+              );
+            })}
           </div>
         </div>
+      )}
+    </div>
+  );
+}
+
+function ComfyPayloadSection({
+  payload, onCopy,
+}: { payload: GeneratedPayload; onCopy: (s: string) => void }) {
+  const slotEntries = Object.entries(payload).filter(([k]) => k !== LORAS_KEY);
+  const json = JSON.stringify(payload, null, 2);
+  return (
+    <div className={styles.section}>
+      <div className={styles.sectionHeader}>
+        <span>Payload</span>
+        <Button size="sm" variant="ghost" onClick={() => onCopy(json)}>
+          copy JSON
+        </Button>
+      </div>
+      {slotEntries.length === 0 ? (
+        <div className={styles.empty}>
+          No filled slots — the workflow's slot map has no
+          <code> binding=llm </code> entries.
+        </div>
+      ) : (
+        slotEntries.map(([label, value]) => (
+          <div key={label} className={styles.section}>
+            <div className={styles.sectionHeader}>
+              <span>{label}</span>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => onCopy(String(value ?? ""))}
+              >
+                copy
+              </Button>
+            </div>
+            <textarea
+              readOnly
+              className={styles.textarea}
+              value={typeof value === "string" ? value : JSON.stringify(value)}
+            />
+          </div>
+        ))
       )}
     </div>
   );
@@ -218,14 +311,14 @@ function NegativeSection({
 }
 
 function LoraSection({
-  prompt,
+  loras,
   knownByName,
   pinnedNames,
   retrievedNames,
   weights,
   onWeightChange,
 }: {
-  prompt: GeneratedPrompt;
+  loras: LoraSpec[];
   knownByName: Record<string, Lora>;
   pinnedNames: Set<string>;
   retrievedNames: Set<string>;
@@ -234,9 +327,9 @@ function LoraSection({
 }) {
   return (
     <div className={styles.section}>
-      <div className={styles.sectionHeader}>LoRAs ({prompt.loras.length})</div>
+      <div className={styles.sectionHeader}>LoRAs ({loras.length})</div>
       <div className={styles.loraList}>
-        {prompt.loras.map((spec) => {
+        {loras.map((spec) => {
           const kind = classifyLora(spec, {
             knownByName, pinnedNames, retrievedNames,
           });

@@ -12,7 +12,7 @@ import { SessionSettingsDrawer } from "@/components/organisms/SessionSettingsDra
 import { SourceImagesPane } from "@/components/organisms/SourceImagesPane";
 import styles from "@/components/templates/WorkspaceLayout.module.css";
 
-type ComfyStep = "nodes" | "slot_map";
+type ComfyStep = "nodes" | "slot_map" | "compose";
 
 export function ProjectLanding() {
   const { projectId } = useParams();
@@ -59,12 +59,32 @@ export default function WorkspaceRoute() {
         <div className={styles.spacer} />
         <div className={styles.actions}>
           <Badge variant="accent">{s.session_type}</Badge>
-          {!isComfy && s.model_name && <Badge>{s.model_name}</Badge>}
+          {s.model_name && <Badge>{s.model_name}</Badge>}
           {!isComfy && s.use_negative && <Badge>neg · on</Badge>}
-          {!isComfy && s.pinned_loras.length > 0 && (
+          {s.pinned_loras.length > 0 && (
             <Badge variant="accent">{s.pinned_loras.length} pinned</Badge>
           )}
-          {!isComfy && (
+          {isComfy && comfyStep === "compose" && (
+            <>
+              <Button
+                size="sm"
+                icon={<Icon name="ChevronLeft" size={12} />}
+                onClick={() => setComfyStep("slot_map")}
+                title="Edit the workflow's slot map"
+              >
+                Edit slots
+              </Button>
+              <Button
+                size="sm"
+                icon={<Icon name="ChevronLeft" size={12} />}
+                onClick={() => setComfyStep("nodes")}
+                title="Re-check ComfyUI node readiness"
+              >
+                Edit nodes
+              </Button>
+            </>
+          )}
+          {(!isComfy || comfyStep === "compose") && (
             <Button
               size="sm"
               icon={<Icon name="Settings" size={12} />}
@@ -75,7 +95,7 @@ export default function WorkspaceRoute() {
           )}
         </div>
       </header>
-      {isComfy ? (
+      {isComfy && comfyStep !== "compose" ? (
         <div className={styles.body}>
           {comfyStep === "nodes" && (
             <ComfyReadinessPanel
@@ -87,6 +107,7 @@ export default function WorkspaceRoute() {
             <ComfySlotMappingPanel
               sessionId={s.id}
               onBack={() => setComfyStep("nodes")}
+              onContinue={() => setComfyStep("compose")}
             />
           )}
         </div>
@@ -97,14 +118,12 @@ export default function WorkspaceRoute() {
           <PromptPane session={s} />
         </div>
       )}
-      {!isComfy && (
-        <SessionSettingsDrawer
-          key={s.id}
-          session={s}
-          open={drawerOpen}
-          onOpenChange={setDrawerOpen}
-        />
-      )}
+      <SessionSettingsDrawer
+        key={s.id}
+        session={s}
+        open={drawerOpen}
+        onOpenChange={setDrawerOpen}
+      />
     </>
   );
 }

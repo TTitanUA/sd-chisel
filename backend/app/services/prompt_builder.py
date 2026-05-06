@@ -156,3 +156,66 @@ def build_composition_messages(
         {"role": "system", "content": system},
         {"role": "user", "content": user},
     ]
+
+
+def build_comfy_composition_messages(
+    *,
+    mode: str,
+    family_prompt_guide: str,
+    model_description: str | None,
+    candidates: list[dict[str, Any]],
+    vl_summary: str | None,
+    chat_messages: list[dict[str, Any]],
+    reference_summaries: list[tuple[str, str]] | None,
+    brief: str | None,
+    slot_context_block: str,
+    schema_hint: str,
+) -> list[dict[str, str]]:
+    """Composition messages for comfy sessions (Phase 3 prep).
+
+    Same anatomy as :func:`build_composition_messages` (mode, family
+    guide, model description, LoRA candidates, vision summary,
+    references, brief / chat tail) but the output schema is the
+    per-session dynamic one — ``schema_hint`` and
+    ``slot_context_block`` are produced by
+    :mod:`app.services.comfy_payload` from the session's slot map.
+
+    There is no ``use_negative`` switch — negative prompting is
+    expressed as a ``binding=llm`` slot in the workflow if needed
+    (e.g. ``main_negative``), so the generic instruction belongs to
+    the slot-context block, not the system message.
+    """
+    parts = [f"# Mode: {mode}", family_prompt_guide.strip()]
+    if model_description and model_description.strip():
+        parts.append(model_description.strip())
+    if slot_context_block.strip():
+        parts.append(slot_context_block)
+    if candidates:
+        loras_section = "\n\n---\n\n".join(
+            _format_lora_block(c) for c in candidates
+        )
+    else:
+        loras_section = "(no candidate LoRAs)"
+    parts.append("# Available LoRAs\n" + loras_section)
+    if vl_summary and vl_summary.strip():
+        parts.append(f"# Source image analysis\n{vl_summary}")
+    refs_block = _format_references(reference_summaries)
+    if refs_block:
+        parts.append(refs_block)
+    if brief and brief.strip():
+        parts.append(f"# User brief\n{brief.strip()}")
+    else:
+        parts.append(f"# Conversation\n{_format_history(chat_messages)}")
+    parts.append("# Output\n" + schema_hint)
+    system = "\n\n".join(parts)
+
+    user = (
+        "Generate the payload now. Fill every slot listed under "
+        "`# Workflow slots` that is marked `[fill]` — match its kind "
+        "and respect any constraints. The `__loras` field is the "
+        "selected LoRA list (may be empty)."
+    )
+    return [
+        {"role": "system", "content": system},
+        {"role": "user", "content": user},
+    ]

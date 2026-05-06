@@ -80,11 +80,13 @@ export function ChatPane({ session }: { session: Session }) {
 
   const rows = messages.data ?? [];
   const hasAnySources = session.source_images.length > 0;
-  // i2i requires a source image as the visual anchor; t2i does not — the
-  // chat works from text alone, with any uploaded images acting as
-  // optional references.
+  // i2i requires a source image as the visual anchor; t2i and comfy
+  // don't — t2i works from text alone, comfy infers mode from its
+  // slot map and any uploaded images act as optional references for
+  // the LLM context (image bindings into the workflow are wired by
+  // the patcher in Phase 3, not by the chat).
   const isT2I = session.session_type === "t2i";
-  const chatReady = isT2I || hasAnySources;
+  const chatReady = session.session_type !== "i2i" || hasAnySources;
   const showOptimistic = optimistic && !rows.some((r) => r.id === optimistic.id);
   const showStreamingThinking = pending && streaming.length === 0;
   const showStreamingBubble = pending && streaming.length > 0;
