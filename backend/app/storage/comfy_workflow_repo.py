@@ -142,12 +142,12 @@ def set_slot_map(
     """Persist a slot map for the workflow. Returns the refreshed row,
     or None if the workflow id is unknown.
 
-    ``slot_map`` shape: a dict whose keys are sd-chisel logical slot
-    names (``positive_prompt``, ``negative_prompt``, ``main_image``,
-    …) and whose values are either ``None`` (slot left unassigned) or
-    ``{"node_id": str, "input_name": str}``. The repo doesn't validate
-    those references against the graph — the API layer does that.
-    Passing ``None`` clears the column.
+    ``slot_map`` is the JSON payload to write verbatim. Phase 2.5
+    writes ``{"version": 2, "slots": [...]}``; older Phase 2 rows
+    carry the legacy three-key dict and are upgraded on read by
+    :func:`app.services.comfy_slot_map_service.upgrade_slot_map`. The
+    repo doesn't validate the payload against the graph — the API
+    layer does that. Passing ``None`` clears the column.
     """
     if conn.execute(
         "SELECT 1 FROM comfy_workflows WHERE id = ?", (workflow_id,),

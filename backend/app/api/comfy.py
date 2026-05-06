@@ -18,7 +18,6 @@ from starlette.responses import StreamingResponse
 
 from app.api.deps import get_conn
 from app.models.comfy import (
-    SLOT_NAMES,
     NodeList,
     NodeOut,
     NodeUpdate,
@@ -34,14 +33,14 @@ from app.models.comfy import (
     WorkflowUpload,
 )
 from app.services import (
-    action_settings,
     comfy_client,
     comfy_import_service,
     comfy_readiness,
     comfy_slot_map_service,
 )
-from app.storage import comfy_catalog_repo, comfy_workflow_repo as repo
-from app.storage import db as db_mod, session_repo, settings_repo
+from app.storage import comfy_catalog_repo, session_repo, settings_repo
+from app.storage import comfy_workflow_repo as repo
+from app.storage import db as db_mod
 
 Conn = Annotated[sqlite3.Connection, Depends(get_conn)]
 
@@ -214,10 +213,6 @@ def _resolve_comfy_session_workflow(
     return workflow
 
 
-def _empty_slot_map() -> dict[str, None]:
-    return {slot: None for slot in SLOT_NAMES}
-
-
 @router.get(
     "/api/comfy/sessions/{session_id}/slot_map",
     response_model=SlotMapOut,
@@ -227,14 +222,15 @@ def get_session_slot_map(session_id: str, conn: Conn) -> dict:
     candidates = comfy_slot_map_service.compute_candidates(
         conn=conn, graph=workflow["graph"],
     )
-    saved = workflow.get("slot_map") or {}
-    slot_map = _empty_slot_map()
-    slot_map.update({k: v for k, v in saved.items() if k in slot_map})
+    upgraded = comfy_slot_map_service.upgrade_slot_map(
+        raw=workflow.get("slot_map"), candidates=candidates,
+    )
     return {
         "session_id": session_id,
         "workflow_id": workflow["id"],
-        "slot_map": slot_map,
+        "slot_map": upgraded,
         "candidates": candidates,
+        "inferred_mode": comfy_slot_map_service.infer_mode(upgraded),
     }
 
 
@@ -249,28 +245,25 @@ def put_session_slot_map(
     candidates = comfy_slot_map_service.compute_candidates(
         conn=conn, graph=workflow["graph"],
     )
-    incoming = {
-        slot: (assignment.model_dump() if assignment is not None else None)
-        for slot, assignment in body.slot_map.items()
-    }
+    incoming = [slot.model_dump() for slot in body.slots]
     try:
-        normalised = comfy_slot_map_service.validate_slot_map(
-            slot_map=incoming, candidates=candidates,
+        normalised = comfy_slot_map_service.validate_slots(
+            slots=incoming, candidates=candidates,
         )
     except comfy_slot_map_service.SlotMapValidationError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    payload = {"version": 2, "slots": normalised}
     repo.set_slot_map(
         conn,
         workflow_id=workflow["id"],
-        slot_map=normalised,
+        slot_map=payload,
     )
-    slot_map = _empty_slot_map()
-    slot_map.update(normalised)
     return {
         "session_id": session_id,
         "workflow_id": workflow["id"],
-        "slot_map": slot_map,
+        "slot_map": payload,
         "candidates": candidates,
+        "inferred_mode": comfy_slot_map_service.infer_mode(payload),
     }
 
 

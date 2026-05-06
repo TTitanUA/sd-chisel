@@ -38,8 +38,12 @@ class WorkflowOut(StrictModel):
     graph_hash: str
     created_at: int
     slot_map: dict[str, Any] | None = None
-    """Phase 2 slot mapping. None means no map saved yet — the editor
-    opens with everything unassigned. See ``SlotMapOut`` for shape."""
+    """Phase 2.5 typed slot list. ``None`` means no map saved yet —
+    the editor opens with an empty list. Stored shape is
+    ``{"version": 2, "slots": [...]}`` (older rows may still carry
+    ``version: 1`` and are upgraded on read by
+    :func:`app.services.comfy_slot_map_service.upgrade_slot_map`).
+    See :class:`SlotMapOut` for the response contract."""
 
 
 class WorkflowList(StrictModel):
@@ -103,7 +107,7 @@ class PackDetailOut(StrictModel):
     publisher_id: str | None
     dir_path: str | None
     readme_md: str | None
-    nodes: list["NodeListItemOut"]
+    nodes: list[NodeListItemOut]
     imported_at: int
 
 
@@ -168,83 +172,191 @@ class NodeList(StrictModel):
     nodes: list[NodeListItemOut]
 
 
-# --- Phase 2: workflow slot mapping ---------------------------------------
+# --- Phase 2.5: workflow-declared, typed, labelled slots ------------------
+#
+# The Phase 2 model exposed three fixed logical slots (positive_prompt,
+# negative_prompt, main_image). Phase 2.5 replaces that with a per-
+# workflow list of labelled slots, each carrying a kind (text, image,
+# number, …) and a binding (who fills the value at generation time).
+#
+# Background and the wider design — see docs/comfy-workflow-plan.md
+# §"Phase 2.5". Stored payloads use ``version: 2``; older rows
+# (``version: 1`` or no version key) are upgraded lazily on read.
 
 
-SlotName = Literal["positive_prompt", "negative_prompt", "main_image"]
-"""Logical injection slots sd-chisel knows how to fill. Two text
-slots and one image slot — Phase 2 scope. LoRA-related slots will
-join here once Q3 is decided."""
+SlotKind = Literal[
+    "text",
+    "multiline_text",
+    "image",
+    "image_alpha",
+    "number_int",
+    "number_float",
+    "boolean",
+    "enum",
+    "lora_name",
+    "checkpoint_name",
+]
 
 
-SLOT_NAMES: tuple[SlotName, ...] = (
-    "positive_prompt",
-    "negative_prompt",
-    "main_image",
+ALL_SLOT_KINDS: tuple[SlotKind, ...] = (
+    "text",
+    "multiline_text",
+    "image",
+    "image_alpha",
+    "number_int",
+    "number_float",
+    "boolean",
+    "enum",
+    "lora_name",
+    "checkpoint_name",
 )
 
 
-SlotKind = Literal["text", "image"]
+SlotBinding = Literal["llm", "frozen", "user_image", "library_loras"]
+"""Who supplies the value at generation time.
+
+- ``llm`` — composition LLM call (Phase 3 prep). Default for text/number
+  slots.
+- ``frozen`` — value is fixed at slot-map config time and reused on every
+  generation. Default for non-text scalars and the catalog-derived
+  combo kinds (lora_name, checkpoint_name).
+- ``user_image`` — image picker / session source image. Default for
+  image / image_alpha kinds.
+- ``library_loras`` — sd-chisel's LoRA retriever. Reserved in the enum
+  for the L4 milestone (Q3); not selectable from the editor in 2.5.
+"""
 
 
-SLOT_KIND: dict[SlotName, SlotKind] = {
-    "positive_prompt": "text",
-    "negative_prompt": "text",
-    "main_image": "image",
+ALLOWED_BINDINGS: dict[SlotKind, frozenset[SlotBinding]] = {
+    "text":            frozenset({"llm", "frozen"}),
+    "multiline_text":  frozenset({"llm", "frozen"}),
+    "image":           frozenset({"user_image", "frozen"}),
+    "image_alpha":     frozenset({"user_image", "frozen"}),
+    "number_int":      frozenset({"llm", "frozen"}),
+    "number_float":    frozenset({"llm", "frozen"}),
+    "boolean":         frozenset({"llm", "frozen"}),
+    "enum":            frozenset({"llm", "frozen"}),
+    "lora_name":       frozenset({"frozen"}),
+    "checkpoint_name": frozenset({"frozen"}),
 }
 
 
-class SlotAssignment(StrictModel):
+DEFAULT_BINDING: dict[SlotKind, SlotBinding] = {
+    "text":            "llm",
+    "multiline_text":  "llm",
+    "image":           "user_image",
+    "image_alpha":     "user_image",
+    "number_int":      "frozen",
+    "number_float":    "frozen",
+    "boolean":         "frozen",
+    "enum":            "frozen",
+    "lora_name":       "frozen",
+    "checkpoint_name": "frozen",
+}
+
+
+# Kinds that, when wired as ``user_image``, mean the session is i2i.
+USER_IMAGE_KINDS: frozenset[SlotKind] = frozenset({"image", "image_alpha"})
+
+
+# A label may not collide with another label and must be filesystem /
+# JSON-key safe. We allow alphanumerics, underscore, hyphen and dot —
+# enough to express ``Region 1/positive`` style group + label without
+# the editor having to escape anything.
+_LABEL_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9_.\-]*$"
+
+
+class SlotOrigin(StrictModel):
+    """Where the slot lives in the workflow graph."""
     node_id: str = Field(min_length=1)
     input_name: str = Field(min_length=1)
 
 
+class SlotDefinition(StrictModel):
+    """One labelled slot in the per-workflow slot list."""
+    label: str = Field(min_length=1, max_length=64, pattern=_LABEL_PATTERN)
+    group: str | None = Field(default=None, max_length=64)
+    ordinal: int | None = None
+    description: str | None = Field(default=None, max_length=2000)
+    kind: SlotKind
+    origin: SlotOrigin
+    binding: SlotBinding
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    """Kind-specific extras. For frozen scalars, ``metadata.value`` is
+    the literal injected at patch time. For numbers, ``min``/``max``/
+    ``step``. For enums, ``options``. The shape is validated against
+    the candidate's raw schema in
+    ``comfy_slot_map_service.validate_slots``."""
+
+
+class SlotMapV2(StrictModel):
+    """The persisted slot map. ``version`` distinguishes 2.5+ payloads
+    from earlier ones (which the service upgrades on read)."""
+    version: Literal[2] = 2
+    slots: list[SlotDefinition] = Field(default_factory=list)
+
+
 class CandidateInput(StrictModel):
-    """One eligible (node_id, input_name) pair the user can pick to
-    fill a logical slot. Eligibility is computed from the graph and
-    the catalog's raw INPUT_TYPES schema — see
+    """One eligible (node_id, input_name) pair the editor can offer for
+    a slot. Eligibility, the candidate's ``kind``, and any per-kind
+    extras in ``metadata`` come from
     ``comfy_slot_map_service.compute_candidates``."""
     node_id: str
     input_name: str
     node_class_type: str
     node_display_name: str | None
     """Human-readable name from the catalog (``NODE_DISPLAY_NAME_MAPPINGS``
-    in ComfyUI), e.g. "CLIP Text Encode (Prompt)". Falls back to
-    ``class_type`` when the node hasn't been imported yet."""
+    in ComfyUI). Falls back to ``class_type`` when the node hasn't been
+    imported yet."""
     node_title: str | None
     """Per-node free-form title the user set in the ComfyUI canvas
-    (``graph[node_id]._meta.title``). When two nodes share a class
-    this is the only thing that distinguishes them — the editor
-    leads with it when present."""
+    (``graph[node_id]._meta.title``)."""
     node_in_catalog: bool
     """False when the workflow references a node class that hasn't
-    been imported yet. The candidate still works for image slots
-    (LoadImage is detected by name), but the editor flags it so the
-    user can finish import first if they want catalog-driven hints."""
+    been imported yet — combo subtypes (image_upload, mask, …) are
+    only detected with the catalog, so uncatalogued combos appear as
+    plain ``enum`` candidates."""
     current_value: Any
-    """The literal value currently sitting at this input — shown as
-    a preview so the user can recognise which encoder is which."""
-    multiline: bool = False
+    """The literal currently sitting at this input — shown as a
+    preview so the user can recognise which encoder is which."""
+    kind: SlotKind
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    """Kind-specific extras inferred from the raw schema. Examples:
+    ``multiline`` for text kinds, ``options`` for enums,
+    ``min``/``max``/``step``/``default`` for numbers."""
 
 
-class CandidateBucket(StrictModel):
-    text: list[CandidateInput]
-    image: list[CandidateInput]
+class CandidateBuckets(StrictModel):
+    """All eligible candidates grouped by kind. Empty buckets are
+    serialised as empty lists, never omitted."""
+    text: list[CandidateInput] = Field(default_factory=list)
+    multiline_text: list[CandidateInput] = Field(default_factory=list)
+    image: list[CandidateInput] = Field(default_factory=list)
+    image_alpha: list[CandidateInput] = Field(default_factory=list)
+    number_int: list[CandidateInput] = Field(default_factory=list)
+    number_float: list[CandidateInput] = Field(default_factory=list)
+    boolean: list[CandidateInput] = Field(default_factory=list)
+    enum: list[CandidateInput] = Field(default_factory=list)
+    lora_name: list[CandidateInput] = Field(default_factory=list)
+    checkpoint_name: list[CandidateInput] = Field(default_factory=list)
+
+
+InferredMode = Literal["i2i", "t2i"]
 
 
 class SlotMapOut(StrictModel):
     session_id: str
     workflow_id: str
-    slot_map: dict[SlotName, SlotAssignment | None]
-    """Saved assignments. Every slot in ``SLOT_NAMES`` is present;
-    unassigned slots hold ``null``."""
-    candidates: CandidateBucket
-    """All eligible inputs grouped by kind. The same candidate may
-    appear in multiple slot dropdowns (e.g. a STRING input can fill
-    either positive_prompt or negative_prompt)."""
+    slot_map: SlotMapV2
+    candidates: CandidateBuckets
+    inferred_mode: InferredMode
+    """Inferred at GET time from the saved slot list. ``i2i`` if any
+    wired ``binding=user_image`` slot is present, else ``t2i``. The
+    family-guide append logic (``prompt_i2i`` / ``prompt_t2i``)
+    consumes this in Phase 3 prep."""
 
 
 class SlotMapUpdate(StrictModel):
     """Body of PUT /api/comfy/sessions/{id}/slot_map. Send the full
-    desired state — omitted slots are treated as unassigned."""
-    slot_map: dict[SlotName, SlotAssignment | None]
+    desired list — the slot map is replaced atomically."""
+    slots: list[SlotDefinition]

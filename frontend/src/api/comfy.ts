@@ -168,31 +168,101 @@ export async function runImport(
 }
 
 
-// --- Phase 2: workflow slot mapping --------------------------------------
+// --- Phase 2.5: workflow-declared, typed, labelled slots ----------------
+//
+// The Phase 2 model exposed three fixed slots. Phase 2.5 replaces it
+// with a per-workflow list of labelled slots, each carrying a kind
+// (text / image / number / enum / …) and a binding (who fills the
+// value at generation time). See docs/comfy-workflow-plan.md
+// "Phase 2.5".
 
-/** Logical injection slots sd-chisel knows how to fill. Two text
- *  slots and one image slot — see docs/comfy-workflow-plan.md
- *  Phase 2 sketch. */
-export const SLOT_NAMES = [
-  "positive_prompt",
-  "negative_prompt",
-  "main_image",
+export const SLOT_KINDS = [
+  "text",
+  "multiline_text",
+  "image",
+  "image_alpha",
+  "number_int",
+  "number_float",
+  "boolean",
+  "enum",
+  "lora_name",
+  "checkpoint_name",
 ] as const;
-export type SlotName = (typeof SLOT_NAMES)[number];
+export type SlotKind = (typeof SLOT_KINDS)[number];
 
-export const SLOT_KIND: Record<SlotName, "text" | "image"> = {
-  positive_prompt: "text",
-  negative_prompt: "text",
-  main_image: "image",
+export const SLOT_KIND_LABEL: Record<SlotKind, string> = {
+  text: "Text",
+  multiline_text: "Multiline text",
+  image: "Image",
+  image_alpha: "Image (alpha)",
+  number_int: "Integer",
+  number_float: "Float",
+  boolean: "Boolean",
+  enum: "Enum",
+  lora_name: "LoRA",
+  checkpoint_name: "Checkpoint",
 };
 
-export const SLOT_LABEL: Record<SlotName, string> = {
-  positive_prompt: "Positive prompt",
-  negative_prompt: "Negative prompt",
-  main_image: "Main image (i2i)",
+export const SLOT_BINDINGS = [
+  "llm",
+  "frozen",
+  "user_image",
+  "library_loras",
+] as const;
+export type SlotBinding = (typeof SLOT_BINDINGS)[number];
+
+export const SLOT_BINDING_LABEL: Record<SlotBinding, string> = {
+  llm: "Composed by LLM",
+  frozen: "Fixed value",
+  user_image: "Session image",
+  library_loras: "LoRA library",
 };
 
-export type SlotAssignment = { node_id: string; input_name: string };
+/** Mirror of backend ALLOWED_BINDINGS. Used to populate the binding
+ *  dropdown per slot row. */
+export const ALLOWED_BINDINGS: Record<SlotKind, SlotBinding[]> = {
+  text:            ["llm", "frozen"],
+  multiline_text:  ["llm", "frozen"],
+  image:           ["user_image", "frozen"],
+  image_alpha:     ["user_image", "frozen"],
+  number_int:      ["llm", "frozen"],
+  number_float:    ["llm", "frozen"],
+  boolean:         ["llm", "frozen"],
+  enum:            ["llm", "frozen"],
+  lora_name:       ["frozen"],
+  checkpoint_name: ["frozen"],
+};
+
+export const DEFAULT_BINDING: Record<SlotKind, SlotBinding> = {
+  text:            "llm",
+  multiline_text:  "llm",
+  image:           "user_image",
+  image_alpha:     "user_image",
+  number_int:      "frozen",
+  number_float:    "frozen",
+  boolean:         "frozen",
+  enum:            "frozen",
+  lora_name:       "frozen",
+  checkpoint_name: "frozen",
+};
+
+export type SlotOrigin = { node_id: string; input_name: string };
+
+export type SlotDefinition = {
+  label: string;
+  group: string | null;
+  ordinal: number | null;
+  description: string | null;
+  kind: SlotKind;
+  origin: SlotOrigin;
+  binding: SlotBinding;
+  metadata: Record<string, unknown>;
+};
+
+export type SlotMapV2 = {
+  version: 2;
+  slots: SlotDefinition[];
+};
 
 export type CandidateInput = {
   node_id: string;
@@ -202,16 +272,20 @@ export type CandidateInput = {
   node_title: string | null;
   node_in_catalog: boolean;
   current_value: unknown;
-  multiline: boolean;
+  kind: SlotKind;
+  metadata: Record<string, unknown>;
 };
 
-export type SlotMap = Record<SlotName, SlotAssignment | null>;
+export type CandidateBuckets = Record<SlotKind, CandidateInput[]>;
+
+export type InferredMode = "i2i" | "t2i";
 
 export type SlotMapResponse = {
   session_id: string;
   workflow_id: string;
-  slot_map: SlotMap;
-  candidates: { text: CandidateInput[]; image: CandidateInput[] };
+  slot_map: SlotMapV2;
+  candidates: CandidateBuckets;
+  inferred_mode: InferredMode;
 };
 
 export const comfyKeys = {
@@ -277,10 +351,10 @@ export const comfyApi = {
     apiFetch<SlotMapResponse>(
       `/api/comfy/sessions/${encodeURIComponent(sessionId)}/slot_map`,
     ),
-  putSlotMap: (sessionId: string, slot_map: SlotMap) =>
+  putSlotMap: (sessionId: string, slots: SlotDefinition[]) =>
     apiFetch<SlotMapResponse>(
       `/api/comfy/sessions/${encodeURIComponent(sessionId)}/slot_map`,
-      { method: "PUT", body: JSON.stringify({ slot_map }) },
+      { method: "PUT", body: JSON.stringify({ slots }) },
     ),
 };
 
@@ -397,8 +471,8 @@ export function useSlotMap(sessionId: string | null | undefined) {
 export function useSaveSlotMap(sessionId: string | null | undefined) {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: (slot_map: SlotMap) =>
-      comfyApi.putSlotMap(sessionId as string, slot_map),
+    mutationFn: (slots: SlotDefinition[]) =>
+      comfyApi.putSlotMap(sessionId as string, slots),
     onSuccess: (data) => {
       if (sessionId) {
         client.setQueryData(comfyKeys.slotMap(sessionId), data);

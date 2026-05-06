@@ -882,8 +882,11 @@ public API for importing LoRA metadata.
 **Shipped post-MVP, already in this tree:**
 
 - ComfyUI integration — Phase 1 (node-readiness gate + on-demand
-  catalog growth) and Phase 2 (workflow slot mapping). Phase 3
-  (generation execution) is still pending. See §10.
+  catalog growth), Phase 2, and Phase 2.5 (workflow-declared,
+  typed, labelled slot list with per-slot bindings — replaces
+  Phase 2's fixed three-key model; data-model + editor only,
+  generation still gated). Phase 3 (generation execution) is still
+  pending. See §10.
 
 - LMStudio settings + capability detection (`vision`, `tool_use`,
   `reasoning`) + the `lm_models` cache + Unload all.
@@ -964,13 +967,19 @@ workspace shell:
   any `needs_config` cards through the per-node import wizard
   (§10.5) and resolves `not_installed` ones by installing packs in
   ComfyUI then pressing Refresh.
-- **Step 2 — Slot mapping.** Maps sd-chisel's logical slots
-  (positive prompt, negative prompt, main image) onto specific
-  literal-valued inputs in the workflow graph (§10.6).
+- **Step 2 — Slot mapping.** Builds a per-workflow list of labelled,
+  typed slots that sd-chisel will fill at generate time (§10.6).
 
 The two steps are freely navigable — readiness isn't a hard gate.
 Generation (Phase 3) will gate on something like "every slot the
 session needs is filled" once it ships.
+
+The session's mode (`i2i` / `t2i`) for the family-prompt-guide
+append (§4.x) is **inferred** from the slot list at composition
+time: any wired `binding=user_image` slot ⇒ `i2i`, otherwise
+`t2i`. Computed on demand — no cached column on `sessions`.
+Legacy `i2i` / `t2i` (non-comfy) sessions keep their explicit
+`session_type` column.
 
 ### 10.3. Workflow uploads
 
@@ -1059,45 +1068,101 @@ itself is the user's favourite LMStudio model — a dedicated
 
 ### 10.6. Workflow slot mapping
 
-The slot map binds sd-chisel's logical injection slots to concrete
-`(node_id, input_name)` pairs in the bound workflow's graph.
-sd-chisel only ever injects values it owns — text (positive /
-negative prompt) and images (i2i source). Everything else (seed,
-steps, cfg, sampler, dimensions, checkpoint, VAE, …) is the
-user's responsibility, set inside the workflow at export time.
+The slot map is a **per-workflow list of labelled, typed slots**
+that sd-chisel binds to concrete `(node_id, input_name)` pairs in
+the workflow graph. Each slot carries a label, an optional group,
+a typed `kind`, an `origin`, a `binding` (who supplies the value
+at generation time), and per-kind metadata. The shape replaces
+Phase 2's fixed three-key dict.
 
-The current slot list:
+#### Slot kinds
 
-- `positive_prompt` (text)
-- `negative_prompt` (text)
-- `main_image` (image)
+A closed enum, set per slot:
 
-The map is **user-driven** — no LLM-based auto-proposal. The UI
-narrows the candidate list by computing *eligible* inputs:
+- `text`, `multiline_text` — `STRING` inputs in the graph.
+  Multiline is set from the `STRING` widget's `multiline` flag.
+- `image`, `image_alpha` — combos flagged `image_upload=true` /
+  `mask=true` in the catalog's raw schema (LoadImage-style
+  pickers).
+- `number_int`, `number_float`, `boolean` — primitive scalars
+  (INT / FLOAT / BOOLEAN widgets). Range / step / default are
+  carried over from the schema in the candidate's metadata.
+- `enum` — a generic combo, exposed with the candidate options.
+- `lora_name`, `checkpoint_name` — combos whose options are
+  filename lists ending in `.safetensors` / `.ckpt` / etc., and
+  whose input name implies the file role (`lora_name`,
+  `ckpt_name`, `checkpoint_*`).
 
-- An input is eligible if its value in `graph_json` is a literal
-  (not a `[node_id, output_idx]` wire).
-- Its raw type must be one sd-chisel can supply: `STRING` (text
-  bucket) or a combo with `image_upload=true` (image bucket — i.e.
-  a `LoadImage`-style picker).
-- Class types not yet imported into the catalog still produce text
-  candidates (best-effort: any literal string), flagged with
-  `node_in_catalog=false` so the editor can hint that import
-  would help.
+#### Slot bindings
 
-Persistence: `comfy_workflows.slot_map_json` holds the saved map as
-`{slot: null | {node_id, input_name}}`. Endpoints:
+Who fills the value at generation time:
+
+- `llm` — the composition LLM call (Phase 3 prep). Default for
+  text and number kinds.
+- `frozen` — the value is fixed at slot-map config time and reused
+  on every generation, stored on the slot's `metadata.value`.
+  Default for non-text scalars and the file-name combo kinds.
+- `user_image` — picked from the session's source images at
+  generate time. Default for image / image_alpha kinds.
+- `library_loras` — sd-chisel's LoRA retriever. Reserved in the
+  enum for the L4 milestone; not selectable from the editor and
+  rejected by the validator.
+
+The per-kind allow-list is fixed: text / number / boolean / enum
+slots accept `llm` or `frozen`; image / image_alpha accept
+`user_image` or `frozen`; `lora_name` / `checkpoint_name` accept
+only `frozen` until L4 ships.
+
+#### Candidate discovery
+
+The service walks `graph_json` and classifies every literal-valued
+input by `kind`, returning one candidate bucket per kind. Catalog-
+known classes use the cached `inputs_raw_json` schema to detect
+combo subtypes (`image_upload`, `mask`, lora / checkpoint
+filename lists). Uncatalogued classes fall back to a soft
+heuristic on the literal value alone — primitive scalars and
+plain strings are still classified, but combo subtypes can't be
+detected without the catalog. Each candidate carries
+`(node_id, input_name, node_class_type, node_display_name,
+node_title, node_in_catalog, current_value, kind, metadata)`.
+
+#### Persistence and lazy upgrade
+
+`comfy_workflows.slot_map_json` holds the saved map as
+`{"version": 2, "slots": [...]}`. Older Phase 2 rows (the
+three-key dict, no version key) are upgraded **lazily on read**
+by the service: each non-null legacy assignment becomes a slot
+with the matching default label (`positive_prompt`,
+`negative_prompt`, `main_image`), kind borrowed from the
+candidate, and binding (`llm` for the prompts, `user_image` for
+the image). Empty / unmatched legacy keys collapse to an empty
+slot list. The upgraded shape is written back the first time the
+slot map is saved through `PUT /slot_map`. The column is JSON,
+no migration SQL was needed.
+
+#### API surface
 
 - `GET /api/comfy/sessions/{id}/slot_map` — recomputes candidates
-  every call and merges them with the saved assignments. Returns
-  `{session_id, workflow_id, slot_map, candidates}`.
-- `PUT /api/comfy/sessions/{id}/slot_map` — full-replace write.
-  Returns 422 if any assignment names a `(node_id, input_name)`
-  that isn't an eligible candidate of the slot's expected kind.
+  every call, runs the lazy upgrade against any saved row, and
+  returns
+  `{session_id, workflow_id, slot_map: {version, slots[]},
+  candidates: {<kind>: [...]}, inferred_mode}`. Every kind bucket
+  is always present (empty list when no eligible inputs).
+  `inferred_mode` is `i2i` if the slot list contains any wired
+  `binding=user_image` slot, else `t2i`.
+- `PUT /api/comfy/sessions/{id}/slot_map` — full-replace write
+  with body `{slots: [...]}`. Validation rejects (422) duplicate
+  labels, origins that don't match a candidate of the slot's
+  declared kind, bindings outside the per-kind allow-list, and
+  frozen scalars whose value falls outside the candidate's
+  declared range / options. The legacy `positive_prompt` /
+  `negative_prompt` / `main_image` keys are **not** part of the
+  request contract — clients always send and receive the slot
+  list.
 
-All slots are optional. Saving partial maps is fine; Phase 3 will
-simply skip slots that are still `null` instead of touching the
-graph.
+Slots are independent: saving partial lists is fine; generation
+(Phase 3) will simply skip the unbound graph inputs and let the
+workflow's baked literals stand.
 
 ### 10.7. Phase 3 — pending
 
