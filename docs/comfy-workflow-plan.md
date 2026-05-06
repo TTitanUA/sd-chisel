@@ -37,12 +37,17 @@ this redirect lives in chat history; the salient summary sits in
 
 - **Phase 2.5** — typed labelled slots: data model rewrite,
   candidate-discovery widening, slot-map editor evolution.
-- **Phase 2.6** — LLM auto-suggest labels.
 - **Phase 3 prep** — dynamic orchestrator schema, composition call
   restructure, legacy i2i/t2i path preserved.
 - **Phase 3** — generation execution: `comfy_client`, image upload,
   graph patching with slot bindings, queue + websocket cycle,
   result persistence.
+
+LLM auto-suggest labels (originally Phase 2.6) is parked in
+[backlog.md](backlog.md) — manual labelling in the slot-map
+editor turned out fast enough that the auto-suggest button is
+not currently worth the extra surface area. Revisit when real
+workflows push past ~10 slots.
 
 Carried-forward polish from earlier phases that is independent of
 this redirect:
@@ -146,7 +151,7 @@ Replaces the fixed-three-slot model with a labelled, typed slot
 list per workflow. No new external behaviour — the wizard, library,
 catalog, settings stay as they are. Generation is still gated
 (Phase 3 not done). The point is to land the data model and
-editor that Phases 2.6 / 3-prep / 3 plug into.
+editor that Phase 3 prep / 3 plug into.
 
 ### Slot kinds — taxonomy
 
@@ -267,10 +272,9 @@ slot list — the user re-labels from the editor.
 
 Replaces the fixed three-row table. New layout:
 
-- **Top toolbar.** "Auto-suggest labels" (Phase 2.6 — wired
-  disabled in 2.5), "Add slot" (opens candidate picker filtered
-  by kind), "Reset to defaults" (re-runs the legacy upgrade
-  heuristic), and a slot-count badge.
+- **Top toolbar.** "Add slot" (opens candidate picker filtered
+  by kind), a mode badge (live i2i / t2i from the slot list),
+  and a slot-count badge.
 - **Slot list**, grouped by `group`, sorted by
   `(group, ordinal, label)`. Each row shows:
   - `label` — inline editable, validated (unique, no whitespace
@@ -335,132 +339,13 @@ receive the slot list. The upgrade path is server-side only.
 
 ### Out of scope for 2.5
 
-- Auto-suggest labels (lands in 2.6).
+- Auto-suggest labels — parked in [backlog.md](backlog.md).
 - LLM composition consuming the schema (lands in 3-prep).
 - Generation execution (Phase 3).
 - LoRA-stack binding (Q3).
 - Slot-level overrides per generation call (Phase 3 may add
   per-call patches like "use this seed this time only" — out of
   scope for the slot-map editor itself).
-
-## Phase 2.6 — LLM auto-suggest labels
-
-A button on the slot-map editor that proposes a label / group /
-description / binding for every eligible candidate the workflow
-exposes. The user reviews, edits, and saves. No autosave; the
-response is just a draft.
-
-Phase 2.6 lands one migration on `app_settings` adding three
-columns: `default_comfy_label_settings` (JSON, nullable —
-sampling bundle, see Action below) and the
-`comfy_import_model_name` / `comfy_label_model_name` pair
-(TEXT, nullable — see Polish below).
-
-### Action
-
-New per-action sampling bundle `comfy_label`, sibling of
-`comfy_import` / `analyze` / `chat` / `summarize` / `generate`.
-Defaults on `app_settings.default_comfy_label_settings`. Code-level
-`BUILTIN_DEFAULTS`: `temperature=0.2`, `max_tokens=8000` (the
-payload can be large for 20-node workflows). Validation lives in
-`action_settings.py` next to the existing bundles. Reuses the
-favourite-LMStudio-model selection until Q6 ships dedicated
-`comfy_label_model_name` / `comfy_import_model_name` settings.
-
-### Prompt and response
-
-Input to the LLM:
-
-- The full `graph_json` (kept as-is; the LLM has shown it can
-  parse the format).
-- For each distinct class_type, the catalog entry's
-  `description_md` and (if any) user override notes from
-  `comfy_node_overrides`.
-- The list of candidate `(node_id, input_name, kind, current_value, _meta.title)`.
-- A short style instruction: prefer snake_case labels; group by
-  obvious semantic clusters (refiner, region, style, controlnet);
-  default `binding=llm` for text, `frozen` for numbers, scalars,
-  and enums; `user_image` for images; never invent kinds.
-
-Response (validated against a Pydantic schema; same `text` mode +
-brace-matching extractor used by `comfy_import`):
-
-```json
-{
-  "suggestions": [
-    {
-      "node_id": "6",
-      "input_name": "text",
-      "label": "main_positive",
-      "group": null,
-      "ordinal": 1,
-      "description": "Primary positive prompt for the base sampler",
-      "kind": "multiline_text",
-      "binding": "llm"
-    }
-  ]
-}
-```
-
-Validation: every `(node_id, input_name)` must exist among
-candidates of the matching `kind`; labels unique; bindings valid
-for kind. On failure the wizard surfaces the error and the user
-retries — no per-stage resume.
-
-### UX
-
-- Toolbar button "Auto-suggest labels" runs the call. Streams
-  events as SSE the same way `comfy_import` does
-  (`stage_started`, `stage_succeeded`, `stage_failed`, `done`),
-  so the editor can show a spinner.
-- On success the editor enters **review mode**: every suggested
-  slot is rendered as a slot row with a green `suggested` badge
-  and an "Accept" / "Discard" toggle per row. Two top-level
-  actions: "Accept all", "Discard all".
-- Accepted suggestions become real slots on Save. The editor
-  preserves any pre-existing slots; a suggestion that overlaps
-  an existing slot's `origin` is shown side-by-side, the user
-  picks which to keep.
-- Re-running auto-suggest replaces the unsaved draft. Saved
-  slots are not touched.
-
-### API
-
-- `POST /api/comfy/sessions/{id}/slot_map/suggest_labels` —
-  starts the LLM call, streams SSE events, returns the
-  validated `suggestions` array on `done`. No state on the
-  server; the client owns review and the eventual `PUT`.
-
-### Polish — dedicated import / label models (resolves Q6)
-
-Both `comfy_import` and `comfy_label` currently fall back to
-the favourite LMStudio model. Reasoning-distilled models can
-drop their JSON answer into `reasoning_content` (the OpenAI
-surface ignores it) and ship empty `message.content` even
-with the bumped baseline. Phase 2.6 adds two settings to
-`app_settings`:
-
-- `comfy_import_model_name` — pin a specific LMStudio model
-  for the per-node import wizard.
-- `comfy_label_model_name` — same for slot-map auto-suggest.
-
-Both nullable. Resolution order at call time: per-action
-setting → favourite → 422 (no usable model). The LM Studio
-settings page renders two model dropdowns next to the
-existing per-action sampling rows. Reasoning models are
-**not** filtered out — instead the dropdown row shows a
-warning chip ("reasoning models often emit empty content
-with this action") so the user picks informed. The Pydantic
-validator on the new fields just checks that the named model
-exists in `lm_models` and is `enabled`.
-
-### Out of scope for 2.6
-
-- Auto-applying suggestions (always requires user confirmation).
-- Suggesting `binding=library_loras` slots (gated on Q3).
-- Suggesting frozen values for non-text slots (the LLM proposes
-  the slot, the user fills the literal — auto-filling reasonable
-  numeric defaults is a 2.6.1 polish).
 
 ## Phase 3 prep — dynamic orchestrator schema
 
@@ -946,10 +831,12 @@ Upscale/seed               (number_int,    frozen)    → KSampler #50.seed = 12
 User flow:
 
 1. Upload workflow, walk readiness gate (Phase 1 — done).
-2. Open slot-map editor. Press "Auto-suggest labels".
-   LLM proposes the eight slots above with labels and groups.
-   User reviews, tweaks `Region 1` → `Foreground` and
-   `Region 2` → `Background`, accepts all, saves.
+2. Open slot-map editor. Press "Add slot" eight times, picking
+   each text encoder + the seed input from the candidate picker.
+   Label them `Foreground/positive`, `Foreground/negative`,
+   `Background/positive`, `Background/negative`,
+   `Global/positive`, `Global/negative`,
+   `Upscale/refiner_positive`, `Upscale/seed`. Save.
 3. Continue to chat. User describes the scene.
 4. Open Generate modal. Summarize fires. Brief looks right.
    Press Generate.
@@ -1026,11 +913,15 @@ revision. Future open questions land here as they arise.
   unchanged — clears the flag. Job history is unaffected:
   each `comfy_jobs` row freezes `slot_map_snapshot_json` for
   reproducibility-of-record (not for replay).
-- **Q6 — dedicated model selection.** Add
-  `comfy_import_model_name` / `comfy_label_model_name` to
-  `app_settings`. Resolution order at call time: per-action
-  setting → favourite → 422. Reasoning models flagged with a
-  warning chip on the dropdown row, not filtered.
+- **Q6 — dedicated model selection.** Parked. Both
+  `comfy_import` and any future `comfy_label` action would
+  benefit from per-action model pins
+  (`comfy_import_model_name` / `comfy_label_model_name`) rather
+  than the favourite-LMStudio fallback, but the work was
+  packaged with the auto-suggest feature in
+  [backlog.md](backlog.md). The `comfy_import_model_name`
+  half is independently shippable if the import wizard's
+  reasoning-model surface bug becomes painful in isolation.
 - **Q7 — multi-image i2i with named slots.** Per-slot dropdown
   in the Generate modal under "Image bindings". Picks land in
   `payload_overrides`, persist on `comfy_jobs.payload_json`.
@@ -1085,16 +976,6 @@ Phase 2.5:
   gate (mocked), open the slot-map editor, add slots, save,
   reload, slots persist.
 
-Phase 2.6:
-
-- Unit tests for the auto-suggest validator: every suggestion
-  ties to a real candidate; label collision rejects; invalid
-  kind rejects; binding-for-kind rejects.
-- Integration test with a faked LMStudio: SSE event sequence,
-  successful suggestion array, malformed-JSON retry.
-- Browser test: press "Auto-suggest labels", review suggestions,
-  Accept all, save, reload.
-
 Phase 3 prep:
 
 - Unit tests for the dynamic-schema generator: every kind maps
@@ -1125,10 +1006,6 @@ Phase 2.5: spec §10.6 is rewritten end-to-end. Slot kinds /
 binding taxonomy, candidate-bucket shape, storage shape,
 endpoint contracts. Mode-inference paragraph in §3.2 / §10.2
 is updated to reflect the new derivation.
-
-Phase 2.6: spec §10.6 grows a sub-section for the auto-suggest
-endpoint and the new `comfy_label` action. §4 grows the
-per-action sampling table.
 
 Phase 3 prep: spec §4.3 (Generate flow) grows a paragraph
 distinguishing legacy `GeneratedPrompt` from comfy

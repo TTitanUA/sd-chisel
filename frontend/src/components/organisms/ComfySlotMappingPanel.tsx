@@ -120,9 +120,6 @@ export function ComfySlotMappingPanel({
         >
           Add slot
         </Button>
-        <Button size="sm" disabled title="Coming in Phase 2.6">
-          Auto-suggest labels
-        </Button>
         <span className={styles.modeBadge} data-mode={inferredMode}>
           {inferredMode}
         </span>
