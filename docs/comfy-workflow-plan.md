@@ -417,6 +417,14 @@ mirroring the existing per-session image directory structure.
 
 ### Workspace UX (Phase 3 layout)
 
+> **Note (2026-05-06):** the layout described below is being
+> reworked separately — see
+> [`comfy-workspace-redesign-plan.md`](comfy-workspace-redesign-plan.md).
+> This subsection stays as the **feature checklist** for what the
+> UI must surface; the redesign plan owns the *shape* (rail tabs,
+> drawer, brief flow). The two are merged once the redesign
+> lands.
+
 The post-readiness comfy session screen lights up:
 
 - **Left** — chat + prompt pane + pinned-LoRAs stack. The

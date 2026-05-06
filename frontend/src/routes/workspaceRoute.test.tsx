@@ -35,52 +35,19 @@ function json(data: unknown) {
   return Promise.resolve(new Response(JSON.stringify(data), { status: 200 }));
 }
 
-describe("workspace route", () => {
-  it("renders header, source drop zone, and pane placeholders", async () => {
-    vi.stubGlobal("fetch", vi.fn((url: string) => {
+type FakeSession = Omit<typeof FAKE_SESSION, "session_type"> & {
+  session_type: "i2i" | "t2i" | "comfy";
+};
+
+function stubFetchFor(session: FakeSession) {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((url: string) => {
       const s = String(url);
       if (s.endsWith("/api/projects")) {
-        return json([{ id: "p1", name: "Test", session_count: 1, created_at: 1, updated_at: 1 }]);
-      }
-      if (s.includes("/api/sessions/") && s.endsWith("/messages")) {
-        return json({ messages: [] });
-      }
-      if (s.includes("/api/sessions/") && s.includes(FAKE_SESSION.id)) {
-        return json(FAKE_SESSION);
-      }
-      if (s.includes("/api/library/models")) return json([]);
-      if (s.includes("/api/library/loras")) return json([]);
-      if (s.includes("/api/sessions/") && s.endsWith("/prompts")) return json({ prompts: [] });
-      return json([]);
-    }));
-
-    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    render(
-      <QueryClientProvider client={client}>
-        <MemoryRouter initialEntries={[`/projects/p1/sessions/${FAKE_SESSION.id}`]}>
-          <Routes>
-            <Route
-              path="/projects/:projectId/sessions/:sessionId"
-              element={<WorkspaceRoute />}
-            />
-          </Routes>
-        </MemoryRouter>
-      </QueryClientProvider>,
-    );
-
-    await waitFor(() => expect(screen.getByText("test session")).toBeInTheDocument());
-    expect(screen.getByText(/Drop source images/)).toBeInTheDocument();
-    expect(screen.getByRole("textbox")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /^send$/i })).toBeInTheDocument();
-    expect(screen.getByLabelText(/prompt pane/i)).toBeInTheDocument();
-  });
-
-  it("renders the same three-pane grid for t2i sessions (no placeholder)", async () => {
-    const session = { ...FAKE_SESSION, session_type: "t2i" as const };
-    vi.stubGlobal("fetch", vi.fn((url: string) => {
-      const s = String(url);
-      if (s.endsWith("/api/projects")) {
-        return json([{ id: "p1", name: "Test", session_count: 1, created_at: 1, updated_at: 1 }]);
+        return json([
+          { id: "p1", name: "Test", session_count: 1, created_at: 1, updated_at: 1 },
+        ]);
       }
       if (s.includes("/api/sessions/") && s.endsWith("/messages")) {
         return json({ messages: [] });
@@ -91,27 +58,63 @@ describe("workspace route", () => {
       if (s.includes("/api/library/models")) return json([]);
       if (s.includes("/api/library/loras")) return json([]);
       if (s.includes("/api/sessions/") && s.endsWith("/prompts")) return json({ prompts: [] });
+      if (s.includes("/api/comfy/sessions/") && s.endsWith("/readiness")) {
+        return json({ ready: false, cards: [], error: null });
+      }
       return json([]);
-    }));
+    }),
+  );
+}
 
-    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    render(
-      <QueryClientProvider client={client}>
-        <MemoryRouter initialEntries={[`/projects/p1/sessions/${session.id}`]}>
-          <Routes>
-            <Route
-              path="/projects/:projectId/sessions/:sessionId"
-              element={<WorkspaceRoute />}
-            />
-          </Routes>
-        </MemoryRouter>
-      </QueryClientProvider>,
-    );
+function renderRoute(session: FakeSession) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return render(
+    <QueryClientProvider client={client}>
+      <MemoryRouter initialEntries={[`/projects/p1/sessions/${session.id}`]}>
+        <Routes>
+          <Route
+            path="/projects/:projectId/sessions/:sessionId"
+            element={<WorkspaceRoute />}
+          />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+}
+
+describe("workspace route dispatch", () => {
+  it("dispatches i2i sessions to the i2i workspace (sources | chat | prompt)", async () => {
+    stubFetchFor(FAKE_SESSION);
+    renderRoute(FAKE_SESSION);
 
     await waitFor(() => expect(screen.getByText("test session")).toBeInTheDocument());
-    expect(screen.queryByText(/T2I workflow is not yet implemented/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/Drop source images/)).toBeInTheDocument();
+    expect(screen.getByRole("textbox")).toBeInTheDocument();
+    expect(screen.getByLabelText(/prompt pane/i)).toBeInTheDocument();
+  });
+
+  it("dispatches t2i sessions to the t2i workspace (sources | chat | prompt)", async () => {
+    const session = { ...FAKE_SESSION, session_type: "t2i" as const };
+    stubFetchFor(session);
+    renderRoute(session);
+
+    await waitFor(() => expect(screen.getByText("test session")).toBeInTheDocument());
     expect(screen.getByText(/Drop reference images/)).toBeInTheDocument();
     expect(screen.getByRole("textbox")).toBeInTheDocument();
     expect(screen.getByLabelText(/prompt pane/i)).toBeInTheDocument();
+  });
+
+  it("dispatches comfy sessions to the comfy workspace (readiness gate first)", async () => {
+    const session = { ...FAKE_SESSION, session_type: "comfy" as const };
+    stubFetchFor(session);
+    renderRoute(session);
+
+    await waitFor(() => expect(screen.getByText("test session")).toBeInTheDocument());
+    // Comfy starts on the readiness step — no source/prompt panes yet.
+    expect(screen.queryByText(/Drop reference images/)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/prompt pane/i)).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.getByText(/Workflow readiness/i)).toBeInTheDocument(),
+    );
   });
 });

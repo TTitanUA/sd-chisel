@@ -9,7 +9,7 @@ import {
 } from "@/api/comfy";
 import { ComfyBulkImportModal } from "./ComfyBulkImportModal";
 import { ComfyImportModal } from "./ComfyImportModal";
-import styles from "./ComfyReadinessPanel.module.css";
+import styles from "./ComfyReadinessGate.module.css";
 
 const STATUS_LABEL: Record<ReadinessStatus, string> = {
   ready: "Ready",
@@ -17,7 +17,7 @@ const STATUS_LABEL: Record<ReadinessStatus, string> = {
   not_installed: "Not installed",
 };
 
-export function ComfyReadinessPanel({
+export function ComfyReadinessGate({
   sessionId,
   onContinue,
 }: {

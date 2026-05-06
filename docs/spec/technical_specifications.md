@@ -726,14 +726,30 @@ tokens. No Tailwind, no shadcn. Package manager: pnpm.
 
 ### 6.1. Decomposition
 
-Atomic design: `atoms/` (Button, Badge, Icon), `molecules/` (form blocks,
-SourceImageCard, AnalyzeImageModal, AnalysisDetailModal, ImageLightbox,
-MentionPopover, SessionSettingsDrawer), `organisms/` (LibraryCrud,
-SourceImagesPane, PromptPane, ChatPane, GenerateModal, ProjectSidebar,
-CRUD forms, LmStudioSettings, TaskIndicator), `templates/`
-(WorkspaceLayout, LibraryLayout, AppShell).
-Pages (`routes/`) are assembled from templates + organisms; data flows in
-through TanStack Query hooks in `src/api/`.
+Atomic design + per-feature folders:
+
+- `components/atoms/` — global primitives (Button, Badge, Icon).
+- `components/molecules/` — genuinely shared composites (ChatPane,
+  Slider, FormField, ImageLightbox, MarkdownField, MentionPopover,
+  SourceImageCard, AnalyzeImageModal, AnalysisDetailModal,
+  TaskListPopover, …).
+- `components/organisms/` — cross-feature organisms used by two or
+  more features (ProjectSidebar, SessionSettingsDrawer,
+  ActionSettingsModal, PromptPane, GenerateModal, SourceImagesPane,
+  PromptLoraRow), plus library/settings page organisms (LibraryCrud,
+  FamilyForm, ModelForm, LoraForm, LmStudioSettings, ComfyUiSettings).
+- `components/templates/` — shell layouts (AppShell, WorkspaceLayout,
+  LibraryLayout, SettingsLayout).
+- `features/` — one folder per session type (`features/i2i/`,
+  `features/t2i/`, `features/comfy/`). Each owns its workspace shell
+  and any session-type-specific components (drawers, columns,
+  inspector tabs, readiness gate, slot-map panel). The bias is
+  **≥ 2 features ⇒ `components/`, exactly 1 feature ⇒ `features/`**.
+
+Pages (`routes/`) are assembled from templates + features +
+organisms; data flows in through TanStack Query hooks in `src/api/`.
+`routes/workspace.tsx` is a thin three-way dispatch by
+`session.session_type`.
 
 ### 6.2. Screens
 
@@ -891,8 +907,10 @@ public API for importing LoRA metadata.
   - `package.json`, `vite.config.ts`.
   - `src/api/` — TanStack Query hooks over REST/SSE.
   - `src/components/{atoms,molecules,organisms,templates}/`.
-  - `src/routes/` — workspace, library/{families,models,loras},
-    settings/{lmstudio,privacy}.
+  - `src/features/{i2i,t2i,comfy}/` — per-session-type workspace
+    shells and session-type-specific components.
+  - `src/routes/` — workspace (thin dispatch by session_type),
+    library/{families,models,loras}, settings/{lmstudio,privacy}.
   - `src/store/` — Zustand store for client state.
   - `src/styles/`, `assets/`, `lib/`.
 - `scripts/` — `dev.sh` / `dev.ps1` / `dev.mjs` (raise backend + frontend
@@ -1005,21 +1023,51 @@ in parallel.
 
 `session_type = "comfy"` on `sessions`, with a non-null
 `comfy_workflow_id` referencing `comfy_workflows(id)` (`ON DELETE
-RESTRICT`). The session screen is a two-step navigator inside the
-workspace shell:
+RESTRICT`). The workspace surface is:
 
-- **Step 1 — Nodes (readiness panel).** One card per distinct
-  `class_type` referenced in the bound workflow's graph, bucketed
-  into `ready` / `needs_config` / `not_installed`. The user walks
-  any `needs_config` cards through the per-node import wizard
+- **Readiness gate (one-time).** Until every distinct `class_type`
+  in the bound workflow's graph is `ready` (catalogued + installed),
+  the workspace renders the readiness panel — one card per class,
+  bucketed into `ready` / `needs_config` / `not_installed`. The user
+  walks any `needs_config` cards through the per-node import wizard
   (§10.5) and resolves `not_installed` ones by installing packs in
-  ComfyUI then pressing Refresh.
-- **Step 2 — Slot mapping.** Builds a per-workflow list of labelled,
-  typed slots that sd-chisel will fill at generate time (§10.6).
+  ComfyUI then pressing Refresh. Once `ready=true`, the gate flips
+  off automatically and the workspace mounts.
+- **Workspace shell (post-readiness).** A three-column layout:
+  - **Left** — `ChatPane` plus a payload preview of the slot-keyed
+    `GeneratedPayload` produced by the latest assistant turn.
+  - **Centre** — gallery of past `comfy_jobs` runs, newest first.
+    Phase 3 pins a running-job progress card to the top while in
+    flight; Mock PR shows an empty state.
+  - **Right rail** — tabbed inspector with five tabs:
+    1. **Slots** — read-only summary of the slot map, grouped by
+       `group`. A pencil icon opens the **slot-map drawer**, which
+       wraps the same editor body that used to live in the full-
+       screen "Step 2" — `Save` / `Discard` close it.
+    2. **Bindings** — per-slot picker for every `binding=user_image`
+       slot. Mock PR is read-only; Live PR persists picks as
+       session-scoped state and feeds them into Phase 3's
+       `payload_overrides[<label>]`.
+    3. **Frozen** — per-session override editor for `binding=frozen`
+       slots. Mock PR is read-only; Live PR adds kind-appropriate
+       widgets and a "use slot-map value" toggle. Edits never write
+       back to the slot map.
+    4. **Sources** — image upload + thumbnails (the shared
+       `SourceImagesPane`, with no `is_main` UI for comfy).
+    5. **Nodes** — compact readiness summary. If a workflow replace
+       regresses readiness (a class drops out of the catalog), the
+       inline gate surfaces here — the user is not bounced back to
+       a step machine.
+- **Header.** Project / session crumbs, pinned-LoRA chip, a
+  prominent **Generate** button (disabled in Mock PR, wired in Live
+  PR), and `Session settings`.
 
-The two steps are freely navigable — readiness isn't a hard gate.
-Generation (Phase 3) will gate on something like "every slot the
-session needs is filled" once it ships.
+There is no `compose` step or full-screen `slot_map` / `nodes` step
+— the slot-map editor is a drawer; readiness regressions surface in
+the Nodes tab. Generation (Phase 3) will gate on "every slot the
+session needs is filled" once it ships; the Brief drawer + SSE
+progress described in the Phase 3 plan replaces the existing
+GenerateModal for comfy sessions.
 
 The session's mode (`i2i` / `t2i`) for the family-prompt-guide
 append (§4.x) is **inferred** from the slot list at composition
@@ -1278,11 +1326,17 @@ mirrored LoRA list in `loras_json` (the discriminator is
 meaning unchanged. One migration adds the column.
 
 **What's still pending (Phase 3).** The catalogue, readiness gate,
-slot-map editor, dynamic-schema composition, and persistence are in
-place; what remains is the actual generation cycle: a `comfy_client`
-service mirroring `lmstudio_client.py`, image upload, workflow
-patching per `slot_map_json`, queueing via `/api/prompt`, the
-websocket consumer for progress events, result fetching +
-persistence, and the per-slot image-binding / frozen-overrides UI
-inside the Generate modal. None of this exists yet — the comfy
-session screen ends at slot mapping plus payload composition for now.
+slot-map editor, dynamic-schema composition, persistence, and the
+redesigned three-column workspace shell (§10.2 — chat + gallery +
+tabbed inspector, with the slot-map drawer in place of the old
+full-screen step) are in place; what remains is the actual
+generation cycle: a `comfy_client` service mirroring
+`lmstudio_client.py`, image upload, workflow patching per
+`slot_map_json`, queueing via `/api/prompt`, the websocket consumer
+for progress events, result fetching + persistence, the running-job
+progress card and gallery cards in the centre column, the live
+session-scoped state for the Bindings / Frozen rail tabs, and the
+Brief drawer + SSE wiring for the header `Generate` button (it
+replaces the `GenerateModal` for comfy). None of this exists yet —
+the comfy workspace ends at slot mapping plus payload composition
+for now.
