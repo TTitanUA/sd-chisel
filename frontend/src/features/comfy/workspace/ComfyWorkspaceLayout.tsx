@@ -20,6 +20,7 @@ import { InputDrawer } from "../components/InputDrawer";
 import { InputsPanel } from "../components/InputsPanel";
 import { KnobsStrip } from "../components/KnobsStrip";
 import { OutputsPanel } from "../components/OutputsPanel";
+import { RunViewer } from "../components/RunViewer";
 import { useSlotDraft } from "../components/slot-variants/useSlotDraft";
 import { MappingTreeDrawer } from "../components/tree-variants/MappingTreeDrawer";
 import { SourcesPanel } from "../components/SourcesPanel";
@@ -45,7 +46,7 @@ type LeftTab = (typeof LEFT_TABS)[number]["id"];
 type CenterMode = "agent" | "tree";
 
 export function ComfyWorkspaceLayout({ knobsOpen }: { knobsOpen: boolean }) {
-  const { session, agents, selectedAgentId, slotMap } = useComfy();
+  const { session, agents, selectedAgentId, slotMap, runState, isRunningWorkflow, dismissRun } = useComfy();
   const knobs = useKnobs("d", KNOBS);
   const workflowQuery = useQuery({
     queryKey: ["comfy", "workflows", session.comfy_workflow_id],
@@ -71,8 +72,17 @@ export function ComfyWorkspaceLayout({ knobsOpen }: { knobsOpen: boolean }) {
     [agents, selectedAgentId],
   );
 
+  // Lock the workspace below the modal while a run is in flight —
+  // pointer-events: none + aria-hidden keep keyboard + screenreader
+  // focus contained inside the Run Viewer.
+  const lockedClass = isRunningWorkflow ? styles.locked : "";
+
   return (
     <div className={styles.outer}>
+      <div
+        className={`${styles.workspaceContent} ${lockedClass}`}
+        aria-hidden={isRunningWorkflow ? "true" : undefined}
+      >
       <div className={styles.shell}>
         <nav className={styles.tabs}>
           {LEFT_TABS.map((t) => (
@@ -158,6 +168,8 @@ export function ComfyWorkspaceLayout({ knobsOpen }: { knobsOpen: boolean }) {
         inputName={drawerInput?.inputName ?? null}
         onClose={() => setDrawerInput(null)}
       />
+      </div>
+      {runState !== null && <RunViewer onClose={dismissRun} />}
     </div>
   );
 }

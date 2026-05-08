@@ -143,6 +143,11 @@ export type ComfyContextShape = {
   setSourceSlots: (slots: SourceSlot[]) => void;
   runAgent: (agentId: string) => Promise<void>;
   runWorkflow: () => Promise<void>;
+  /** Clear ``runState`` once the run terminates. The Run Viewer
+   *  calls this when the user dismisses; the provider refuses while
+   *  ``inProgress`` is true so the viewer's Close button is the
+   *  only path to dismissal. */
+  dismissRun: () => void;
   sendChat: (text: string) => Promise<void>;
   clearChat: () => void;
   deleteJob: (jobId: string) => void;
@@ -390,6 +395,79 @@ export function ComfyProvider({
 
   const clearChat = useCallback(() => setChat([]), []);
 
+  const dismissRun = useCallback(() => {
+    setRunState((prev) => (prev && prev.inProgress ? prev : null));
+  }, []);
+
+  // Browser-level nav block while a run is in flight — the browser's
+  // native confirm is a fallback; the workspace layout adds a router
+  // blocker for the in-app navigation paths.
+  useEffect(() => {
+    if (!runState || !runState.inProgress) return;
+    function onBeforeUnload(e: BeforeUnloadEvent) {
+      e.preventDefault();
+      e.returnValue = "";
+    }
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [runState]);
+
+  // Resume on reload — when the session has a comfy_jobs row in
+  // status='running' on first load, the orchestrator may still be
+  // alive on the backend. Hydrate runState from that row and try to
+  // re-subscribe; the channel's replay snapshot fills the event log.
+  useEffect(() => {
+    if (runState !== null) return;
+    const inflight = jobs.find((j) => j.status === "running");
+    if (!inflight) return;
+    setRunState({
+      jobId: inflight.id,
+      generationId: inflight.generation_id,
+      events: [],
+      currentStage: "validate",
+      inProgress: true,
+    });
+    streamCleanupRef.current?.();
+    const cleanup = subscribeToJobStream(
+      inflight.id,
+      (event) => {
+        setRunState((prev) => {
+          if (prev === null || prev.jobId !== inflight.id) return prev;
+          const stage = typeof event.stage === "string"
+            ? event.stage
+            : prev.currentStage;
+          const inProgress = !(
+            event.stage === "done" ||
+            (event.stage === "execute" && event.event === "failed")
+          );
+          return {
+            ...prev,
+            events: [...prev.events, event],
+            currentStage: stage,
+            inProgress,
+          };
+        });
+        if (event.stage === "done") {
+          void queryClient.invalidateQueries({
+            queryKey: comfyKeys.jobs(sessionId),
+          });
+          streamCleanupRef.current?.();
+          streamCleanupRef.current = null;
+        }
+      },
+      () => {
+        // Channel reaped — the run finished before we could resume.
+        // Fall back to whatever the gallery shows.
+        setRunState((prev) =>
+          prev && prev.jobId === inflight.id
+            ? { ...prev, inProgress: false }
+            : prev,
+        );
+      },
+    );
+    streamCleanupRef.current = cleanup;
+  }, [jobs, runState, sessionId, queryClient]);
+
   const deleteJob = useCallback(
     (jobId: string) => {
       deleteJobMutation.mutate(jobId);
@@ -420,6 +498,7 @@ export function ComfyProvider({
       setSourceSlots,
       runAgent,
       runWorkflow,
+      dismissRun,
       sendChat,
       clearChat,
       deleteJob,
@@ -444,6 +523,7 @@ export function ComfyProvider({
       setSourceSlots,
       runAgent,
       runWorkflow,
+      dismissRun,
       sendChat,
       clearChat,
       deleteJob,
