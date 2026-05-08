@@ -21,6 +21,7 @@ from app.models.comfy import (
     AgentCreate,
     AgentList,
     AgentOut,
+    AgentRunRequest,
     AgentSeedDefaultOut,
     AgentUpdate,
     NodeList,
@@ -39,11 +40,13 @@ from app.models.comfy import (
 )
 from app.models.session import COMFY_LIKE_TYPES
 from app.services import (
+    comfy_agent_runner,
     comfy_agent_service,
     comfy_client,
     comfy_import_service,
     comfy_readiness,
     comfy_slot_map_service,
+    lmstudio_client,
 )
 from app.storage import (
     comfy_catalog_repo,
@@ -479,6 +482,49 @@ def seed_default_session_agent(session_id: str, conn: Conn) -> dict:
     except comfy_agent_service.AgentValidationError as exc:
         raise _validation_to_http(exc) from exc
     return {"agent": _agent_to_out(agent)}
+
+
+@router.post(
+    "/api/comfy/sessions/{session_id}/agents/{agent_id}/run",
+    response_model=AgentOut,
+)
+def run_session_agent(
+    session_id: str, agent_id: str, conn: Conn,
+    body: AgentRunRequest | None = None,
+) -> dict:
+    """Run one agent against the configured LMStudio model and persist
+    each composable output slot's ``last_value``. Auto-origin slots
+    without a ``bound_to`` and slots whose ``kind`` is not
+    LLM-composed (image / lora_name / checkpoint_name) are skipped —
+    same rule as the old client-side emulator. ``source`` input slots
+    trigger a VL pass on the bound session image (resolved through
+    ``body.source_image_overrides``) and the description gets folded
+    into the agent's system message."""
+    _ensure_comfy_session(conn, session_id)
+    try:
+        updated = comfy_agent_runner.run_agent(
+            conn,
+            session_id=session_id,
+            agent_id=agent_id,
+            source_image_overrides=(
+                body.source_image_overrides if body is not None else None
+            ),
+        )
+    except comfy_agent_runner.AgentRunError as exc:
+        # Treat 'agent not found' as 404; everything else is a
+        # precondition failure — same conventions as the rest of the
+        # comfy router.
+        message = str(exc)
+        if message.startswith("agent not found"):
+            raise HTTPException(status_code=404, detail=message) from exc
+        raise HTTPException(status_code=409, detail=message) from exc
+    except lmstudio_client.LmError as exc:
+        # Upstream / shape failures bubble up as 502 so the client can
+        # tell the difference between "you misconfigured something"
+        # (409, retry after fixing) and "the model itself misbehaved"
+        # (502, retry the same call).
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return _agent_to_out(updated)
 
 
 @router.delete("/api/comfy/workflows/{workflow_id}")

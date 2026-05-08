@@ -1,7 +1,6 @@
 import { Navigate, useParams } from "react-router-dom";
 import { useSession, useSessionsByProject } from "@/api/sessions";
 import { ComfyWorkspace } from "@/features/comfy";
-import { ComfyMockWorkspace } from "@/features/comfymock";
 import { I2iWorkspace } from "@/features/i2i";
 import { T2iWorkspace } from "@/features/t2i";
 import styles from "@/components/templates/WorkspaceLayout.module.css";
@@ -39,8 +38,7 @@ export default function WorkspaceRoute() {
     case "t2i":
       return <T2iWorkspace session={s} projectId={projectId} />;
     case "comfy":
-      return <ComfyWorkspace session={s} projectId={projectId} />;
     case "comfy_mock":
-      return <ComfyMockWorkspace session={s} projectId={projectId} />;
+      return <ComfyWorkspace session={s} projectId={projectId} />;
   }
 }

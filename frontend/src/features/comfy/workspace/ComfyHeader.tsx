@@ -1,24 +1,27 @@
+/** Header bar — project + session crumbs + Session settings + Generate
+ *  workflow button. Uses ComfyProvider for the workflow run state and
+ *  validation message that surfaces under the button when a slot is
+ *  unbound or empty. */
 import { useProjects, type Session } from "@/api/sessions";
-import { Badge } from "@/components/atoms/Badge";
 import { Button } from "@/components/atoms/Button";
 import { Icon } from "@/components/atoms/Icon";
 import styles from "@/components/templates/WorkspaceLayout.module.css";
+import { useComfy } from "../state/useComfy";
 
 export function ComfyHeader({
   session,
   projectId,
   onOpenSettings,
-  onGenerate,
-  generateDisabled,
-  generateTitle,
+  knobsOpen,
+  onToggleKnobs,
 }: {
   session: Session;
   projectId: string;
   onOpenSettings: () => void;
-  onGenerate?: () => void;
-  generateDisabled?: boolean;
-  generateTitle?: string;
+  knobsOpen: boolean;
+  onToggleKnobs: () => void;
 }) {
+  const { runWorkflow, isRunningWorkflow, workflowGenerateError } = useComfy();
   const projects = useProjects();
   const project = (projects.data ?? []).find((p) => p.id === projectId);
 
@@ -31,18 +34,12 @@ export function ComfyHeader({
       </div>
       <div className={styles.spacer} />
       <div className={styles.actions}>
-        {session.pinned_loras.length > 0 && (
-          <Badge variant="accent">{session.pinned_loras.length} pinned</Badge>
-        )}
         <Button
           size="sm"
-          variant="primary"
-          icon={<Icon name="Sparkles" size={12} />}
-          onClick={onGenerate}
-          disabled={generateDisabled}
-          title={generateTitle ?? "Compose a brief and queue a generation"}
+          onClick={onToggleKnobs}
+          variant={knobsOpen ? "primary" : "secondary"}
         >
-          Generate
+          knobs
         </Button>
         <Button
           size="sm"
@@ -51,6 +48,23 @@ export function ComfyHeader({
         >
           Session settings
         </Button>
+        <div style={{ display: "flex", flexDirection: "column", gap: 2, alignItems: "flex-end" }}>
+          <Button
+            size="sm"
+            variant="primary"
+            icon={<Icon name="Sparkles" size={12} />}
+            onClick={runWorkflow}
+            disabled={isRunningWorkflow}
+            title={workflowGenerateError ?? "Run the workflow with current state"}
+          >
+            {isRunningWorkflow ? "Generating…" : "Generate workflow"}
+          </Button>
+          {workflowGenerateError && (
+            <span style={{ fontSize: 10, color: "var(--danger)", maxWidth: 320, textAlign: "right" }}>
+              {workflowGenerateError}
+            </span>
+          )}
+        </div>
       </div>
     </header>
   );

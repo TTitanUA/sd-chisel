@@ -92,6 +92,12 @@ export function SessionSettingsDrawer({
     `${l.name} ${l.display_name}`.toLowerCase().includes(loraSearch.toLowerCase()),
   );
 
+  // Comfy sessions configure their diffusion model, negative-prompt
+  // toggle, and LoRAs through agents + the workflow's slot map, not
+  // through the session row.
+  const isComfyLike =
+    session.session_type === "comfy" || session.session_type === "comfy_mock";
+
   const noLmModels =
     !vlChoices.isLoading
     && !promptChoices.isLoading
@@ -117,29 +123,33 @@ export function SessionSettingsDrawer({
               value={name}
               onChange={(e) => setName(e.currentTarget.value)}
             />
-            <div className={styles.labelBlock}>
-              <span>Base model (diffusion)</span>
-              <select
-                className={styles.select}
-                value={modelName}
-                onChange={(e) => setModelName(e.currentTarget.value)}
-              >
-                <option value="">(none)</option>
-                {(models.data ?? []).map((m) => (
-                  <option key={m.name} value={m.name}>
-                    {m.display_name} · {m.family_id}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              <input
-                type="checkbox"
-                checked={useNegative}
-                onChange={(e) => setUseNegative(e.currentTarget.checked)}
-              />
-              Use negative prompt
-            </label>
+            {!isComfyLike && (
+              <>
+                <div className={styles.labelBlock}>
+                  <span>Base model (diffusion)</span>
+                  <select
+                    className={styles.select}
+                    value={modelName}
+                    onChange={(e) => setModelName(e.currentTarget.value)}
+                  >
+                    <option value="">(none)</option>
+                    {(models.data ?? []).map((m) => (
+                      <option key={m.name} value={m.name}>
+                        {m.display_name} · {m.family_id}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                  <input
+                    type="checkbox"
+                    checked={useNegative}
+                    onChange={(e) => setUseNegative(e.currentTarget.checked)}
+                  />
+                  Use negative prompt
+                </label>
+              </>
+            )}
 
             <div className={styles.labelBlock}>
               <span>VL model (image analysis)</span>
@@ -185,35 +195,37 @@ export function SessionSettingsDrawer({
               </div>
             )}
 
-            <div>
-              <div style={{ marginBottom: 6 }}>Pinned LoRAs ({pinned.length})</div>
-              <TextInput
-                label="Search LoRAs"
-                placeholder="Type to filter…"
-                value={loraSearch}
-                onChange={(e) => setLoraSearch(e.currentTarget.value)}
-              />
-              <div className={styles.loraList}>
-                {filteredLoras.map((l) => {
-                  const isPinned = pinned.some((p) => p.lora_name === l.name);
-                  return (
-                    <button
-                      key={l.name}
-                      type="button"
-                      className={`${styles.loraRow} ${isPinned ? styles.pinned : ""}`}
-                      onClick={() => togglePin(l)}
-                    >
-                      {isPinned && <Icon name="Pin" size={12} />}
-                      <span className={styles.loraName}>{l.display_name}</span>
-                      <span className={styles.loraMeta}>{l.family_id}</span>
-                    </button>
-                  );
-                })}
-                {filteredLoras.length === 0 && (
-                  <div style={{ padding: 12, color: "var(--text-subtle)" }}>No LoRAs match.</div>
-                )}
+            {!isComfyLike && (
+              <div>
+                <div style={{ marginBottom: 6 }}>Pinned LoRAs ({pinned.length})</div>
+                <TextInput
+                  label="Search LoRAs"
+                  placeholder="Type to filter…"
+                  value={loraSearch}
+                  onChange={(e) => setLoraSearch(e.currentTarget.value)}
+                />
+                <div className={styles.loraList}>
+                  {filteredLoras.map((l) => {
+                    const isPinned = pinned.some((p) => p.lora_name === l.name);
+                    return (
+                      <button
+                        key={l.name}
+                        type="button"
+                        className={`${styles.loraRow} ${isPinned ? styles.pinned : ""}`}
+                        onClick={() => togglePin(l)}
+                      >
+                        {isPinned && <Icon name="Pin" size={12} />}
+                        <span className={styles.loraName}>{l.display_name}</span>
+                        <span className={styles.loraMeta}>{l.family_id}</span>
+                      </button>
+                    );
+                  })}
+                  {filteredLoras.length === 0 && (
+                    <div style={{ padding: 12, color: "var(--text-subtle)" }}>No LoRAs match.</div>
+                  )}
+                </div>
               </div>
-            </div>
+            )}
 
             <div className={styles.dangerZone}>
               <Button

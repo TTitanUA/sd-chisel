@@ -1,6 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 import type { Session } from "@/api/sessions";
@@ -90,6 +89,9 @@ function stubFetch({ ready }: { ready: boolean }) {
         inferred_mode: "t2i",
       });
     }
+    if (s.includes("/api/comfy/sessions/") && s.endsWith("/agents")) {
+      return json({ agents: [] });
+    }
     if (s.includes("/messages")) return json({ messages: [] });
     if (s.includes("/prompts")) return json({ prompts: [] });
     if (s.includes("/library")) return json([]);
@@ -109,48 +111,25 @@ function renderWorkspace() {
 }
 
 describe("ComfyWorkspace", () => {
-  it("opens on the readiness gate when readiness is not ready (no inspector tabs)", async () => {
+  it("opens on the readiness gate when readiness is not ready", async () => {
     vi.stubGlobal("fetch", stubFetch({ ready: false }));
     renderWorkspace();
     await waitFor(() => expect(screen.getByText("comfy smoke")).toBeInTheDocument());
     await waitFor(() =>
       expect(screen.getByText(/Workflow readiness/i)).toBeInTheDocument(),
     );
-    expect(screen.queryByRole("tablist")).not.toBeInTheDocument();
   });
 
-  it("renders the 3-column shell when ready (inspector tabs, slots default)", async () => {
+  it("renders the IDE-like layout when ready (left tab bar + mode toggle)", async () => {
     vi.stubGlobal("fetch", stubFetch({ ready: true }));
     renderWorkspace();
     await waitFor(() => expect(screen.getByText("comfy smoke")).toBeInTheDocument());
     await waitFor(() =>
-      expect(screen.getByRole("tab", { name: "Slots" })).toBeInTheDocument(),
+      expect(screen.getByRole("button", { name: /Generate workflow/i })).toBeInTheDocument(),
     );
-    expect(screen.getByRole("tab", { name: "Bindings" })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "Frozen" })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "Sources" })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "Nodes" })).toBeInTheDocument();
-    // Slots tab is active by default — the live slot we returned shows up.
-    await waitFor(() => expect(screen.getByText("subject")).toBeInTheDocument());
-    // Gallery placeholder is present.
-    expect(screen.getByText(/No generations yet/i)).toBeInTheDocument();
-    // No old step-machine buttons remain.
-    expect(screen.queryByRole("button", { name: /Edit slots/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /Edit nodes/i })).not.toBeInTheDocument();
-  });
-
-  it("opens the slot-map drawer when the Slots tab edit icon is clicked", async () => {
-    vi.stubGlobal("fetch", stubFetch({ ready: true }));
-    renderWorkspace();
-    await waitFor(() => expect(screen.getByText("comfy smoke")).toBeInTheDocument());
-    await waitFor(() =>
-      expect(screen.getByRole("tab", { name: "Slots" })).toBeInTheDocument(),
-    );
-    const editButton = await screen.findByRole("button", { name: /Edit slot map/i });
-    await userEvent.click(editButton);
-    await waitFor(() =>
-      expect(screen.getByRole("dialog")).toBeInTheDocument(),
-    );
-    expect(screen.getByText(/Workflow slot mapping/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Agent editor/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Node tree/i })).toBeInTheDocument();
+    expect(screen.getByTitle("Agents")).toBeInTheDocument();
+    expect(screen.getByTitle("Chat")).toBeInTheDocument();
   });
 });

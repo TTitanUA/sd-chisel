@@ -451,6 +451,15 @@ export const comfyApi = {
       `/api/comfy/sessions/${encodeURIComponent(sessionId)}/agents/seed_default`,
       { method: "POST" },
     ).then((r) => r.agent),
+  runAgent: (
+    sessionId: string,
+    agentId: string,
+    body?: { source_image_overrides?: Record<string, string | null> },
+  ) =>
+    apiFetch<Agent>(
+      `/api/comfy/sessions/${encodeURIComponent(sessionId)}/agents/${encodeURIComponent(agentId)}/run`,
+      { method: "POST", body: JSON.stringify(body ?? {}) },
+    ),
 };
 
 /** Parse a 409 conflict body returned from createWorkflow. */

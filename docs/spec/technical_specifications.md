@@ -111,10 +111,10 @@ applies them to an empty or existing DB.
   - `session_type` — `i2i`, `t2i`, `comfy`, or `comfy_mock`. Chosen at
     creation time and immutable thereafter (no PATCH path accepts it;
     the `SessionUpdate` schema has no field for it). Defaults to
-    `i2i` for rows that pre-date the migration. ComfyMock
-    (`comfy_mock`) is a UI-exploration peer of `comfy`: same workflow
-    + slot-map + agent contracts, LLM and workflow generation
-    emulated client-side. Detail in §3.5 / §10.9.
+    `i2i` for rows that pre-date the migration. `comfy_mock` is now a
+    legacy alias kept on the CHECK constraint so pre-existing rows
+    keep loading; new sessions are created as `comfy` and both routes
+    mount the same workspace. Detail in §3.5 / §10.9.
   - `use_negative` (0/1) — a workflow property: when `0`, the LLM returns
     `negative: null` and the frontend hides the block.
   - `vl_model_name` and `prompt_model_name` — *names* of the LMStudio
@@ -682,14 +682,19 @@ Prefix is `/api/`. Endpoints are grouped by domain.
   completion).
 - **Comfy session agents:** `GET / POST /api/comfy/sessions/{id}/agents`
   for list / create, `GET / PATCH / DELETE /api/comfy/sessions/{id}/
-  agents/{agent_id}` for per-agent CRUD, and `POST /api/comfy/sessions/
+  agents/{agent_id}` for per-agent CRUD, `POST /api/comfy/sessions/
   {id}/agents/seed_default` to create the opt-in default composer (one
   agent covering every `binding=llm` workflow slot, rejected with `409`
   when the session already has an agent or the workflow has no
-  `binding=llm` slots). Validation: per-kind allow-list, single-bind
-  rule (no two agents target the same workflow slot label),
-  source-scope reconciliation (`selected` requires `source_ids`).
-  Detail in §3.5 / §10.8.
+  `binding=llm` slots), and `POST /api/comfy/sessions/{id}/agents/
+  {agent_id}/run` to actually run one agent — calls LMStudio with the
+  agent's prompt + model + sampling params (and any `system` /
+  `prompt_guide` input slots merged into the system message),
+  parses the JSON response, persists each composable output slot's
+  `last_value`, and bumps `last_run_at`. Validation: per-kind
+  allow-list, single-bind rule (no two agents target the same
+  workflow slot label), source-scope reconciliation (`selected`
+  requires `source_ids`). Detail in §3.5 / §10.8.
 
 For step 6 (post-MVP): `POST /sessions/{s}/result`,
 `POST /sessions/{s}/analyze-result` — only an architectural placeholder
@@ -1465,47 +1470,98 @@ violation.
   the workflow has no `binding=llm` slots. Never triggered
   automatically — the session-creation flow leaves the agent list
   empty.
+- `POST   /api/comfy/sessions/{id}/agents/{agent_id}/run` — run one
+  agent. The service (`comfy_agent_runner.run_agent`) selects the
+  agent's *composable* output slots (skip `origin='auto'` slots
+  with `bound_to=None`; skip slots whose `kind` is `None` or
+  outside the LLM-composed set `text / multiline_text /
+  number_int / number_float / boolean / enum`), builds a system
+  prompt that lists each composable slot's label + kind +
+  description, merges any `system`, `prompt_guide`, and `source`
+  input slots into the system message:
+    - `system` slots append their text verbatim;
+    - `prompt_guide` slots append the picked Family's
+      `prompt_guide` plus its `prompt_i2i` / `prompt_t2i` section
+      when `generation_type` is set;
+    - `source` slots resolve their bound session image (see the
+      override map below), read the file off disk, call
+      `lmstudio_client.analyze_image` with the slot's `vl_model`
+      + `vl_prompt` + `vl_temperature` + `vl_max_tokens`, and
+      append the description under a per-slot heading. Soft
+      failures (no image bound, model disabled, file missing,
+      upstream LM error) are reported as a one-line warning
+      inside the system prompt rather than aborting the run.
+  After building the system prompt the runner calls LMStudio's
+  `chat_complete` with `response_format={"type": "text"}`, parses
+  the first JSON object out of the response, coerces each value
+  to its slot's kind (number-as-string and bool-as-string are
+  tolerated, missing values stay `null`), persists the new
+  `last_value`s via `update_agent`, and bumps `last_run_at`. The
+  model is the agent's `model_name` if set, otherwise the
+  session's `prompt_model_name`; LMStudio config comes from
+  `app_settings.lmstudio_url` / `lmstudio_api_key`. Sampling keys
+  in `agent.model_params` (`temperature`, `top_p`, `top_k`,
+  `max_tokens`, `presence_penalty`, `frequency_penalty`,
+  `repeat_penalty`, `seed`) are forwarded; the `__input_slots`
+  blob is stripped before forwarding.
+  Optional request body: `{"source_image_overrides":
+  {<input_slot_id>: <session_image_id> | null}}`. Each entry maps
+  a `source`-kind input slot's id to the resolved session image
+  id. The frontend fills this map from its browser-only
+  `SourceSlot` table before posting; the backend has no view of
+  that table, so missing entries default to "no image bound" and
+  surface as soft warnings in the system prompt.
+  `409` on missing model / missing LMStudio URL / no composable
+  slots; `502` on upstream `chat_complete` failures; `404` when
+  the agent doesn't belong to the session. The `loras` input-slot
+  kind is recognised but ignored — LoRA-scope handling is
+  pending work for the workflow-level Generate.
 
-**Pending — per-agent run + workflow Generate.** The `/run`
-endpoint (composes one agent's output slots, persists each
-slot's `last_value`) and the workflow-level Generate's
-agent-driven slot resolution land in the next PR alongside the
-frontend agent column. The current §10.7 single-composer path
-stays the live generation path until that switchover.
+**Pending — workflow Generate.** The workflow-level Generate's
+agent-driven slot resolution still lives in the legacy
+single-composer path described in §10.7. It lands in the next PR
+alongside the frontend's gallery / brief drawer; per-agent
+`/run` is independent and already shipped.
 
-### 10.9. ComfyMock session type — UI exploration
+### 10.9. Comfy workspace — IDE-style layout (graduated from ComfyMock)
 
-`comfy_mock` is a UI-exploration peer of `comfy`. Same workflow
-upload + slot-map editor + agents CRUD as a real comfy session;
-LLM calls and workflow generation are emulated client-side so we
-can iterate on layout / interaction variants without depending on
-LMStudio or ComfyUI being up.
+The variant exploration that lived in `features/comfymock/` has
+converged into the regular comfy workspace. `features/comfy/`
+now hosts the IDE-shell layout (formerly Variant D / `d-tree-drawer`),
+the agents/inspector panels, the mapping tree, the gallery, the
+chat panel, the knobs strip, and the client-side emulators. New
+sessions are created as `session_type='comfy'`; the `comfy_mock`
+enum value is retained on the CHECK constraint so legacy rows keep
+loading and `routes/workspace.tsx` routes both to the same
+`ComfyWorkspace` shell. The dedicated ComfyMock creation option in
+the new-session modal has been removed.
 
 **What's real.** Workflow rows (`comfy_workflows`), slot map
 (`comfy_workflows.slot_map_json`), source images
 (`session_source_images` + on-disk files), agents
-(`comfy_session_agents`). Every backend endpoint that accepts
+(`comfy_session_agents`), per-agent run (`POST .../agents/
+{aid}/run` — see §10.8). Every backend endpoint that accepts
 `session_type='comfy'` accepts `comfy_mock` too — the guard
 function is a single `COMFY_LIKE_TYPES` set in
 `app.models.session`.
 
-**What's emulated.** Per-agent run (10-second delay + kind-aware
-canned values, PATCHed back into the agent's `last_value`s so
-they persist across reload). Workflow Generate (1.5-second queue
-delay + a procedural placeholder image). Chat replies (echoes
-the user's message). LoRA retrieval (a fixed two-entry list).
+**What's still emulated client-side.** Workflow Generate
+(1.5-second queue delay + a procedural placeholder image). Chat
+replies (echoes the user's message). LoRA retrieval (a fixed
+two-entry list). Job snapshots (localStorage). These stay
+client-side until the matching backend endpoints land —
+workflow Generate / `comfy_jobs` from the planned Phase 3
+backend.
 
-**Frontend layout.** The dispatch in `routes/workspace.tsx`
-mounts `features/comfymock/ComfyMockWorkspace`. The variant
-explorer has converged on a single shipping layout —
-`d-tree-drawer` — built around the IDE-shell with five left-bar
-panels (Agents / Inputs / Sources / Nodes / Chat), a centre
-column toggling between agent editor and the slot-mapping tree,
-and a collapsible gallery footer. The mapping tree itself is a
-3-column shell (`MappingTreeShell`): mapped-slots summary on the
-left, the workflow's node tree in the middle (cards in a
-2-column grid, each input row showing the workflow input's
-current value alongside the action), and a shared
+**Frontend layout.** `ComfyWorkspace` mounts a readiness gate
+pre-readiness, then `ComfyWorkspaceLayout` post-readiness — an
+IDE-shell with five left-bar panels (Agents / Inputs / Sources /
+Nodes / Chat), a centre column toggling between agent editor and
+the slot-mapping tree, and a collapsible gallery footer. The
+mapping tree itself is a 3-column shell (`MappingTreeShell`):
+mapped-slots summary on the left, the workflow's node tree in the
+middle (cards in a 2-column grid, each input row showing the
+workflow input's current value alongside the action), and a shared
 `InputContextPanel` editor on the right.
 
 The editor surfaces, depending on slot binding:
@@ -1525,18 +1581,14 @@ The intro line shows `Current: …` (workflow-graph value) and
 `Default: …` (schema default, when present), both single-line
 and truncated.
 
-The variant infrastructure (`?variant=…`, persisted to
-localStorage) is still wired up so we can A/B more layouts again
-later, but the switcher UI has been removed while only one option
-exists.
 A `KnobsStrip` in the header (`?knobs=1` or toggle button)
 exposes layout CSS variables as sliders + manual numeric
-inputs, persisted per `(variant, knob)` pair in localStorage.
-Job snapshots — one per workflow Generate — persist to
-localStorage keyed by session id, capped at 50 with LRU
-eviction; opening a snapshot reveals the full agent + binding
-state that produced the result. See
-`docs/comfy-agents-ui-mock-plan.md` for the full design.
+inputs, persisted per knob in localStorage. Job snapshots — one
+per workflow Generate — persist to localStorage keyed by session
+id, capped at 50 with LRU eviction; opening a snapshot reveals
+the full agent + binding state that produced the result. See
+`docs/comfy-agents-ui-mock-plan.md` for the original variant
+exploration that produced this layout.
 
 **Source-slot indirection.** Mock-only per-session table
 (`state/source-slots.ts`, localStorage-backed) sitting between
@@ -1552,8 +1604,11 @@ tree variants' mapped-slots column surface this with three-state
 filler hints — `agent fills slot` for `binding=llm` rows and
 `source slot fills slot` for `binding=user_image` rows.
 
-**When the layout converges.** The winning variant graduates
-into `features/comfy/`, the emulators get replaced by real
-endpoints (per-agent `/run` from §10.8, workflow Generate from
-the planned Phase 3 backend), and the `comfymock` feature plus
-the `comfy_mock` enum value are dropped in a cleanup migration.
+**Remaining cleanup.** The remaining three client-side emulators
+(`mocks/chat-emulator.ts`, `mocks/fake-result.ts`,
+`mocks/job-snapshots.ts`) get replaced by real endpoints once they
+land (workflow Generate / `comfy_jobs` from the planned Phase 3
+backend). The per-agent `/run` emulator was deleted once
+`comfyApi.runAgent` started calling the real endpoint. The
+`comfy_mock` enum value can then be dropped in a cleanup
+migration along with the source-slot localStorage table.

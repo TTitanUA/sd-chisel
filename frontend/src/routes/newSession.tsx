@@ -34,13 +34,7 @@ const TYPE_OPTIONS: { value: SessionType; label: string; description: string }[]
     value: "comfy",
     label: "comfy",
     description:
-      "Bind a saved ComfyUI workflow. The session opens on a readiness panel that walks every node through configuration before any further work.",
-  },
-  {
-    value: "comfy_mock",
-    label: "ComfyMock",
-    description:
-      "UI-exploration session — same workflow upload + slot map + agents as comfy, but LLM calls and workflow generation are emulated client-side. Switch between layout variants from the workspace header.",
+      "Bind a saved ComfyUI workflow. The session opens on a readiness panel that walks every node through configuration, then drops into the agents + slot-mapping workspace. Per-agent /run and workflow Generate are emulated client-side until the matching backend endpoints land.",
   },
 ];
 

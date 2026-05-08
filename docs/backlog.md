@@ -3,6 +3,34 @@
 Ideas parked for later. Not on the active roadmap. Promoted to a
 plan document if and when they become real work.
 
+## Prompt-guide input slot — auto mode
+
+The agent input-slot editor (kind `prompt_guide`) used to ship with
+two modes: **manual** (pick a family + generation type from the
+library) and **auto** (derive both from the agent's chosen LLM and
+the workflow's inferred mode). Auto mode was removed before the
+agents went live — the heuristic for *"which family does this LLM
+prompt-write for"* turned out fuzzier than expected (per-LLM tag in
+Library → LMStudio? per-family preferred-models list? pick the most
+recently used family?) and we did not want to gate the first cut of
+real agents on that decision.
+
+When we revisit:
+
+- Decide where the model→family mapping lives (and how the user
+  authors it). Likely a small editor on Library → LMStudio rows or
+  on Library → Families.
+- The `generation_type` half can already come from the workflow's
+  `inferred_mode` (already on `SlotMapResponse`); restrict to the
+  same `i2i / t2i` set the manual editor exposes.
+- Re-introduce the `mode: "auto" | "manual"` discriminator on
+  `PromptGuideInputConfig` (the legacy shape with `mode` is still
+  read-tolerated; see `migrateLegacyShape` in
+  `frontend/src/features/comfy/components/agent-input-slots.ts`).
+- Add the radio back to `PromptGuideForm`. Auto-mode rows hide the
+  family picker and surface the resolved family + generation type as
+  read-only hint text so the user can confirm what auto picked.
+
 ## LLM auto-suggest slot labels (was "Phase 2.6")
 
 A button on the slot-map editor that proposes a label / group /

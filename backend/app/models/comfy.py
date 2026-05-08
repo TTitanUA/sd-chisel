@@ -496,3 +496,18 @@ class AgentSeedDefaultOut(StrictModel):
     output slot per ``binding=llm`` workflow slot, all pre-bound. It is
     rejected (409) when the session already has at least one agent."""
     agent: AgentOut
+
+
+class AgentRunRequest(StrictModel):
+    """Optional body for ``POST .../agents/{id}/run``.
+
+    ``source_image_overrides`` resolves each ``source``-kind input
+    slot's frontend-only ``source_slot_id`` to an actual
+    ``session_source_images.id`` so the runner can read the file off
+    disk. Maps input-slot id (the id stored in
+    ``model_params.__input_slots[].id``) to the session image id.
+    Missing keys, ``null`` values, and unknown image ids are tolerated
+    — the runner reports those as soft warnings inside the system
+    prompt rather than aborting the run."""
+
+    source_image_overrides: dict[str, str | None] | None = None
