@@ -1,20 +1,30 @@
-"""HTTP client for ComfyUI.
+"""HTTP / WebSocket client for ComfyUI.
 
-Phase 1 only needs the connection check — verify the configured URL is
-reachable and that ComfyUI responds with system stats. Subsequent
-phases will extend this module with workflow queueing, websocket
-subscription, and image fetching (see docs/comfy-workflow-plan.md).
+The Phase 1 surface is the sync `system_stats` + `object_info` pair —
+used by the settings connection check and the catalog import. Phase 3
+adds the async surface used by the Single Run orchestrator: image
+upload, prompt queue, history fetch, interrupt, and a websocket
+event stream.
 
-`endpoint` shape: {"server_root": str, "api_key": str | None}
+`endpoint` shape: {"server_root": str, "api_key": str | None}.
 """
 from __future__ import annotations
 
+import asyncio
+import contextlib
+import json
+import urllib.parse
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Literal
 
 import httpx
+import websockets
 
 DEFAULT_TIMEOUT = httpx.Timeout(15.0, connect=5.0)
+UPLOAD_TIMEOUT = httpx.Timeout(60.0, connect=5.0)
+QUEUE_TIMEOUT = httpx.Timeout(30.0, connect=5.0)
 
 
 @dataclass
@@ -117,3 +127,243 @@ def _str_or_none(v: Any) -> str | None:
         return None
     s = str(v).strip()
     return s or None
+
+
+# --------------------------------------------------------------------- #
+# Phase 3 — async surface for the Single Run orchestrator.
+# --------------------------------------------------------------------- #
+
+
+async def upload_image(
+    *,
+    endpoint: dict[str, Any],
+    file_path: Path,
+    overwrite: bool = True,
+    subfolder: str | None = None,
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> str:
+    """POST /api/upload/image — upload a file into ComfyUI's input dir.
+
+    Returns the filename ComfyUI assigned (which usually matches the
+    upload but may have a suffix when ``overwrite`` is False and a
+    same-named file already exists). The Single Run patcher uses the
+    returned name as the literal value for the slot's input.
+    """
+    server_root, headers = _resolve(endpoint)
+    url = f"{server_root}/api/upload/image"
+    data: dict[str, str] = {"overwrite": "true" if overwrite else "false"}
+    if subfolder:
+        data["subfolder"] = subfolder
+    try:
+        with file_path.open("rb") as fh:
+            files = {"image": (file_path.name, fh, "application/octet-stream")}
+            async with httpx.AsyncClient(transport=transport, timeout=UPLOAD_TIMEOUT) as client:
+                resp = await client.post(url, headers=headers, data=data, files=files)
+    except FileNotFoundError as exc:
+        raise ComfyError("config", f"upload source missing: {exc}") from exc
+    except httpx.TimeoutException as exc:
+        raise ComfyError("timeout", str(exc)) from exc
+    except httpx.HTTPError as exc:
+        raise ComfyError("upstream", str(exc)) from exc
+    if resp.status_code >= 400:
+        raise ComfyError("upstream", f"{resp.status_code}: {resp.text[:200]}")
+    try:
+        body = resp.json()
+    except ValueError as exc:
+        raise ComfyError("shape", f"invalid JSON: {exc}") from exc
+    name = body.get("name") if isinstance(body, dict) else None
+    if not isinstance(name, str) or not name:
+        raise ComfyError("shape", "upload response missing 'name'")
+    return name
+
+
+async def queue_prompt(
+    *,
+    endpoint: dict[str, Any],
+    prompt: dict[str, Any],
+    client_id: str,
+    extra_data: dict[str, Any] | None = None,
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> str:
+    """POST /api/prompt — enqueue a workflow. Returns the ``prompt_id``
+    ComfyUI assigned. The orchestrator stores it on `comfy_jobs.prompt_id`
+    so it can demux WS events and reconcile history fetches.
+    """
+    server_root, headers = _resolve(endpoint)
+    url = f"{server_root}/api/prompt"
+    payload: dict[str, Any] = {"prompt": prompt, "client_id": client_id}
+    if extra_data is not None:
+        payload["extra_data"] = extra_data
+    try:
+        async with httpx.AsyncClient(transport=transport, timeout=QUEUE_TIMEOUT) as client:
+            resp = await client.post(url, headers=headers, json=payload)
+    except httpx.TimeoutException as exc:
+        raise ComfyError("timeout", str(exc)) from exc
+    except httpx.HTTPError as exc:
+        raise ComfyError("upstream", str(exc)) from exc
+    if resp.status_code >= 400:
+        raise ComfyError("upstream", f"{resp.status_code}: {resp.text[:200]}")
+    try:
+        body = resp.json()
+    except ValueError as exc:
+        raise ComfyError("shape", f"invalid JSON: {exc}") from exc
+    prompt_id = body.get("prompt_id") if isinstance(body, dict) else None
+    if not isinstance(prompt_id, str) or not prompt_id:
+        raise ComfyError("shape", "queue response missing 'prompt_id'")
+    return prompt_id
+
+
+async def get_history(
+    *,
+    endpoint: dict[str, Any],
+    prompt_id: str,
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> dict[str, Any]:
+    """GET /history/{prompt_id} — fetch outputs after a job finishes.
+
+    The response shape is ``{<prompt_id>: {"prompt": [...], "outputs":
+    {<node_id>: {"images": [...]}}, "status": {...}}}``. Returns the
+    inner dict for the requested prompt_id, or {} if not present yet
+    (ComfyUI's history sometimes lags by a few hundred ms).
+    """
+    server_root, headers = _resolve(endpoint)
+    url = f"{server_root}/history/{prompt_id}"
+    try:
+        async with httpx.AsyncClient(transport=transport, timeout=DEFAULT_TIMEOUT) as client:
+            resp = await client.get(url, headers=headers)
+    except httpx.TimeoutException as exc:
+        raise ComfyError("timeout", str(exc)) from exc
+    except httpx.HTTPError as exc:
+        raise ComfyError("upstream", str(exc)) from exc
+    if resp.status_code >= 400:
+        raise ComfyError("upstream", f"{resp.status_code}: {resp.text[:200]}")
+    try:
+        body = resp.json()
+    except ValueError as exc:
+        raise ComfyError("shape", f"invalid JSON: {exc}") from exc
+    if not isinstance(body, dict):
+        raise ComfyError("shape", "history response is not a JSON object")
+    inner = body.get(prompt_id)
+    return inner if isinstance(inner, dict) else {}
+
+
+async def fetch_view_image(
+    *,
+    endpoint: dict[str, Any],
+    filename: str,
+    subfolder: str = "",
+    folder_type: str = "output",
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> bytes:
+    """GET /view?filename=…&subfolder=…&type=… — download a SaveImage
+    output by filename. Used when ComfyUI's output dir isn't directly
+    reachable from sd-chisel's process and we have to fall back to the
+    HTTP download path."""
+    server_root, headers = _resolve(endpoint)
+    qs = urllib.parse.urlencode(
+        {"filename": filename, "subfolder": subfolder, "type": folder_type}
+    )
+    url = f"{server_root}/view?{qs}"
+    try:
+        async with httpx.AsyncClient(transport=transport, timeout=UPLOAD_TIMEOUT) as client:
+            resp = await client.get(url, headers=headers)
+    except httpx.TimeoutException as exc:
+        raise ComfyError("timeout", str(exc)) from exc
+    except httpx.HTTPError as exc:
+        raise ComfyError("upstream", str(exc)) from exc
+    if resp.status_code >= 400:
+        raise ComfyError("upstream", f"{resp.status_code}: {resp.text[:200]}")
+    return resp.content
+
+
+async def interrupt(
+    *,
+    endpoint: dict[str, Any],
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> None:
+    """POST /api/interrupt — best-effort cancel of the currently-executing
+    workflow. ComfyUI doesn't take a prompt_id; it interrupts the active
+    one and drops everything still queued for the same client_id."""
+    server_root, headers = _resolve(endpoint)
+    url = f"{server_root}/api/interrupt"
+    try:
+        async with httpx.AsyncClient(transport=transport, timeout=DEFAULT_TIMEOUT) as client:
+            resp = await client.post(url, headers=headers)
+    except httpx.TimeoutException as exc:
+        raise ComfyError("timeout", str(exc)) from exc
+    except httpx.HTTPError as exc:
+        raise ComfyError("upstream", str(exc)) from exc
+    if resp.status_code >= 400 and resp.status_code != 404:
+        # 404 happens when nothing is executing — treat as success.
+        raise ComfyError("upstream", f"{resp.status_code}: {resp.text[:200]}")
+
+
+async def stream_events(
+    *,
+    endpoint: dict[str, Any],
+    client_id: str,
+    stop: asyncio.Event | None = None,
+) -> AsyncIterator[dict[str, Any]]:
+    """Yield JSON events from ComfyUI's `/ws?clientId=…` socket.
+
+    ComfyUI emits text frames (the JSON event types — `executing`,
+    `progress`, `executed`, `execution_start`, `execution_success`,
+    `execution_error`, `status`, …) and binary frames for the live
+    preview image stream. We yield only the text events as parsed
+    dicts; binary frames are dropped on the floor (the orchestrator
+    doesn't show previews).
+
+    The caller drives the lifetime — pass an `asyncio.Event` and set
+    it to stop streaming, or break out of the iterator. Reconnect on
+    transient drops is the orchestrator's job (the per-job pipeline
+    can re-subscribe and resume from the history endpoint).
+    """
+    server_root, headers = _resolve(endpoint)
+    if server_root.startswith("https://"):
+        ws_root = "wss://" + server_root[len("https://"):]
+    elif server_root.startswith("http://"):
+        ws_root = "ws://" + server_root[len("http://"):]
+    else:
+        ws_root = server_root
+    url = f"{ws_root}/ws?clientId={urllib.parse.quote(client_id)}"
+    try:
+        async with websockets.connect(
+            url, additional_headers=headers, max_size=None
+        ) as ws:
+            while True:
+                if stop is not None and stop.is_set():
+                    return
+                try:
+                    raw = await asyncio.wait_for(ws.recv(), timeout=1.0)
+                except asyncio.TimeoutError:
+                    continue
+                except websockets.ConnectionClosed as exc:
+                    raise ComfyError("upstream", f"ws closed: {exc}") from exc
+                if isinstance(raw, (bytes, bytearray)):
+                    # Binary frame = preview image; orchestrator skips.
+                    continue
+                try:
+                    event = json.loads(raw)
+                except ValueError:
+                    continue
+                if isinstance(event, dict):
+                    yield event
+    except OSError as exc:
+        raise ComfyError("upstream", f"ws connect failed: {exc}") from exc
+
+
+@contextlib.asynccontextmanager
+async def event_stream(
+    *,
+    endpoint: dict[str, Any],
+    client_id: str,
+) -> AsyncIterator[AsyncIterator[dict[str, Any]]]:
+    """Context manager wrapping ``stream_events`` so the caller can
+    ``async with`` and break out cleanly. Yields the same async
+    iterator; on exit, sets the stop flag so the underlying socket
+    closes deterministically."""
+    stop = asyncio.Event()
+    try:
+        yield stream_events(endpoint=endpoint, client_id=client_id, stop=stop)
+    finally:
+        stop.set()
