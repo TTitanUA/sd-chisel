@@ -1,0 +1,119 @@
+.tree {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  padding: 12px;
+  overflow: auto;
+  font-size: 12px;
+  align-content: start;
+}
+
+/* On narrow viewports collapse to fewer columns so each node card
+   stays readable. The breakpoints are coarse on purpose — there's no
+   responsive design target for ComfyMock yet, just don't crush the
+   tree to single-pixel columns. */
+@media (max-width: 1100px) {
+  .tree {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 700px) {
+  .tree {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.node {
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  overflow: hidden;
+  background: var(--surface);
+}
+
+.nodeHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: var(--surface-alt);
+  border-bottom: 1px solid var(--border);
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 11px;
+}
+
+.nodeId {
+  color: var(--text-muted);
+}
+
+.classType {
+  font-weight: 600;
+}
+
+.title {
+  color: var(--accent);
+  font-style: italic;
+}
+
+.inputs {
+  display: flex;
+  flex-direction: column;
+}
+
+.input {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 4px 12px;
+  background: transparent;
+  border: none;
+  border-top: 1px solid var(--border);
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  color: inherit;
+  text-align: left;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+}
+
+.input:first-child {
+  border-top: none;
+}
+
+.input:not(:disabled):hover {
+  background: var(--surface-alt);
+}
+
+.input:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.inputName {
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.inputValue {
+  text-align: right;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  /* Allow the value to shrink below its intrinsic content size so
+     long literals (filenames, prompts) ellipsis cleanly inside the
+     narrow grid columns. */
+  min-width: 0;
+}
+
+.bound .inputValue {
+  color: var(--accent);
+}
+
+.empty {
+  padding: 24px;
+  font-size: 13px;
+  color: var(--text-muted);
+  text-align: center;
+}

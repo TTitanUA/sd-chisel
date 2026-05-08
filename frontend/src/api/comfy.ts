@@ -219,7 +219,14 @@ export const SLOT_BINDING_LABEL: Record<SlotBinding, string> = {
 };
 
 /** Mirror of backend ALLOWED_BINDINGS. Used to populate the binding
- *  dropdown per slot row. */
+ *  dropdown per slot row.
+ *
+ *  `lora_name` allows `llm` because an agent that's been given a
+ *  LoRAs input slot can pick a name from that constrained pool — same
+ *  shape as picking an enum value. The agent-side editor still gates
+ *  the lora_name kind on actually having such an input slot.
+ *  `checkpoint_name` stays frozen-only: checkpoints are global model
+ *  files, not something an agent picks at run time. */
 export const ALLOWED_BINDINGS: Record<SlotKind, SlotBinding[]> = {
   text:            ["llm", "frozen"],
   multiline_text:  ["llm", "frozen"],
@@ -229,7 +236,7 @@ export const ALLOWED_BINDINGS: Record<SlotKind, SlotBinding[]> = {
   number_float:    ["llm", "frozen"],
   boolean:         ["llm", "frozen"],
   enum:            ["llm", "frozen"],
-  lora_name:       ["frozen"],
+  lora_name:       ["llm", "frozen"],
   checkpoint_name: ["frozen"],
 };
 
@@ -295,12 +302,75 @@ export const comfyKeys = {
     ["comfy", "sessions", sessionId, "readiness"] as const,
   slotMap: (sessionId: string) =>
     ["comfy", "sessions", sessionId, "slot_map"] as const,
+  agents: (sessionId: string) =>
+    ["comfy", "sessions", sessionId, "agents"] as const,
+  agent: (sessionId: string, agentId: string) =>
+    ["comfy", "sessions", sessionId, "agents", agentId] as const,
   packs: () => ["comfy", "packs"] as const,
   pack: (name: string) => ["comfy", "packs", name] as const,
   nodes: (q?: string, pack?: string, hasDescription?: boolean) =>
     ["comfy", "nodes", { q: q ?? "", pack: pack ?? "", hasDescription: hasDescription ?? null }] as const,
   node: (classType: string) => ["comfy", "nodes", classType] as const,
 };
+
+// --- Comfy agents (per-session, user-programmable) ----------------------
+
+export type SourceScope = "all" | "selected" | "none";
+export type SlotOriginKind = "preset" | "custom" | "auto";
+export type PresetOutputName = "positive" | "negative";
+
+export type AgentSlotBinding = { workflow_slot_label: string };
+
+export type AgentOutputSlot = {
+  id: string;
+  origin: SlotOriginKind;
+  preset: PresetOutputName | null;
+  kind: SlotKind | null;
+  label: string;
+  description: string | null;
+  last_value: unknown;
+  bound_to: AgentSlotBinding | null;
+};
+
+export type Agent = {
+  id: string;
+  session_id: string;
+  position: number;
+  name: string;
+  prompt: string;
+  model_name: string | null;
+  model_params: Record<string, unknown> | null;
+  source_scope: SourceScope;
+  source_ids: string[] | null;
+  loras_enabled: boolean;
+  output_slots: AgentOutputSlot[];
+  last_run_at: number | null;
+  created_at: number;
+  updated_at: number;
+};
+
+export type AgentCreateBody = {
+  name: string;
+  prompt?: string;
+  model_name?: string | null;
+  model_params?: Record<string, unknown> | null;
+  source_scope?: SourceScope;
+  source_ids?: string[] | null;
+  loras_enabled?: boolean;
+  output_slots?: AgentOutputSlot[];
+};
+
+export type AgentUpdateBody = Partial<{
+  name: string;
+  prompt: string;
+  model_name: string | null;
+  model_params: Record<string, unknown> | null;
+  source_scope: SourceScope;
+  source_ids: string[] | null;
+  loras_enabled: boolean;
+  output_slots: AgentOutputSlot[];
+  position: number;
+}>;
 
 export const comfyApi = {
   listWorkflows: () =>
@@ -356,6 +426,31 @@ export const comfyApi = {
       `/api/comfy/sessions/${encodeURIComponent(sessionId)}/slot_map`,
       { method: "PUT", body: JSON.stringify({ slots }) },
     ),
+  // --- agents -----------------------------------------------------------
+  listAgents: (sessionId: string) =>
+    apiFetch<{ agents: Agent[] }>(
+      `/api/comfy/sessions/${encodeURIComponent(sessionId)}/agents`,
+    ).then((r) => r.agents),
+  createAgent: (sessionId: string, body: AgentCreateBody) =>
+    apiFetch<Agent>(
+      `/api/comfy/sessions/${encodeURIComponent(sessionId)}/agents`,
+      { method: "POST", body: JSON.stringify(body) },
+    ),
+  updateAgent: (sessionId: string, agentId: string, body: AgentUpdateBody) =>
+    apiFetch<Agent>(
+      `/api/comfy/sessions/${encodeURIComponent(sessionId)}/agents/${encodeURIComponent(agentId)}`,
+      { method: "PATCH", body: JSON.stringify(body) },
+    ),
+  deleteAgent: (sessionId: string, agentId: string) =>
+    apiFetch<void>(
+      `/api/comfy/sessions/${encodeURIComponent(sessionId)}/agents/${encodeURIComponent(agentId)}`,
+      { method: "DELETE" },
+    ),
+  seedDefaultAgent: (sessionId: string) =>
+    apiFetch<{ agent: Agent }>(
+      `/api/comfy/sessions/${encodeURIComponent(sessionId)}/agents/seed_default`,
+      { method: "POST" },
+    ).then((r) => r.agent),
 };
 
 /** Parse a 409 conflict body returned from createWorkflow. */
@@ -476,6 +571,67 @@ export function useSaveSlotMap(sessionId: string | null | undefined) {
     onSuccess: (data) => {
       if (sessionId) {
         client.setQueryData(comfyKeys.slotMap(sessionId), data);
+      }
+    },
+  });
+}
+
+// --- Agents hooks --------------------------------------------------------
+
+export function useAgents(sessionId: string | null | undefined) {
+  return useQuery({
+    queryKey: sessionId ? comfyKeys.agents(sessionId) : ["comfy", "agents", "unset"],
+    queryFn: () => comfyApi.listAgents(sessionId as string),
+    enabled: !!sessionId,
+  });
+}
+
+export function useCreateAgent(sessionId: string | null | undefined) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (body: AgentCreateBody) =>
+      comfyApi.createAgent(sessionId as string, body),
+    onSuccess: () => {
+      if (sessionId) {
+        void client.invalidateQueries({ queryKey: comfyKeys.agents(sessionId) });
+      }
+    },
+  });
+}
+
+export function useUpdateAgent(sessionId: string | null | undefined) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ agentId, body }: { agentId: string; body: AgentUpdateBody }) =>
+      comfyApi.updateAgent(sessionId as string, agentId, body),
+    onSuccess: () => {
+      if (sessionId) {
+        void client.invalidateQueries({ queryKey: comfyKeys.agents(sessionId) });
+      }
+    },
+  });
+}
+
+export function useDeleteAgent(sessionId: string | null | undefined) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (agentId: string) =>
+      comfyApi.deleteAgent(sessionId as string, agentId),
+    onSuccess: () => {
+      if (sessionId) {
+        void client.invalidateQueries({ queryKey: comfyKeys.agents(sessionId) });
+      }
+    },
+  });
+}
+
+export function useSeedDefaultAgent(sessionId: string | null | undefined) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: () => comfyApi.seedDefaultAgent(sessionId as string),
+    onSuccess: () => {
+      if (sessionId) {
+        void client.invalidateQueries({ queryKey: comfyKeys.agents(sessionId) });
       }
     },
   });

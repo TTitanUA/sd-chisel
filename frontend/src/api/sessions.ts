@@ -12,7 +12,7 @@ export type Project = {
 
 export type PinnedLora = { lora_name: string; weight_override: number | null };
 
-export type SessionType = "i2i" | "t2i" | "comfy";
+export type SessionType = "i2i" | "t2i" | "comfy" | "comfy_mock";
 
 export type SourceImage = {
   id: string;

@@ -4,7 +4,18 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-SessionType = Literal["i2i", "t2i", "comfy"]
+SessionType = Literal["i2i", "t2i", "comfy", "comfy_mock"]
+"""``comfy_mock`` is a UI-exploration session type that reuses comfy
+workflow / slot-map / agent machinery but emulates LLM calls and
+workflow generation on the frontend. See
+``docs/comfy-agents-ui-mock-plan.md``."""
+
+
+COMFY_LIKE_TYPES: frozenset[SessionType] = frozenset({"comfy", "comfy_mock"})
+"""Session types that use the comfy workflow + slot map + agents
+contracts. The agent + slot-map + readiness endpoints accept any
+member; only the generation cycle differs (real LMStudio/ComfyUI for
+``comfy``, emulated client-side for ``comfy_mock``)."""
 
 
 class StrictModel(BaseModel):

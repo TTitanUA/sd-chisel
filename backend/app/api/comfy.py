@@ -18,6 +18,11 @@ from starlette.responses import StreamingResponse
 
 from app.api.deps import get_conn
 from app.models.comfy import (
+    AgentCreate,
+    AgentList,
+    AgentOut,
+    AgentSeedDefaultOut,
+    AgentUpdate,
     NodeList,
     NodeOut,
     NodeUpdate,
@@ -32,13 +37,20 @@ from app.models.comfy import (
     WorkflowSummary,
     WorkflowUpload,
 )
+from app.models.session import COMFY_LIKE_TYPES
 from app.services import (
+    comfy_agent_service,
     comfy_client,
     comfy_import_service,
     comfy_readiness,
     comfy_slot_map_service,
 )
-from app.storage import comfy_catalog_repo, session_repo, settings_repo
+from app.storage import (
+    comfy_catalog_repo,
+    comfy_session_agent_repo,
+    session_repo,
+    settings_repo,
+)
 from app.storage import comfy_workflow_repo as repo
 from app.storage import db as db_mod
 
@@ -124,7 +136,7 @@ def get_session_readiness(session_id: str, conn: Conn) -> dict:
     session = session_repo.get_session(conn, session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="session not found")
-    if session.get("session_type") != "comfy":
+    if session.get("session_type") not in COMFY_LIKE_TYPES:
         raise HTTPException(
             status_code=409,
             detail="session is not a comfy session",
@@ -194,7 +206,7 @@ def _resolve_comfy_session_workflow(
     session = session_repo.get_session(conn, session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="session not found")
-    if session.get("session_type") != "comfy":
+    if session.get("session_type") not in COMFY_LIKE_TYPES:
         raise HTTPException(
             status_code=409, detail="session is not a comfy session",
         )
@@ -265,6 +277,208 @@ def put_session_slot_map(
         "candidates": candidates,
         "inferred_mode": comfy_slot_map_service.infer_mode(payload),
     }
+
+
+# --- session agents (per-session, user-programmable LLM pipelines) -----
+
+
+def _agent_to_out(row: dict) -> dict:
+    """Repo rows already carry decoded JSON; only the field-name shape
+    differs from :class:`AgentOut` (no transformation needed today)."""
+    return {
+        "id": row["id"],
+        "session_id": row["session_id"],
+        "position": row["position"],
+        "name": row["name"],
+        "prompt": row["prompt"],
+        "model_name": row["model_name"],
+        "model_params": row.get("model_params"),
+        "source_scope": row["source_scope"],
+        "source_ids": row.get("source_ids"),
+        "loras_enabled": bool(row["loras_enabled"]),
+        "output_slots": row.get("output_slots") or [],
+        "last_run_at": row["last_run_at"],
+        "created_at": row["created_at"],
+        "updated_at": row["updated_at"],
+    }
+
+
+def _validation_to_http(exc: comfy_agent_service.AgentValidationError) -> HTTPException:
+    if exc.code == "not_found":
+        return HTTPException(status_code=404, detail=str(exc))
+    if exc.code == "conflict":
+        return HTTPException(status_code=409, detail=str(exc))
+    return HTTPException(status_code=422, detail=str(exc))
+
+
+def _ensure_comfy_session(conn: sqlite3.Connection, session_id: str) -> dict:
+    session = session_repo.get_session(conn, session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="session not found")
+    if session.get("session_type") not in COMFY_LIKE_TYPES:
+        raise HTTPException(
+            status_code=409,
+            detail="session is not a comfy session",
+        )
+    return session
+
+
+@router.get(
+    "/api/comfy/sessions/{session_id}/agents",
+    response_model=AgentList,
+)
+def list_session_agents(session_id: str, conn: Conn) -> dict:
+    _ensure_comfy_session(conn, session_id)
+    return {
+        "agents": [
+            _agent_to_out(r)
+            for r in comfy_session_agent_repo.list_agents(conn, session_id)
+        ],
+    }
+
+
+@router.post(
+    "/api/comfy/sessions/{session_id}/agents",
+    response_model=AgentOut,
+)
+def create_session_agent(
+    session_id: str, body: AgentCreate, conn: Conn,
+) -> dict:
+    _ensure_comfy_session(conn, session_id)
+    try:
+        source_ids = comfy_agent_service.validate_source_scope(
+            source_scope=body.source_scope,
+            source_ids=body.source_ids,
+        )
+        normalised = comfy_agent_service.validate_output_slots(
+            conn=conn,
+            session_id=session_id,
+            self_agent_id=None,
+            slots=[s.model_dump() for s in body.output_slots],
+        )
+    except comfy_agent_service.AgentValidationError as exc:
+        raise _validation_to_http(exc) from exc
+    inserted = comfy_session_agent_repo.insert_agent(
+        conn,
+        session_id=session_id,
+        name=body.name,
+        prompt=body.prompt,
+        model_name=body.model_name,
+        model_params=body.model_params,
+        source_scope=body.source_scope,
+        source_ids=source_ids,
+        loras_enabled=body.loras_enabled,
+        output_slots=normalised,
+    )
+    return _agent_to_out(inserted)
+
+
+@router.get(
+    "/api/comfy/sessions/{session_id}/agents/{agent_id}",
+    response_model=AgentOut,
+)
+def get_session_agent(
+    session_id: str, agent_id: str, conn: Conn,
+) -> dict:
+    _ensure_comfy_session(conn, session_id)
+    row = comfy_session_agent_repo.get_agent(conn, agent_id)
+    if row is None or row["session_id"] != session_id:
+        raise HTTPException(status_code=404, detail="agent not found")
+    return _agent_to_out(row)
+
+
+@router.patch(
+    "/api/comfy/sessions/{session_id}/agents/{agent_id}",
+    response_model=AgentOut,
+)
+def update_session_agent(
+    session_id: str, agent_id: str, body: AgentUpdate, conn: Conn,
+) -> dict:
+    _ensure_comfy_session(conn, session_id)
+    existing = comfy_session_agent_repo.get_agent(conn, agent_id)
+    if existing is None or existing["session_id"] != session_id:
+        raise HTTPException(status_code=404, detail="agent not found")
+
+    sent = body.model_fields_set
+    fields: dict[str, object] = {}
+
+    if "name" in sent and body.name is not None:
+        fields["name"] = body.name
+    if "prompt" in sent and body.prompt is not None:
+        fields["prompt"] = body.prompt
+    if "model_name" in sent:
+        fields["model_name"] = body.model_name
+    if "model_params" in sent:
+        fields["model_params"] = body.model_params
+    if "loras_enabled" in sent and body.loras_enabled is not None:
+        fields["loras_enabled"] = body.loras_enabled
+    if "position" in sent and body.position is not None:
+        fields["position"] = body.position
+
+    # Source scope + ids must be reconciled together — applying one
+    # without the other can leave the row in an invalid state.
+    if "source_scope" in sent or "source_ids" in sent:
+        scope = (
+            body.source_scope
+            if "source_scope" in sent and body.source_scope is not None
+            else existing["source_scope"]
+        )
+        if "source_ids" in sent:
+            ids = body.source_ids
+        else:
+            ids = existing.get("source_ids")
+        try:
+            normalised_ids = comfy_agent_service.validate_source_scope(
+                source_scope=scope, source_ids=ids,
+            )
+        except comfy_agent_service.AgentValidationError as exc:
+            raise _validation_to_http(exc) from exc
+        fields["source_scope"] = scope
+        fields["source_ids"] = normalised_ids
+
+    if "output_slots" in sent and body.output_slots is not None:
+        try:
+            fields["output_slots"] = comfy_agent_service.validate_output_slots(
+                conn=conn,
+                session_id=session_id,
+                self_agent_id=agent_id,
+                slots=[s.model_dump() for s in body.output_slots],
+            )
+        except comfy_agent_service.AgentValidationError as exc:
+            raise _validation_to_http(exc) from exc
+
+    updated = comfy_session_agent_repo.update_agent(
+        conn, agent_id, fields=fields,
+    )
+    assert updated is not None  # existence checked above
+    return _agent_to_out(updated)
+
+
+@router.delete("/api/comfy/sessions/{session_id}/agents/{agent_id}")
+def delete_session_agent(
+    session_id: str, agent_id: str, conn: Conn,
+) -> Response:
+    _ensure_comfy_session(conn, session_id)
+    row = comfy_session_agent_repo.get_agent(conn, agent_id)
+    if row is None or row["session_id"] != session_id:
+        raise HTTPException(status_code=404, detail="agent not found")
+    comfy_session_agent_repo.delete_agent(conn, agent_id)
+    return Response(status_code=204)
+
+
+@router.post(
+    "/api/comfy/sessions/{session_id}/agents/seed_default",
+    response_model=AgentSeedDefaultOut,
+)
+def seed_default_session_agent(session_id: str, conn: Conn) -> dict:
+    _ensure_comfy_session(conn, session_id)
+    try:
+        agent = comfy_agent_service.seed_default_agent(
+            conn=conn, session_id=session_id,
+        )
+    except comfy_agent_service.AgentValidationError as exc:
+        raise _validation_to_http(exc) from exc
+    return {"agent": _agent_to_out(agent)}
 
 
 @router.delete("/api/comfy/workflows/{workflow_id}")

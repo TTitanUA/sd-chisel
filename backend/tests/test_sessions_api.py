@@ -290,6 +290,66 @@ def test_non_comfy_session_rejects_workflow_id(client):
     assert resp.status_code == 422
 
 
+def test_create_comfy_mock_session_binds_workflow(client):
+    """ComfyMock is a peer of comfy: requires + accepts the same
+    ``comfy_workflow_id`` plumbing. See
+    docs/comfy-agents-ui-mock-plan.md."""
+    pid = client.post("/api/projects", json={"name": "P"}).json()["id"]
+    wf = _make_workflow(client)
+    resp = client.post(
+        f"/api/projects/{pid}/sessions",
+        json={
+            "session_type": "comfy_mock",
+            "name": "ui exploration",
+            "model_name": None,
+            "use_negative": True,
+            "comfy_workflow_id": wf["id"],
+        },
+    )
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    assert body["session_type"] == "comfy_mock"
+    assert body["comfy_workflow_id"] == wf["id"]
+
+
+def test_comfy_mock_session_requires_workflow_id(client):
+    pid = client.post("/api/projects", json={"name": "P"}).json()["id"]
+    resp = client.post(
+        f"/api/projects/{pid}/sessions",
+        json={
+            "session_type": "comfy_mock",
+            "name": "x",
+            "model_name": None,
+            "use_negative": True,
+        },
+    )
+    assert resp.status_code == 422
+    assert "comfy_workflow_id" in resp.json()["detail"]
+
+
+def test_comfy_mock_session_supports_workflow_endpoints(client):
+    """The comfy workflow + slot map endpoints accept ``comfy_mock``
+    sessions exactly the way they accept ``comfy``."""
+    pid = client.post("/api/projects", json={"name": "P"}).json()["id"]
+    wf = _make_workflow(client)
+    s = client.post(
+        f"/api/projects/{pid}/sessions",
+        json={
+            "session_type": "comfy_mock",
+            "name": "x",
+            "use_negative": True,
+            "comfy_workflow_id": wf["id"],
+        },
+    ).json()
+    # Slot map endpoint accepts the comfy_mock session.
+    resp = client.get(f"/api/comfy/sessions/{s['id']}/slot_map")
+    assert resp.status_code == 200, resp.text
+    # Agent CRUD accepts the comfy_mock session too.
+    resp = client.get(f"/api/comfy/sessions/{s['id']}/agents")
+    assert resp.status_code == 200
+    assert resp.json() == {"agents": []}
+
+
 def test_delete_workflow_in_use_returns_409(client):
     pid = client.post("/api/projects", json={"name": "P"}).json()["id"]
     wf = _make_workflow(client)

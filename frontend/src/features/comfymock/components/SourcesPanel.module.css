@@ -1,0 +1,395 @@
+.panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  gap: 8px;
+}
+
+.title {
+  flex: 1;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--text-muted);
+}
+
+.upload {
+  font: inherit;
+  font-size: 11px;
+  padding: 3px 8px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.upload:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+.upload:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+  gap: 8px;
+  align-content: start;
+}
+
+.empty {
+  grid-column: 1 / -1;
+  padding: 24px;
+  font-size: 12px;
+  color: var(--text-muted);
+  border: 1px dashed var(--border);
+  border-radius: 4px;
+  text-align: center;
+}
+
+.item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.thumb {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1;
+  background: var(--bg-sunken);
+  border: 2px solid transparent;
+  border-radius: 4px;
+  overflow: hidden;
+  cursor: zoom-in;
+  padding: 0;
+}
+
+.thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  pointer-events: none; /* keep drags hitting the button, not the img */
+}
+
+.thumb:hover {
+  border-color: var(--accent);
+}
+
+.dragging .thumb {
+  opacity: 0.55;
+  cursor: grabbing;
+}
+
+.itemMeta {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.filename {
+  flex: 1;
+  font-size: 10px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.deleteBtn {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 14px;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+}
+
+.deleteBtn:hover {
+  color: var(--danger);
+}
+
+/* --- Body wrap + per-section heads --------------------------------- */
+
+.body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 0;
+}
+
+.section {
+  padding: 8px 12px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.section:last-child {
+  border-bottom: none;
+}
+
+.sectionHead {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.dragHint {
+  font-size: 10px;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  border: 1px dashed var(--accent);
+  border-radius: 3px;
+  padding: 1px 6px;
+  font-style: italic;
+}
+
+/* --- Slot list ------------------------------------------------------ */
+
+.slotList {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.slot {
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface);
+  overflow: hidden;
+  transition: border-color 0.12s, background 0.12s;
+}
+
+.slotDropOver {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 25%, transparent);
+}
+
+.slotHead {
+  font: inherit;
+  display: grid;
+  grid-template-columns: auto auto 1fr auto;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  width: 100%;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  font-size: 12px;
+  color: inherit;
+}
+
+.slotHead:hover {
+  background: var(--surface-alt);
+}
+
+.slotPurpose {
+  display: inline-block;
+  padding: 1px 6px;
+  background: var(--bg-sunken);
+  border-radius: 2px;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--text-muted);
+}
+
+.slotHead[data-purpose="main"] .slotPurpose {
+  background: color-mix(in srgb, var(--accent) 20%, var(--bg-sunken));
+  color: var(--accent);
+}
+
+.slotHead[data-purpose="ref_in_scene"] .slotPurpose {
+  background: color-mix(in srgb, #2e8b57 20%, var(--bg-sunken));
+  color: #2e8b57;
+}
+
+.slotHead[data-purpose="ref_text_only"] .slotPurpose {
+  background: color-mix(in srgb, #6a5acd 20%, var(--bg-sunken));
+  color: #6a5acd;
+}
+
+.slotKey {
+  font-weight: 600;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+}
+
+.slotBound {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.slotThumb {
+  width: 24px;
+  height: 24px;
+  object-fit: cover;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+.slotImgName {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.slotEmpty {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.slotChev {
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.slotForm {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  background: var(--bg-sunken);
+  border-top: 1px solid var(--border);
+}
+
+.field {
+  display: grid;
+  grid-template-columns: 100px 1fr;
+  align-items: start;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.field > span:first-child {
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  font-size: 10px;
+  padding-top: 4px;
+}
+
+.input {
+  font: inherit;
+  font-size: 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 4px 6px;
+  color: var(--text);
+  min-width: 0;
+  width: 100%;
+}
+
+.input[aria-invalid="true"] {
+  border-color: var(--danger);
+}
+
+.imageRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.imageRow .input {
+  flex: 1;
+  min-width: 0;
+}
+
+.previewBtn {
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  background: var(--bg-sunken);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  cursor: zoom-in;
+  overflow: hidden;
+}
+
+.previewBtn img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.previewBtn:hover {
+  border-color: var(--accent);
+}
+
+.errorRow {
+  font-size: 11px;
+  color: var(--danger);
+  padding-left: 108px;
+}
+
+.formActions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 4px;
+}
+
+.delete {
+  font: inherit;
+  font-size: 11px;
+  padding: 4px 10px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--danger);
+  cursor: pointer;
+}
+
+.delete:hover {
+  border-color: var(--danger);
+}
+
+/* --- Image grid: tag for unbound vs bound --------------------------- */
+
+.bound .thumb {
+  border-color: color-mix(in srgb, var(--accent) 30%, var(--border));
+}
+
+.unboundBadge {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  background: var(--surface-alt);
+  color: var(--text-muted);
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  padding: 1px 5px;
+  border-radius: 2px;
+  border: 1px solid var(--border);
+}

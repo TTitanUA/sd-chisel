@@ -1,0 +1,145 @@
+/* Drawer-tree styling. The shared MappingTreeShell handles the
+   3-col grid; the drawer "lives" in col 3 (InputContextPanel). This
+   file only styles the centre column tree itself.
+
+   Node cards are laid out in a fixed 2-column grid. Very narrow
+   viewports collapse back to one column via the media query below
+   so the two cards don't get squashed below readable width. */
+
+.tree {
+  padding: 12px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  align-content: start;
+}
+
+@media (max-width: 720px) {
+  .tree {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.empty {
+  /* Empty / "no fillable inputs" message spans the full grid width
+     instead of getting squashed into one card slot. */
+  grid-column: 1 / -1;
+  padding: 24px;
+  font-size: 13px;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.node {
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.nodeHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: var(--surface-alt);
+  border-bottom: 1px solid var(--border);
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 11px;
+}
+
+.nodeId { color: var(--text-muted); }
+.classType { font-weight: 600; }
+.title { color: var(--accent); font-style: italic; }
+
+.inputs {
+  display: flex;
+  flex-direction: column;
+}
+
+.inputRow {
+  font: inherit;
+  /* Three-track grid: name (auto) | current value (flex, truncates) |
+     action pill / + map button (auto). The middle column shrinks
+     before the others when the row is narrow. */
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 12px;
+  width: 100%;
+  background: transparent;
+  border: none;
+  border-top: 1px solid var(--border);
+  text-align: left;
+  cursor: pointer;
+  font-size: 11px;
+  color: inherit;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+}
+
+.inputValue {
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.inputRow:first-child {
+  border-top: none;
+}
+
+.inputRow:hover {
+  background: var(--surface-alt);
+}
+
+.active {
+  background: color-mix(in srgb, var(--accent) 12%, transparent) !important;
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.inputRow[data-mapped="true"] {
+  background: color-mix(in srgb, var(--accent) 4%, transparent);
+}
+
+.inputName {
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.pill {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 3px;
+  font-size: 11px;
+  background: var(--bg-sunken);
+  border: 1px solid var(--accent);
+  color: var(--accent);
+}
+
+.pill[data-binding="frozen"] {
+  border-color: var(--text-muted);
+  color: var(--text-muted);
+}
+
+.pill[data-binding="user_image"] {
+  border-color: #2e8b57;
+  color: #2e8b57;
+}
+
+.addHint {
+  font-size: 11px;
+  color: var(--text-muted);
+  border: 1px dashed var(--border);
+  padding: 1px 8px;
+  border-radius: 3px;
+}
+
+.dim {
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 50%;
+}

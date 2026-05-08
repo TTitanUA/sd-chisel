@@ -36,7 +36,17 @@ const TYPE_OPTIONS: { value: SessionType; label: string; description: string }[]
     description:
       "Bind a saved ComfyUI workflow. The session opens on a readiness panel that walks every node through configuration before any further work.",
   },
+  {
+    value: "comfy_mock",
+    label: "ComfyMock",
+    description:
+      "UI-exploration session — same workflow upload + slot map + agents as comfy, but LLM calls and workflow generation are emulated client-side. Switch between layout variants from the workspace header.",
+  },
 ];
+
+function isComfyLikeType(t: SessionType): boolean {
+  return t === "comfy" || t === "comfy_mock";
+}
 
 function defaultName(): string {
   return `untitled · ${new Date().toLocaleTimeString([], {
@@ -61,7 +71,7 @@ export default function NewSessionRoute() {
         name: name.trim() || defaultName(),
         model_name: null,
         use_negative: true,
-        comfy_workflow_id: type === "comfy" ? workflowId : null,
+        comfy_workflow_id: isComfyLikeType(type) ? workflowId : null,
       });
     },
     onSuccess: (s) => {
@@ -74,7 +84,7 @@ export default function NewSessionRoute() {
     return <div className={styles.wrap}>Pick a project from the sidebar first.</div>;
   }
 
-  const canCreate = type !== "comfy" || !!workflowId;
+  const canCreate = !isComfyLikeType(type) || !!workflowId;
 
   return (
     <div className={styles.wrap}>
@@ -110,7 +120,7 @@ export default function NewSessionRoute() {
           })}
         </div>
 
-        {type === "comfy" && (
+        {isComfyLikeType(type) && (
           <ComfyWorkflowPicker
             workflowId={workflowId}
             onSelect={setWorkflowId}

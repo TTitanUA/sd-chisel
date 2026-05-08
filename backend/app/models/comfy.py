@@ -360,3 +360,139 @@ class SlotMapUpdate(StrictModel):
     """Body of PUT /api/comfy/sessions/{id}/slot_map. Send the full
     desired list — the slot map is replaced atomically."""
     slots: list[SlotDefinition]
+
+
+# --- Comfy agents (per-session, user-programmable) ---------------------------
+#
+# A comfy session owns a list of agents. Each agent has its own prompt,
+# model, source scope, LoRA toggle, and a list of typed output slots that
+# bind to the workflow's `binding=llm` slots. See
+# docs/comfy-agents-redesign.md.
+
+
+SourceScope = Literal["all", "selected", "none"]
+
+
+SlotOrigin_ = Literal["preset", "custom", "auto"]
+"""How the agent output slot was authored.
+
+- ``preset``: built-in pre-baked slot (currently ``positive`` /
+  ``negative``). Kind, label, and description are pre-filled.
+- ``custom``: user picks ``kind`` + writes ``description``.
+- ``auto``: kind + description are snapshotted from the workflow slot
+  and its catalog node info at bind time. Pre-bind, ``kind`` and
+  ``description`` may be unset (the slot is a placeholder waiting to
+  be wired)."""
+
+
+PresetOutputName = Literal["positive", "negative"]
+
+
+# Kind for each preset. Presets only cover the two pre-baked text slots
+# in v1 — LoRA output stays a session-level side-channel via
+# ``loras_enabled``, not a slot.
+PRESET_KIND: dict[PresetOutputName, SlotKind] = {
+    "positive": "multiline_text",
+    "negative": "multiline_text",
+}
+
+
+class AgentSlotBinding(StrictModel):
+    """A wiring from an agent's output slot into a workflow slot
+    (matched by label)."""
+    workflow_slot_label: str = Field(min_length=1, max_length=64)
+
+
+class AgentOutputSlot(StrictModel):
+    """One output slot owned by an agent.
+
+    Validation rules (enforced in the service layer, not by Pydantic):
+
+    - ``preset`` slots must use the kind defined by :data:`PRESET_KIND`
+      and may not set ``preset`` to anything outside that map.
+    - ``custom`` slots must set ``kind``; ``preset`` must be ``None``.
+    - ``auto`` slots may have ``kind`` / ``description`` unset pre-bind;
+      once ``bound_to`` is set, kind + description are snapshotted from
+      the workflow slot + catalog node info.
+    - ``bound_to`` must reference an existing workflow slot whose
+      ``binding`` is ``llm`` and whose ``kind`` matches this slot's
+      kind. No two agents in the same session may target the same
+      workflow slot label.
+    - ``last_value`` is the agent's most recent successful output for
+      this slot, kind-typed. Persisted across session reads."""
+
+    id: str = Field(min_length=1, max_length=32)
+    origin: SlotOrigin_
+    preset: PresetOutputName | None = None
+    kind: SlotKind | None = None
+    label: str = Field(min_length=1, max_length=64)
+    description: str | None = Field(default=None, max_length=2000)
+    last_value: Any | None = None
+    bound_to: AgentSlotBinding | None = None
+
+
+class AgentOut(StrictModel):
+    """One agent on a comfy session."""
+    id: str
+    session_id: str
+    position: int
+    name: str
+    prompt: str
+    model_name: str | None
+    model_params: dict[str, Any] | None
+    source_scope: SourceScope
+    source_ids: list[str] | None
+    """Set when ``source_scope == 'selected'``. ``null`` for ``all`` /
+    ``none``."""
+    loras_enabled: bool
+    output_slots: list[AgentOutputSlot]
+    last_run_at: int | None
+    created_at: int
+    updated_at: int
+
+
+class AgentList(StrictModel):
+    agents: list[AgentOut]
+
+
+class AgentCreate(StrictModel):
+    """Body of POST /api/comfy/sessions/{id}/agents.
+
+    Only ``name`` is required. Everything else has a sensible default —
+    output slots start empty, prompt is empty, source scope is ``all``,
+    LoRAs off. The user fills the rest via PATCH."""
+    name: str = Field(min_length=1, max_length=120)
+    prompt: str = Field(default="", max_length=20000)
+    model_name: str | None = None
+    model_params: dict[str, Any] | None = None
+    source_scope: SourceScope = "all"
+    source_ids: list[str] | None = None
+    loras_enabled: bool = False
+    output_slots: list[AgentOutputSlot] = Field(default_factory=list)
+
+
+class AgentUpdate(StrictModel):
+    """Partial update. Fields not present in ``model_fields_set`` keep
+    their existing value; explicit ``None`` clears the value (where
+    nullable). Position updates are accepted as-is — the service does
+    not renumber siblings, the client is expected to send a coherent
+    new position."""
+
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    prompt: str | None = Field(default=None, max_length=20000)
+    model_name: str | None = None
+    model_params: dict[str, Any] | None = None
+    source_scope: SourceScope | None = None
+    source_ids: list[str] | None = None
+    loras_enabled: bool | None = None
+    output_slots: list[AgentOutputSlot] | None = None
+    position: int | None = None
+
+
+class AgentSeedDefaultOut(StrictModel):
+    """Returned by POST /api/comfy/sessions/{id}/agents/seed_default.
+
+    The seed action is opt-in: it creates exactly one agent with one
+    output slot per ``binding=llm`` workflow slot, all pre-bound. It is
+    rejected (409) when the session already has at least one agent."""
+    agent: AgentOut

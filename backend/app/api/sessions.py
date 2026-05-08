@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFil
 from app import config as app_config
 from app.api.deps import get_conn
 from app.models.session import (
+    COMFY_LIKE_TYPES,
     AnalyzeSourceRequest,
     HiddenPatch,
     ProjectCreate,
@@ -163,13 +164,18 @@ def create_session(project_id: str, body: SessionCreate, conn: Conn):
     if session_repo.get_project(conn, project_id) is None:
         raise HTTPException(status_code=409, detail=f"unknown project: {project_id}")
 
-    # session_type='comfy' must come with a valid comfy_workflow_id;
-    # other session types must omit it.
-    if body.session_type == "comfy":
+    # comfy + comfy_mock both require a valid comfy_workflow_id;
+    # other session types must omit it. ComfyMock reuses every comfy
+    # workflow / slot-map path verbatim (see
+    # docs/comfy-agents-ui-mock-plan.md).
+    if body.session_type in COMFY_LIKE_TYPES:
         if not body.comfy_workflow_id:
             raise HTTPException(
                 status_code=422,
-                detail="comfy_workflow_id is required for session_type='comfy'",
+                detail=(
+                    f"comfy_workflow_id is required for "
+                    f"session_type={body.session_type!r}"
+                ),
             )
         if comfy_workflow_repo.get_workflow(conn, body.comfy_workflow_id) is None:
             raise HTTPException(
@@ -180,7 +186,10 @@ def create_session(project_id: str, body: SessionCreate, conn: Conn):
         if body.comfy_workflow_id is not None:
             raise HTTPException(
                 status_code=422,
-                detail=f"comfy_workflow_id is only valid for session_type='comfy'",
+                detail=(
+                    "comfy_workflow_id is only valid for comfy / "
+                    "comfy_mock sessions"
+                ),
             )
 
     try:

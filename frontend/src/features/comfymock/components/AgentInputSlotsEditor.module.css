@@ -1,0 +1,429 @@
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-bottom: 4px;
+}
+
+.title {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--text-muted);
+}
+
+.add {
+  font: inherit;
+  font-size: 11px;
+  padding: 3px 10px;
+  background: var(--surface-alt);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.add:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.add:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.kindPicker {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  padding: 8px;
+  background: var(--bg-sunken);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+.kindBtn {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 8px 10px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+}
+
+.kindBtn:hover {
+  border-color: var(--accent);
+}
+
+.kindBtnLabel {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.kindBtnDesc {
+  font-size: 10px;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+.empty {
+  padding: 12px;
+  font-size: 12px;
+  color: var(--text-muted);
+  border: 1px dashed var(--border);
+  border-radius: 4px;
+  text-align: center;
+}
+
+.empty strong {
+  color: var(--accent);
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.slot {
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.slotHead {
+  font: inherit;
+  display: grid;
+  grid-template-columns: auto 1fr auto auto;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  width: 100%;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  font-size: 12px;
+  color: inherit;
+}
+
+.slotHead:hover {
+  background: var(--surface-alt);
+}
+
+.slotKind {
+  display: inline-block;
+  padding: 1px 6px;
+  background: var(--bg-sunken);
+  border-radius: 2px;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--text-muted);
+}
+
+.slotHead[data-kind="source"] .slotKind {
+  background: color-mix(in srgb, #2e8b57 20%, var(--bg-sunken));
+  color: #2e8b57;
+}
+
+.slotHead[data-kind="prompt_guide"] .slotKind {
+  background: color-mix(in srgb, var(--accent) 20%, var(--bg-sunken));
+  color: var(--accent);
+}
+
+.slotHead[data-kind="system"] .slotKind {
+  background: color-mix(in srgb, #c98a2e 20%, var(--bg-sunken));
+  color: #c98a2e;
+}
+
+.slotHead[data-kind="loras"] .slotKind {
+  background: color-mix(in srgb, #6a5acd 20%, var(--bg-sunken));
+  color: #6a5acd;
+}
+
+.slotLabel {
+  font-weight: 600;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.slotSummary {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.slotChev {
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  background: var(--bg-sunken);
+  border-top: 1px solid var(--border);
+}
+
+.field {
+  display: grid;
+  grid-template-columns: 100px 1fr;
+  align-items: start;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.field > span:first-child {
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  font-size: 10px;
+  padding-top: 4px;
+}
+
+.input {
+  font: inherit;
+  font-size: 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 4px 6px;
+  color: var(--text);
+  min-width: 0;
+  width: 100%;
+}
+
+.numInput {
+  font: inherit;
+  font-size: 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 4px 6px;
+  color: var(--text);
+  width: 100px;
+}
+
+.fieldHint {
+  grid-column: 2;
+  font-size: 10px;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.modeRow {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.radio {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.radio input {
+  margin: 0;
+}
+
+.formActions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 4px;
+}
+
+.delete {
+  font: inherit;
+  font-size: 11px;
+  padding: 4px 10px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--danger);
+  cursor: pointer;
+}
+
+.delete:hover {
+  border-color: var(--danger);
+}
+
+.dim {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+/* List + filter chips for the LoRAs form. */
+
+.listInline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  min-height: 28px;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 4px 1px 8px;
+  background: var(--bg-sunken);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  font-size: 11px;
+  color: var(--text);
+}
+
+.chipDel {
+  font: inherit;
+  font-size: 13px;
+  line-height: 1;
+  width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: 50%;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 0;
+}
+
+.chipDel:hover {
+  background: var(--danger);
+  color: white;
+}
+
+.chipInput {
+  font: inherit;
+  font-size: 11px;
+  flex: 1;
+  min-width: 100px;
+  background: transparent;
+  border: none;
+  padding: 2px 4px;
+  color: var(--text);
+}
+
+.chipInput:focus {
+  outline: none;
+}
+
+.filtersBox {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+}
+
+.filterRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+}
+
+.filterField {
+  display: inline-block;
+  padding: 1px 6px;
+  background: var(--bg-sunken);
+  color: var(--text-muted);
+  border-radius: 2px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.filterMatch {
+  flex: 1;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  color: var(--text);
+}
+
+.filterAdd {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 4px;
+  padding-top: 4px;
+  border-top: 1px dashed var(--border);
+}
+
+.saveBar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+}
+
+.saveBtn {
+  font: inherit;
+  font-size: 12px;
+  padding: 5px 12px;
+  background: var(--accent);
+  color: white;
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.saveBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.resetBtn {
+  font: inherit;
+  font-size: 12px;
+  padding: 5px 12px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.saveErr {
+  font-size: 11px;
+  color: var(--danger);
+  margin-left: auto;
+}
