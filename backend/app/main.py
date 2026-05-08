@@ -15,12 +15,36 @@ from app.api.sessions import router as sessions_router
 from app.api.settings import router as settings_router
 from app.api.tasks import router as tasks_router
 from app.services import lora_reindex, task_runner
+from app.storage import db as db_mod
+from app.storage.migrations import DEFAULT_MIGRATIONS_DIR, apply_pending
 
 logger = logging.getLogger(__name__)
 
 
+def _apply_pending_migrations() -> None:
+    """Bring ``data/app.db`` up to the current schema before any
+    request handler or background task touches it. Failures here are
+    fatal — re-raise so uvicorn aborts startup rather than serving on a
+    half-migrated DB."""
+    conn = db_mod.connect()
+    try:
+        count = apply_pending(conn, DEFAULT_MIGRATIONS_DIR)
+        if count:
+            logger.info(
+                "applied %d pending migration(s) at startup (db=%s)",
+                count, db_mod.db_path(),
+            )
+        else:
+            logger.debug("schema is up to date (db=%s)", db_mod.db_path())
+    finally:
+        conn.close()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Migrations first — every other startup hook below assumes the
+    # schema matches the code that's about to run.
+    _apply_pending_migrations()
     registry = task_runner.TaskRegistry()
     registry.start()
     task_runner.install(registry)

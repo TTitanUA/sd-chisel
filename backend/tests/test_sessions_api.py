@@ -157,6 +157,66 @@ def test_patch_session_round_trips_vl_and_prompt_model_names(client):
     assert cleared["prompt_model_name"] is None
 
 
+def test_session_comfy_input_cleanup_defaults_to_keep(client):
+    pid = client.post("/api/projects", json={"name": "P"}).json()["id"]
+    sid = client.post(
+        f"/api/projects/{pid}/sessions",
+        json={"session_type": "i2i", "name": "s", "model_name": None, "use_negative": True},
+    ).json()["id"]
+    body = client.get(f"/api/sessions/{sid}").json()
+    assert body["comfy_input_cleanup"] == "keep"
+
+
+def test_patch_session_round_trips_comfy_input_cleanup(client):
+    pid = client.post("/api/projects", json={"name": "P"}).json()["id"]
+    sid = client.post(
+        f"/api/projects/{pid}/sessions",
+        json={"session_type": "i2i", "name": "s", "model_name": None, "use_negative": True},
+    ).json()["id"]
+
+    base = {
+        "name": "s",
+        "model_name": None,
+        "use_negative": True,
+        "pinned_loras": [],
+    }
+    flipped = client.patch(
+        f"/api/sessions/{sid}",
+        json={**base, "comfy_input_cleanup": "delete"},
+    ).json()
+    assert flipped["comfy_input_cleanup"] == "delete"
+
+    # Absent field on PATCH leaves the value alone.
+    untouched = client.patch(f"/api/sessions/{sid}", json=base).json()
+    assert untouched["comfy_input_cleanup"] == "delete"
+
+    restored = client.patch(
+        f"/api/sessions/{sid}",
+        json={**base, "comfy_input_cleanup": "keep"},
+    ).json()
+    assert restored["comfy_input_cleanup"] == "keep"
+
+
+def test_patch_session_rejects_unknown_comfy_input_cleanup(client):
+    pid = client.post("/api/projects", json={"name": "P"}).json()["id"]
+    sid = client.post(
+        f"/api/projects/{pid}/sessions",
+        json={"session_type": "i2i", "name": "s", "model_name": None, "use_negative": True},
+    ).json()["id"]
+    resp = client.patch(
+        f"/api/sessions/{sid}",
+        json={
+            "name": "s",
+            "model_name": None,
+            "use_negative": True,
+            "pinned_loras": [],
+            "comfy_input_cleanup": "shred",
+        },
+    )
+    # Pydantic literal rejection — 422.
+    assert resp.status_code == 422
+
+
 def test_create_session_t2i_round_trips_type(client):
     pid = client.post("/api/projects", json={"name": "P"}).json()["id"]
     create = client.post(

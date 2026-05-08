@@ -38,6 +38,7 @@ const session: Session = {
   ],
   vl_model_name: null,
   prompt_model_name: "pm-1",
+  comfy_input_cleanup: "keep",
   hidden: false,
   created_at: 0,
   updated_at: 0,

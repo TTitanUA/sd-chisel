@@ -19,6 +19,7 @@ import { GalleryPanel } from "../components/GalleryPanel";
 import { InputDrawer } from "../components/InputDrawer";
 import { InputsPanel } from "../components/InputsPanel";
 import { KnobsStrip } from "../components/KnobsStrip";
+import { OutputsPanel } from "../components/OutputsPanel";
 import { useSlotDraft } from "../components/slot-variants/useSlotDraft";
 import { MappingTreeDrawer } from "../components/tree-variants/MappingTreeDrawer";
 import { SourcesPanel } from "../components/SourcesPanel";
@@ -35,6 +36,7 @@ const KNOBS: KnobSpec[] = [
 const LEFT_TABS = [
   { id: "agents", short: "Ag", label: "Agents" },
   { id: "inputs", short: "In", label: "Inputs" },
+  { id: "outputs", short: "Ou", label: "Outputs" },
   { id: "sources", short: "Sr", label: "Sources" },
   { id: "chat", short: "Ch", label: "Chat" },
 ] as const;
@@ -88,6 +90,7 @@ export function ComfyWorkspaceLayout({ knobsOpen }: { knobsOpen: boolean }) {
         <aside className={styles.sidePanel}>
           {leftTab === "agents" && <AgentsList />}
           {leftTab === "inputs" && <InputsPanel />}
+          {leftTab === "outputs" && <OutputsPanel />}
           {leftTab === "sources" && <SourcesPanel />}
           {leftTab === "chat" && <ChatPanel />}
         </aside>

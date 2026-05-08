@@ -12,6 +12,16 @@ export type ComfyUiConfig = {
   base_url: string | null;
   install_path: string | null;
   api_key: string | null;
+  /** Optional override for ComfyUI's input directory. When null the
+   * effective dir falls back to `<install_path>/input`. */
+  input_dir: string | null;
+  /** Optional override for ComfyUI's output directory. When null the
+   * effective dir falls back to `<install_path>/output`. */
+  output_dir: string | null;
+  /** Resolved input dir — override or `<install_path>/input`. */
+  effective_input_dir: string | null;
+  /** Resolved output dir — override or `<install_path>/output`. */
+  effective_output_dir: string | null;
   configured: boolean;
   updated_at: number;
 };
@@ -93,7 +103,13 @@ export const settingsApi = {
       body: JSON.stringify(patch),
     }),
   getComfyUi: () => apiFetch<ComfyUiConfig>("/api/settings/comfyui"),
-  putComfyUi: (body: { base_url: string | null; install_path: string | null; api_key: string | null }) =>
+  putComfyUi: (body: {
+    base_url: string | null;
+    install_path: string | null;
+    api_key: string | null;
+    input_dir: string | null;
+    output_dir: string | null;
+  }) =>
     apiFetch<ComfyUiConfig>("/api/settings/comfyui", {
       method: "PUT",
       body: JSON.stringify(body),

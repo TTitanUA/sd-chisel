@@ -23,12 +23,29 @@ class ComfyUiConfig(StrictModel):
     base_url: str | None = Field(default=None, max_length=500)
     install_path: str | None = Field(default=None, max_length=1000)
     api_key: str | None = Field(default=None, max_length=500)
+    input_dir: str | None = Field(default=None, max_length=1000)
+    """Optional override for ComfyUI's input directory. ``None`` falls
+    back to ``<install_path>/input`` at resolve time. Used by Phase 3
+    to upload session images and (when ``comfy_input_cleanup=delete``)
+    remove them after a generation."""
+    output_dir: str | None = Field(default=None, max_length=1000)
+    """Optional override for ComfyUI's output directory. ``None`` falls
+    back to ``<install_path>/output``. Used by Phase 3 to read SaveImage
+    results and copy them into ``data/images/<sid>/output/<gid>/``."""
 
 
 class ComfyUiConfigOut(StrictModel):
     base_url: str | None
     install_path: str | None
     api_key: str | None
+    input_dir: str | None
+    output_dir: str | None
+    effective_input_dir: str | None
+    """Resolved input dir — either the override or
+    ``<install_path>/input``, whichever is non-empty. ``None`` when
+    both are unset. Read-only, computed on every GET."""
+    effective_output_dir: str | None
+    """Resolved output dir — same fallback rule as above."""
     configured: bool
     updated_at: int
 

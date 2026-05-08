@@ -16,6 +16,7 @@ const SESSION: Session = {
   source_images: [],
   vl_model_name: null,
   prompt_model_name: null,
+  comfy_input_cleanup: "keep",
   hidden: false,
   created_at: 1,
   updated_at: 1,

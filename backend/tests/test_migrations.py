@@ -138,3 +138,59 @@ def test_settings_schema_present_with_correct_session_columns(tmp_path):
         "VALUES (?, 1, 0, 0, 0, 0)",
         ("ok",),
     )
+
+
+def test_default_migrations_dir_points_at_bundled_files():
+    """``DEFAULT_MIGRATIONS_DIR`` must resolve to ``backend/migrations``
+    so the FastAPI startup hook and the ``db-init`` CLI agree on
+    where to look. Regression guard against future refactors that
+    move the storage package."""
+    from app.storage.migrations import DEFAULT_MIGRATIONS_DIR
+
+    assert DEFAULT_MIGRATIONS_DIR.name == "migrations"
+    # Bundled migrations must be discoverable through the constant.
+    sql_files = sorted(p.name for p in DEFAULT_MIGRATIONS_DIR.glob("*.sql"))
+    assert "001_init.sql" in sql_files
+    assert any(name.startswith("018_") for name in sql_files)
+
+
+def test_app_lifespan_applies_migrations_to_fresh_db(tmp_path, monkeypatch):
+    """Lifespan must bring an empty ``data/app.db`` up to head before
+    serving any request. Use ``TestClient`` as a context manager so
+    FastAPI actually triggers ``lifespan``."""
+    from fastapi.testclient import TestClient
+
+    from app import config as app_config
+    from app.storage import db as db_mod
+
+    # Redirect both `data/` and the DB target to a tmp location so the
+    # test never touches the real repo. ``db_mod`` does
+    # ``from app.config import resolve_data_root`` at import time, so we
+    # patch the binding on ``db_mod`` directly (and on ``app_config``
+    # too for any other consumer that re-imports it).
+    data_root = tmp_path / "data"
+    monkeypatch.setattr(app_config, "resolve_data_root", lambda: data_root)
+    monkeypatch.setattr(db_mod, "resolve_data_root", lambda: data_root)
+    # The TaskRegistry / lora_reindex hooks need a fully-migrated DB.
+    # By the time they run, our migrations call must have already
+    # populated it — that's exactly what we're verifying here.
+    from app import main as app_main
+
+    with TestClient(app_main.app):
+        # Inside the `with` block the lifespan startup has finished.
+        conn = db_mod.connect(data_root / "app.db")
+        try:
+            tables = {
+                r[0] for r in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'",
+                )
+            }
+            assert "schema_migrations" in tables
+            assert "sessions" in tables
+            # Migration 018 lands the comfy_input_cleanup column.
+            session_cols = {
+                r[1] for r in conn.execute("PRAGMA table_info(sessions)")
+            }
+            assert "comfy_input_cleanup" in session_cols
+        finally:
+            conn.close()

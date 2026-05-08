@@ -206,6 +206,135 @@ def test_slot_map_image_candidates_filter_by_image_upload(client, conn):
     assert image_pairs == {("10", "image")}
 
 
+def test_slot_map_image_kind_only_for_loadimage_class(client, conn):
+    """A custom node that declares ``image_upload=True`` should not
+    appear in the ``image`` bucket — Phase 3's upload + patch path
+    only supports the core LoadImage class. Such a custom node falls
+    through to ``enum`` so the user can still frozen-bind it."""
+    _seed_realistic_catalog(conn)
+    _seed_node(
+        conn,
+        class_type="LoadImageFromUrl",
+        pack_name="custom-pack",
+        inputs_raw={
+            "required": {
+                "image": [["a.png", "b.png"], {"image_upload": True}],
+            },
+        },
+    )
+    graph = {
+        **SAMPLE_GRAPH,
+        "11": {
+            "class_type": "LoadImageFromUrl",
+            "inputs": {"image": "a.png"},
+        },
+    }
+    wf = _create_workflow(client, graph=graph)
+    s = _make_comfy_session(client, workflow_id=wf["id"])
+    body = client.get(f"/api/comfy/sessions/{s['id']}/slot_map").json()
+
+    image_pairs = {
+        (c["node_id"], c["input_name"]) for c in body["candidates"]["image"]
+    }
+    # Only the core LoadImage shows up — the custom URL loader is gated.
+    assert image_pairs == {("10", "image")}
+
+    # The custom node's input is downgraded to enum so the user can
+    # still freeze it manually (e.g. "always pin to a.png").
+    enum_pairs = {
+        (c["node_id"], c["input_name"]) for c in body["candidates"]["enum"]
+    }
+    assert ("11", "image") in enum_pairs
+
+
+def test_put_slot_map_rejects_save_image_input(client, conn):
+    """Saver nodes are owned by the output slot map — their inputs
+    (e.g. ``filename_prefix``) cannot also be mapped here."""
+    _seed_realistic_catalog(conn)
+    _seed_node(
+        conn,
+        class_type="SaveImage",
+        inputs_raw={
+            "required": {
+                "filename_prefix": ["STRING", {"default": "ComfyUI"}],
+                "images": ["IMAGE", {}],
+            },
+        },
+    )
+    graph = {
+        **SAMPLE_GRAPH,
+        "9": {
+            "class_type": "SaveImage",
+            "inputs": {"filename_prefix": "ComfyUI", "images": ["3", 0]},
+        },
+    }
+    wf = _create_workflow(client, graph=graph)
+    s = _make_comfy_session(client, workflow_id=wf["id"])
+    resp = client.put(
+        f"/api/comfy/sessions/{s['id']}/slot_map",
+        json={
+            "slots": [{
+                "label": "prefix",
+                "group": None,
+                "ordinal": 1,
+                "description": None,
+                "kind": "text",
+                "origin": {"node_id": "9", "input_name": "filename_prefix"},
+                "binding": "llm",
+                "metadata": {},
+            }],
+        },
+    )
+    assert resp.status_code == 422
+    detail = resp.json()["detail"]
+    assert "saver" in detail.lower() or "SaveImage" in detail
+
+
+def test_put_slot_map_rejects_non_loadimage_image_origin(client, conn):
+    """Defence-in-depth: a hand-crafted PUT can't sneak an image-kind
+    slot through with a non-LoadImage origin."""
+    _seed_realistic_catalog(conn)
+    _seed_node(
+        conn,
+        class_type="LoadImageFromUrl",
+        pack_name="custom-pack",
+        inputs_raw={
+            "required": {
+                "image": [["a.png"], {"image_upload": True}],
+            },
+        },
+    )
+    graph = {
+        **SAMPLE_GRAPH,
+        "11": {
+            "class_type": "LoadImageFromUrl",
+            "inputs": {"image": "a.png"},
+        },
+    }
+    wf = _create_workflow(client, graph=graph)
+    s = _make_comfy_session(client, workflow_id=wf["id"])
+
+    # The candidate at ("11", "image") is an enum after the gate, so
+    # the kind-mismatch check fires — message names the right node.
+    resp = client.put(
+        f"/api/comfy/sessions/{s['id']}/slot_map",
+        json={
+            "slots": [{
+                "label": "img",
+                "group": None,
+                "ordinal": 1,
+                "description": None,
+                "kind": "image",
+                "origin": {"node_id": "11", "input_name": "image"},
+                "binding": "user_image",
+                "metadata": {},
+            }],
+        },
+    )
+    assert resp.status_code == 422
+    assert "image" in resp.json()["detail"].lower()
+
+
 def test_slot_map_classifies_numbers_and_checkpoint(client, conn):
     _seed_realistic_catalog(conn)
     wf = _create_workflow(client)

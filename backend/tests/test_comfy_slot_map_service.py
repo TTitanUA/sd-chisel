@@ -25,11 +25,18 @@ def _candidate(
     kind: str,
     metadata: dict | None = None,
     current_value=None,
+    node_class_type: str | None = None,
 ) -> dict:
+    # ``node_class_type`` defaults to "X" for non-image kinds and to
+    # "LoadImage" for image kinds — the latter is required by the
+    # validator's defence-in-depth guard, and writing it everywhere by
+    # hand would just churn the test bodies.
+    if node_class_type is None:
+        node_class_type = "LoadImage" if kind in ("image", "image_alpha") else "X"
     return {
         "node_id": node_id,
         "input_name": input_name,
-        "node_class_type": "X",
+        "node_class_type": node_class_type,
         "node_display_name": None,
         "node_title": None,
         "node_in_catalog": True,

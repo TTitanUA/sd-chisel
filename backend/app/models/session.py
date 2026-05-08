@@ -5,6 +5,13 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 SessionType = Literal["i2i", "t2i", "comfy", "comfy_mock"]
+
+
+ComfyInputCleanup = Literal["keep", "delete"]
+"""Per-session policy for files sd-chisel uploaded into ComfyUI's input
+dir after a generation finishes (Phase 3). ``keep`` (default) leaves
+them; ``delete`` removes them via direct filesystem access. Phase 3
+soft-degrades to ``keep`` when the input dir isn't reachable."""
 """``comfy_mock`` is a UI-exploration session type that reuses comfy
 workflow / slot-map / agent machinery but emulates LLM calls and
 workflow generation on the frontend. See
@@ -79,6 +86,7 @@ class SessionOut(StrictModel):
     summarize_settings: dict | None = None
     generate_settings: dict | None = None
     comfy_workflow_id: str | None = None
+    comfy_input_cleanup: ComfyInputCleanup = "keep"
     hidden: bool = False
     created_at: int
     updated_at: int
@@ -116,3 +124,6 @@ class SessionUpdate(StrictModel):
     chat_settings: dict | None = None
     summarize_settings: dict | None = None
     generate_settings: dict | None = None
+    comfy_input_cleanup: ComfyInputCleanup | None = None
+    """Per-session policy for ComfyUI input cleanup. ``None`` leaves the
+    column alone; pass ``"keep"`` / ``"delete"`` to update."""

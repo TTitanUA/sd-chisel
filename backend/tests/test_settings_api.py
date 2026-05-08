@@ -287,6 +287,10 @@ def test_get_comfyui_returns_blank_by_default(client):
         "base_url": None,
         "install_path": None,
         "api_key": None,
+        "input_dir": None,
+        "output_dir": None,
+        "effective_input_dir": None,
+        "effective_output_dir": None,
         "configured": False,
         "updated_at": body["updated_at"],
     }
@@ -321,6 +325,56 @@ def test_put_comfyui_configured_requires_both_fields(client):
         json={"base_url": "http://h", "install_path": None, "api_key": None},
     ).json()
     assert body["configured"] is False  # path missing
+
+
+def test_comfyui_input_output_dir_default_to_install_path(client, tmp_path):
+    install = tmp_path / "ComfyUI"
+    (install / "custom_nodes").mkdir(parents=True)
+    resp = client.put(
+        "/api/settings/comfyui",
+        json={
+            "base_url": "http://h",
+            "install_path": str(install),
+            "api_key": None,
+        },
+    ).json()
+    # Effective dirs derive from install path when no override is set.
+    assert resp["input_dir"] is None
+    assert resp["output_dir"] is None
+    assert resp["effective_input_dir"] == str(install / "input")
+    assert resp["effective_output_dir"] == str(install / "output")
+
+
+def test_comfyui_input_output_dir_override(client, tmp_path):
+    install = tmp_path / "ComfyUI"
+    (install / "custom_nodes").mkdir(parents=True)
+    custom_in = tmp_path / "custom-in"
+    custom_out = tmp_path / "custom-out"
+    resp = client.put(
+        "/api/settings/comfyui",
+        json={
+            "base_url": "http://h",
+            "install_path": str(install),
+            "api_key": None,
+            "input_dir": str(custom_in),
+            "output_dir": str(custom_out),
+        },
+    ).json()
+    assert resp["input_dir"] == str(custom_in)
+    assert resp["output_dir"] == str(custom_out)
+    assert resp["effective_input_dir"] == str(custom_in)
+    assert resp["effective_output_dir"] == str(custom_out)
+
+    # Round-trip on GET.
+    again = client.get("/api/settings/comfyui").json()
+    assert again["effective_input_dir"] == str(custom_in)
+    assert again["effective_output_dir"] == str(custom_out)
+
+
+def test_comfyui_no_install_path_no_effective_dirs(client):
+    body = client.get("/api/settings/comfyui").json()
+    assert body["effective_input_dir"] is None
+    assert body["effective_output_dir"] is None
 
 
 def test_check_comfyui_reports_per_field_results(client, tmp_path, monkeypatch):

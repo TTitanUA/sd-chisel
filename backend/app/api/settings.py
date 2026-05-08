@@ -121,10 +121,18 @@ def patch_lm_model(name: str, body: LmModelPatch, conn: Conn) -> dict:
 
 
 def _to_comfy_out(row: dict) -> dict:
+    from app.services import comfy_paths
+
+    eff_input = comfy_paths.resolve_input_dir(row)
+    eff_output = comfy_paths.resolve_output_dir(row)
     return {
         "base_url": row["comfyui_url"],
         "install_path": row["comfyui_path"],
         "api_key": row["comfyui_api_key"],
+        "input_dir": row.get("comfyui_input_dir"),
+        "output_dir": row.get("comfyui_output_dir"),
+        "effective_input_dir": str(eff_input) if eff_input else None,
+        "effective_output_dir": str(eff_output) if eff_output else None,
         "configured": bool(row["comfyui_url"]) and bool(row["comfyui_path"]),
         "updated_at": row["updated_at"],
     }
@@ -150,6 +158,8 @@ def put_comfyui(body: ComfyUiConfig, conn: Conn) -> dict:
             url=body.base_url,
             install_path=body.install_path,
             api_key=body.api_key,
+            input_dir=body.input_dir,
+            output_dir=body.output_dir,
         ),
     )
 

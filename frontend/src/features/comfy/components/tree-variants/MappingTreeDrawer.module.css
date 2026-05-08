@@ -143,3 +143,58 @@
   text-overflow: ellipsis;
   max-width: 50%;
 }
+
+/* SaveImage / saver nodes — owned by the output slot map. The card
+ * head wears an accent chip showing the chosen output label (or
+ * "Reserved for output" when not in the map), and every input row
+ * sits behind a non-interactive "lock" treatment so the user can't
+ * accidentally double-map the node. */
+.node[data-saver="true"] .nodeHead {
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface-alt));
+  border-bottom-color: color-mix(in srgb, var(--accent) 30%, var(--border));
+}
+
+.outputClaim {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 8px;
+  border-radius: 3px;
+  background: var(--bg-sunken);
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.outputClaim[data-claimed="false"] {
+  border-color: var(--text-muted);
+  color: var(--text-muted);
+}
+
+.lockedRow {
+  font: inherit;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 12px;
+  width: 100%;
+  border-top: 1px solid var(--border);
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  cursor: not-allowed;
+}
+
+.lockedRow:first-child {
+  border-top: none;
+}
+
+.lockHint {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-style: italic;
+}

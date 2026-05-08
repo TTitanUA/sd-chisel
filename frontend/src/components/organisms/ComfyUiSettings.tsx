@@ -22,12 +22,16 @@ export function ComfyUiSettings() {
   const [baseUrl, setBaseUrl] = useState("");
   const [installPath, setInstallPath] = useState("");
   const [apiKey, setApiKey] = useState("");
+  const [inputDir, setInputDir] = useState("");
+  const [outputDir, setOutputDir] = useState("");
 
   useEffect(() => {
     if (cfg.data) {
       setBaseUrl(cfg.data.base_url ?? "");
       setInstallPath(cfg.data.install_path ?? "");
       setApiKey(cfg.data.api_key ?? "");
+      setInputDir(cfg.data.input_dir ?? "");
+      setOutputDir(cfg.data.output_dir ?? "");
     }
   }, [cfg.data]);
 
@@ -37,12 +41,26 @@ export function ComfyUiSettings() {
         base_url: baseUrl.trim() || null,
         install_path: installPath.trim() || null,
         api_key: apiKey.trim() || null,
+        input_dir: inputDir.trim() || null,
+        output_dir: outputDir.trim() || null,
       }),
     onSuccess: () => {
       invalidate.comfyui();
       check.reset();
     },
   });
+
+  // Show what the resolver will actually use, computed by the backend
+  // from override + install path. Helps the user see at a glance where
+  // Phase 3 will read/write files.
+  const effectiveInput = cfg.data?.effective_input_dir ?? null;
+  const effectiveOutput = cfg.data?.effective_output_dir ?? null;
+  const inputPlaceholder = installPath.trim()
+    ? `default: ${installPath.trim().replace(/[\\/]+$/, "")}/input`
+    : "set install path first";
+  const outputPlaceholder = installPath.trim()
+    ? `default: ${installPath.trim().replace(/[\\/]+$/, "")}/output`
+    : "set install path first";
 
   return (
     <div className={styles.page}>
@@ -85,6 +103,40 @@ export function ComfyUiSettings() {
           value={apiKey}
           onChange={(e) => setApiKey(e.currentTarget.value)}
         />
+
+        <div className={styles.sub} style={{ marginTop: 16 }}>
+          ComfyUI's input / output directories. Leave empty to use the
+          install-path defaults <code>&lt;install&gt;/input</code> and{" "}
+          <code>&lt;install&gt;/output</code>. Override only if you run ComfyUI
+          with <code>--input-directory</code> / <code>--output-directory</code>.
+          Phase 3's generation cycle uploads session images here, reads
+          SaveImage results from output, and (when the per-session toggle is
+          on) deletes the uploaded files after a run.
+        </div>
+
+        <TextInput
+          label="Input directory (optional)"
+          placeholder={inputPlaceholder}
+          value={inputDir}
+          onChange={(e) => setInputDir(e.currentTarget.value)}
+        />
+        {effectiveInput && (
+          <div className={styles.sub}>
+            Resolved: <code>{effectiveInput}</code>
+          </div>
+        )}
+
+        <TextInput
+          label="Output directory (optional)"
+          placeholder={outputPlaceholder}
+          value={outputDir}
+          onChange={(e) => setOutputDir(e.currentTarget.value)}
+        />
+        {effectiveOutput && (
+          <div className={styles.sub}>
+            Resolved: <code>{effectiveOutput}</code>
+          </div>
+        )}
 
         <div className={styles.actionRow}>
           <Button

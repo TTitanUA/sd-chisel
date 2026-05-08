@@ -123,10 +123,23 @@ def _session_row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
     d = dict(row)
     d["use_negative"] = bool(d["use_negative"])
     d["hidden"] = bool(d.get("hidden", 0))
+    # comfy_input_cleanup defaults to 'keep' at the schema level; legacy
+    # rows from before migration 018 may carry SQL DEFAULT 'keep' too.
+    # Surface it on every session row so the API layer can echo it back
+    # without branching on session_type.
+    d["comfy_input_cleanup"] = d.get("comfy_input_cleanup") or "keep"
     for a in action_settings_svc.ACTIONS:
         col = f"{a}_settings"
         d[col] = action_settings_svc.decode_bundle(d.get(col))
     return d
+
+
+COMFY_INPUT_CLEANUP_VALUES: frozenset[str] = frozenset({"keep", "delete"})
+"""Allowed values for ``sessions.comfy_input_cleanup`` — what Phase 3
+should do with files sd-chisel uploaded to ComfyUI's input dir after a
+generation finishes. ``keep`` (default) leaves them; ``delete`` removes
+them via direct filesystem access (which only works locally — Phase 3
+soft-degrades to ``keep`` when the input dir isn't reachable)."""
 
 
 def get_session(conn: sqlite3.Connection, session_id: str) -> dict[str, Any] | None:
@@ -172,6 +185,7 @@ def update_session(
     vl_model_name: str | None = None,
     prompt_model_name: str | None = None,
     action_bundles: dict[str, dict[str, Any] | None] | None = None,
+    comfy_input_cleanup: str | None = None,
 ) -> dict[str, Any] | None:
     """Update mutable session fields.
 
@@ -179,6 +193,11 @@ def update_session(
     (or ``None`` to clear the per-session override entirely). Actions
     absent from the map are left untouched. The bundle dict itself is
     expected to already be validated by ``action_settings.parse_bundle``.
+
+    ``comfy_input_cleanup`` is the per-session policy for files
+    sd-chisel uploaded into ComfyUI's input dir after a generation
+    finishes (see :data:`COMFY_INPUT_CLEANUP_VALUES`). ``None`` leaves
+    the column unchanged; pass ``"keep"`` or ``"delete"`` to update.
     """
     now = _now()
     sets = [
@@ -201,6 +220,13 @@ def update_session(
                 # bundle is expected to be already-validated; encoding is
                 # tolerant of {} -> NULL ("no overrides, but row exists").
                 params.append(action_settings_svc.encode_bundle(bundle))
+    if comfy_input_cleanup is not None:
+        if comfy_input_cleanup not in COMFY_INPUT_CLEANUP_VALUES:
+            raise ValueError(
+                f"unknown comfy_input_cleanup value: {comfy_input_cleanup!r}",
+            )
+        sets.append("comfy_input_cleanup = ?")
+        params.append(comfy_input_cleanup)
     sets.append("updated_at = ?")
     params.append(now)
     params.append(session_id)

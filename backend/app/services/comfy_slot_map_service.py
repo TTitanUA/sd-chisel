@@ -30,6 +30,8 @@ from typing import Any
 from app.models.comfy import (
     ALL_SLOT_KINDS,
     ALLOWED_BINDINGS,
+    IMAGE_LOADER_CLASSES,
+    IMAGE_SAVER_CLASSES,
     USER_IMAGE_KINDS,
     SlotBinding,
     SlotKind,
@@ -99,7 +101,11 @@ def _looks_like_checkpoint(input_name: str, options: list[Any]) -> bool:
 
 
 def _classify_with_catalog(
-    input_name: str, type_spec: Any, options: dict[str, Any],
+    input_name: str,
+    type_spec: Any,
+    options: dict[str, Any],
+    *,
+    class_type: str,
 ) -> tuple[SlotKind, dict[str, Any]] | None:
     """Catalog-aware classification. Returns ``(kind, metadata)`` or
     ``None`` for inputs sd-chisel can't fill.
@@ -107,6 +113,13 @@ def _classify_with_catalog(
     ``type_spec`` is the first element of the raw INPUT_TYPES tuple
     (a string for primitive types, a list for combos). ``options`` is
     the second element (an options dict, possibly empty).
+
+    ``class_type`` is needed because the ``image`` / ``image_alpha``
+    kinds are gated to :data:`IMAGE_LOADER_CLASSES` — Phase 3's image
+    upload + patch step only knows how to drive a ``LoadImage`` node;
+    custom loaders (``LoadImageFromUrl``, ``LoadImageBatch``, …) declare
+    the same ``image_upload`` flag but expect different inputs and would
+    silently produce wrong results.
     """
     if isinstance(type_spec, str):
         if type_spec == "STRING":
@@ -132,9 +145,16 @@ def _classify_with_catalog(
         # flags), then on the values' shape (lora / checkpoint
         # heuristic), and fall through to a generic enum.
         if options.get("image_upload") is True:
-            return "image", {}
+            if class_type in IMAGE_LOADER_CLASSES:
+                return "image", {}
+            # Fall through — a custom node with the same flag still
+            # exposes a list of filenames; surface it as a generic
+            # enum so the user can frozen-bind it if they really want.
+            return "enum", {"options": list(type_spec)}
         if options.get("mask") is True or options.get("mask_upload") is True:
-            return "image_alpha", {}
+            if class_type in IMAGE_LOADER_CLASSES:
+                return "image_alpha", {}
+            return "enum", {"options": list(type_spec)}
         if _looks_like_lora(input_name, type_spec):
             return "lora_name", {"options": list(type_spec)}
         if _looks_like_checkpoint(input_name, type_spec):
@@ -243,7 +263,7 @@ def compute_candidates(
                 if spec is None:
                     continue
                 classified = _classify_with_catalog(
-                    input_name, spec[0], spec[1],
+                    input_name, spec[0], spec[1], class_type=class_type,
                 )
             else:
                 classified = _classify_without_catalog(value)
@@ -467,6 +487,35 @@ def validate_slots(
                 f"slot '{label}' declares kind '{kind}' but the input is "
                 f"of kind '{cand['kind']}'",
             )
+        # Reject any input of an image-saver node (SaveImage). Saver
+        # nodes are owned by the output slot map — their literal inputs
+        # (e.g. ``filename_prefix``) seed the output label and must not
+        # be repurposed as an LLM-composed / frozen input slot. Catches
+        # a hand-crafted PUT; the editor blocks this in the UI but the
+        # server is the source of truth.
+        cand_class = cand.get("node_class_type")
+        if cand_class in IMAGE_SAVER_CLASSES:
+            raise SlotMapValidationError(
+                f"slot '{label}' targets an input of '{cand_class}' node "
+                f"'{node_id}'; saver nodes are reserved for the output "
+                f"slot map and their inputs are not slot-mappable",
+            )
+        # Defence-in-depth for the LoadImage-only constraint. The
+        # classifier already downgrades non-LoadImage image_upload nodes
+        # to ``enum``, so the kind-mismatch check above usually catches
+        # this — but a stale slot map saved before the gate landed (or
+        # a hand-crafted PUT) can still arrive with kind=image and a
+        # candidate that *also* came in as kind=image somehow. Reject
+        # explicitly with a self-describing error so the frontend can
+        # render "rebind to a LoadImage node".
+        if kind in ("image", "image_alpha"):
+            cand_class = cand.get("node_class_type")
+            if cand_class not in IMAGE_LOADER_CLASSES:
+                raise SlotMapValidationError(
+                    f"slot '{label}' is image-kind but its origin node "
+                    f"'{node_id}' is class '{cand_class}'; sd-chisel only "
+                    f"drives LoadImage nodes for image inputs",
+                )
 
         binding: SlotBinding = slot.get("binding")  # type: ignore[assignment]
         allowed = ALLOWED_BINDINGS.get(kind, frozenset())  # type: ignore[arg-type]

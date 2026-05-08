@@ -5,12 +5,14 @@
  *  is exposed. This file factors out the common pivot. See
  *  docs/comfy-agents-ui-mock-plan.md.
  */
-import type {
-  Agent,
-  CandidateBuckets,
-  CandidateInput,
-  SlotDefinition,
-  Workflow,
+import {
+  IMAGE_SAVER_CLASSES,
+  type Agent,
+  type CandidateBuckets,
+  type CandidateInput,
+  type OutputSlotMapV1,
+  type SlotDefinition,
+  type Workflow,
 } from "@/api/comfy";
 import type { Session } from "@/api/sessions";
 import type { SourceSlot } from "../../state/source-slots";
@@ -28,17 +30,31 @@ export type MappingInputRow = {
   mappedIndex: number | null;
 };
 
+/** Marks a node whose inputs sd-chisel deliberately blocks from the
+ *  slot map. PR-2 only marks ``IMAGE_SAVER_CLASSES`` (SaveImage) — those
+ *  nodes are owned by the output slot map and their literal inputs
+ *  (``filename_prefix``) seed the output label, so we don't let users
+ *  accidentally LLM-compose them. ``outputLabel`` is set when the node
+ *  is included in the live output slot map; ``null`` when the SaveImage
+ *  exists in the workflow but the user has excluded it from outputs.
+ *  Either way the inputs stay locked. */
+export type OutputSaverInfo = {
+  outputLabel: string | null;
+};
+
 export type MappingNodeRow = {
   nodeId: string;
   classType: string;
   title: string | null;
   inputs: MappingInputRow[];
+  outputSaver: OutputSaverInfo | null;
 };
 
 export function buildMappingRows(
   workflow: Workflow | null | undefined,
   draft: SlotDefinition[],
   candidates: CandidateBuckets | null,
+  outputSlotMap: OutputSlotMapV1 | null = null,
 ): MappingNodeRow[] {
   if (!workflow) return [];
 
@@ -62,6 +78,15 @@ export function buildMappingRows(
     );
   });
 
+  // node_id → output label, populated for SaveImage nodes the user
+  // included in the output slot map.
+  const outputLabelByNodeId = new Map<string, string>();
+  if (outputSlotMap) {
+    for (const o of outputSlotMap.outputs) {
+      outputLabelByNodeId.set(o.node_id, o.label);
+    }
+  }
+
   const ids = Object.keys(workflow.graph).sort((a, b) => {
     const na = parseInt(a, 10);
     const nb = parseInt(b, 10);
@@ -79,6 +104,8 @@ export function buildMappingRows(
         }
       | undefined;
     if (!node || typeof node !== "object") continue;
+    const classType = node.class_type ?? "?";
+    const isSaver = IMAGE_SAVER_CLASSES.has(classType);
     const inputs: MappingInputRow[] = [];
     for (const [name, rawValue] of Object.entries(node.inputs ?? {})) {
       if (isWired(rawValue)) continue;
@@ -99,10 +126,13 @@ export function buildMappingRows(
     if (inputs.length === 0) continue;
     out.push({
       nodeId: id,
-      classType: node.class_type ?? "?",
+      classType,
       title:
         node._meta?.title && node._meta.title.trim() ? node._meta.title : null,
       inputs,
+      outputSaver: isSaver
+        ? { outputLabel: outputLabelByNodeId.get(id) ?? null }
+        : null,
     });
   }
   return out;

@@ -612,6 +612,72 @@ def test_source_input_runs_vl_pass_and_appends_summary(
     assert "a tiny test pixel" in sys
     assert "main" in sys
 
+    # VL summary persists onto the source input slot — the editor
+    # surfaces it as "what the model saw" without re-running.
+    refreshed = client.get(
+        f"/api/comfy/sessions/{s['id']}/agents/{a['id']}",
+    ).json()
+    input_slots = (refreshed.get("model_params") or {}).get("__input_slots") or []
+    assert len(input_slots) == 1
+    src = input_slots[0]["source"]
+    assert src["last_summary"] == "a tiny test pixel"
+    assert src["last_warning"] is None
+    assert src["last_image_filename"] == img["original_filename"]
+    assert isinstance(src["last_at"], int) and src["last_at"] > 0
+
+
+def test_source_input_persists_warning_when_image_not_resolved(
+    client, conn, monkeypatch,
+):
+    """Soft failure (no image bound) goes into ``last_warning`` so the
+    editor can show the same one-liner the LLM saw."""
+    _seed_catalog(conn)
+    _seed_vl_model(conn)
+    wf = _make_workflow(conn, slots=SLOTS)
+    s = _make_session(conn, workflow_id=wf["id"])
+    a = _make_agent(
+        conn, session_id=s["id"], model_name="m1",
+        model_params={"__input_slots": [_agent_with_source_input()]},
+        output_slots=[
+            {
+                "id": "p1", "origin": "preset", "preset": "positive",
+                "kind": "multiline_text", "label": "positive_prompt",
+                "description": None, "last_value": None,
+                "bound_to": {"workflow_slot_label": "positive_prompt"},
+            },
+        ],
+    )
+
+    analyze_calls: list[dict] = []
+
+    def fake_analyze(**kwargs):
+        analyze_calls.append(kwargs)
+        return "should not be called"
+
+    monkeypatch.setattr(
+        "app.services.comfy_agent_runner.lmstudio_client.analyze_image",
+        fake_analyze,
+    )
+    _patch_chat(monkeypatch, payload=_json.dumps({"positive_prompt": "ok"}))
+
+    # No source_image_overrides — runner sees no resolved id and short-
+    # circuits with a "no image bound" warning.
+    resp = client.post(
+        f"/api/comfy/sessions/{s['id']}/agents/{a['id']}/run",
+        json={"source_image_overrides": {}},
+    )
+    assert resp.status_code == 200, resp.text
+    assert analyze_calls == []
+
+    refreshed = client.get(
+        f"/api/comfy/sessions/{s['id']}/agents/{a['id']}",
+    ).json()
+    src = refreshed["model_params"]["__input_slots"][0]["source"]
+    assert src["last_summary"] is None
+    assert src["last_warning"] is not None
+    assert "no image bound" in src["last_warning"]
+    assert isinstance(src["last_at"], int)
+
 
 def test_source_input_skips_softly_when_image_not_resolved(
     client, conn, monkeypatch,

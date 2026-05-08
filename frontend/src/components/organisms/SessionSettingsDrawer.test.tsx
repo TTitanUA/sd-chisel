@@ -19,6 +19,7 @@ const baseSession: Session = {
   prompt_model_name: null,
   source_images: [],
   pinned_loras: [],
+  comfy_input_cleanup: "keep",
   hidden: false,
   created_at: 0,
   updated_at: 0,

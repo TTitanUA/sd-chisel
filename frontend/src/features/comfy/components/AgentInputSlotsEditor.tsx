@@ -27,12 +27,15 @@ import {
   MOCK_LORA_FILTER_FIELDS,
   MOCK_MODEL_FAMILIES,
   makeInputSlot,
+  overlayRunResults,
   readInputSlots,
+  stripRunResults,
   writeInputSlots,
   type AgentInputSlot,
   type InputSlotKind,
   type LoraFilter,
   type PromptGuideGenerationType,
+  type SourceInputConfig,
 } from "./agent-input-slots";
 import styles from "./AgentInputSlotsEditor.module.css";
 
@@ -50,19 +53,31 @@ export function AgentInputSlotsEditor({ agent }: { agent: Agent }) {
   const [openSlotId, setOpenSlotId] = useState<string | null>(null);
   const [showKindPicker, setShowKindPicker] = useState(false);
 
-  // Re-sync from server when no local edits are pending — same trick
-  // as useSlotDraft. Otherwise refetches would clobber unsaved work.
+  // Re-sync from server when no local edits are pending — but always
+  // overlay run-result fields (``last_summary``, ``last_warning``, …)
+  // so a fresh ``/run`` shows up in the panel without clobbering any
+  // unsaved field edits. Comparison ignores the run-result fields:
+  // they arrive from the runner, not from user edits.
   useEffect(() => {
     setDraft((prev) => {
-      if (JSON.stringify(prev) === JSON.stringify(serverSlots)) {
+      const prevStripped = JSON.stringify(stripRunResults(prev));
+      const serverStripped = JSON.stringify(stripRunResults(serverSlots));
+      if (prevStripped === serverStripped) {
+        // No unsaved edits — adopt server snapshot wholesale (this is
+        // the path that picks up new run-results when the form is clean).
         return serverSlots;
       }
-      return prev;
+      // Unsaved edits — preserve them but overlay the latest VL output
+      // onto each source slot so the user always sees the most recent
+      // run, even mid-edit.
+      return overlayRunResults(prev, serverSlots);
     });
   }, [serverSlots]);
 
   const dirty = useMemo(
-    () => JSON.stringify(draft) !== JSON.stringify(serverSlots),
+    () =>
+      JSON.stringify(stripRunResults(draft)) !==
+      JSON.stringify(stripRunResults(serverSlots)),
     [draft, serverSlots],
   );
 
@@ -422,8 +437,67 @@ function SourceForm({
           }}
         />
       </label>
+
+      <SourceVlOutput cfg={cfg} />
     </>
   );
+}
+
+/** Last VL output for the source input. The agent runner persists the
+ *  description (or soft-failure warning) onto the slot after each run
+ *  so the user can see what the model actually fed into the agent's
+ *  system prompt — without re-running the analysis. ``last_summary``
+ *  and ``last_warning`` are mutually exclusive; either, neither, or
+ *  both being absent simply means the slot has not been run yet. */
+function SourceVlOutput({ cfg }: { cfg: SourceInputConfig }) {
+  const summary = cfg.last_summary ?? null;
+  const warning = cfg.last_warning ?? null;
+  const filename = cfg.last_image_filename ?? null;
+  const at = cfg.last_at ?? null;
+  if (summary === null && warning === null) {
+    return (
+      <div className={styles.vlOutput}>
+        <div className={styles.vlOutputHead}>Last VL output</div>
+        <div className={styles.vlOutputMeta}>
+          Run the agent once to see what the VL model returned for this
+          input.
+        </div>
+      </div>
+    );
+  }
+  const isWarn = warning !== null && summary === null;
+  return (
+    <div className={styles.vlOutput}>
+      <div className={styles.vlOutputHead}>
+        <span>Last VL output</span>
+        {at !== null && (
+          <span className={styles.vlOutputMeta}>
+            · {formatRelativeTime(at)}
+          </span>
+        )}
+        {filename && (
+          <span className={styles.vlOutputMeta}>
+            · <code>{filename}</code>
+          </span>
+        )}
+      </div>
+      <div
+        className={styles.vlOutputBody}
+        data-state={isWarn ? "warning" : "ok"}
+      >
+        {isWarn ? warning : summary}
+      </div>
+    </div>
+  );
+}
+
+function formatRelativeTime(epochSec: number): string {
+  const now = Math.floor(Date.now() / 1000);
+  const diff = Math.max(0, now - epochSec);
+  if (diff < 60) return `${diff}s ago`;
+  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+  return new Date(epochSec * 1000).toLocaleString();
 }
 
 function PromptGuideForm({

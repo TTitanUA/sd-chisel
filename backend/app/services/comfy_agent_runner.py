@@ -67,6 +67,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import time
+from dataclasses import dataclass
 from typing import Any
 
 from app import config as app_config
@@ -80,6 +81,21 @@ from app.storage import (
     settings_repo,
     source_image_repo,
 )
+
+
+@dataclass
+class _SourceVlResult:
+    """One source-input slot's VL pass result, captured during system-
+    prompt assembly so the runner can persist it back onto the slot
+    after a successful run. ``summary`` carries the model output on
+    success; ``warning`` carries a one-line soft-failure message
+    (image missing, model disabled, upstream LM error, …) — the two
+    are mutually exclusive but both feed the same UI panel so the
+    user always sees *something* after a run."""
+    summary: str | None
+    warning: str | None
+    image_filename: str | None
+    when: int
 
 
 _EXT_TO_CT: dict[str, str] = {
@@ -182,6 +198,7 @@ def _run_inner(
     model = _resolve_model(agent=agent, session=session)
     endpoint = _resolve_endpoint(conn)
     sampling = _extract_sampling(agent.get("model_params"))
+    source_results: dict[str, _SourceVlResult] = {}
     system_prompt = _build_system_prompt(
         conn=conn,
         endpoint=endpoint,
@@ -189,6 +206,7 @@ def _run_inner(
         composable=composable,
         session_id=session_id,
         source_image_overrides=source_image_overrides,
+        source_results=source_results,
     )
     user_message = (agent.get("prompt") or "").strip() or "(no user prompt)"
 
@@ -219,13 +237,60 @@ def _run_inner(
         else:
             new_slots.append(slot)
 
-    agent_repo.update_agent(
-        conn, agent_id, fields={"output_slots": new_slots},
-    )
+    update_fields: dict[str, Any] = {"output_slots": new_slots}
+    if source_results:
+        merged = _merge_source_vl_results(
+            agent.get("model_params"), source_results,
+        )
+        if merged is not None:
+            update_fields["model_params"] = merged
+
+    agent_repo.update_agent(conn, agent_id, fields=update_fields)
     agent_repo.touch_last_run_at(conn, agent_id, when=int(time.time()))
     refreshed = agent_repo.get_agent(conn, agent_id)
     assert refreshed is not None
     return refreshed
+
+
+def _merge_source_vl_results(
+    model_params: dict[str, Any] | None,
+    results: dict[str, _SourceVlResult],
+) -> dict[str, Any] | None:
+    """Patch each ``source``-kind input slot's ``last_summary`` /
+    ``last_warning`` / ``last_image_filename`` / ``last_at`` fields
+    from ``results``. Returns a new ``model_params`` dict the caller
+    passes to :func:`agent_repo.update_agent`. Returns ``None`` when
+    ``model_params`` doesn't carry the input-slots blob — nothing to
+    update."""
+    if not isinstance(model_params, dict):
+        return None
+    raw = model_params.get(_INPUT_SLOTS_KEY)
+    if not isinstance(raw, list):
+        return None
+    new_slots: list[dict[str, Any]] = []
+    changed = False
+    for slot in raw:
+        if not isinstance(slot, dict):
+            new_slots.append(slot)
+            continue
+        if slot.get("kind") != "source":
+            new_slots.append(slot)
+            continue
+        slot_id = slot.get("id") if isinstance(slot.get("id"), str) else None
+        result = results.get(slot_id or "")
+        if result is None:
+            new_slots.append(slot)
+            continue
+        cfg = dict(slot.get("source") or {})
+        cfg["last_summary"] = result.summary
+        cfg["last_warning"] = result.warning
+        cfg["last_image_filename"] = result.image_filename
+        cfg["last_at"] = result.when
+        new_slots.append({**slot, "source": cfg})
+        changed = True
+    if not changed:
+        return None
+    return {**model_params, _INPUT_SLOTS_KEY: new_slots}
 
 
 # --- selection ------------------------------------------------------------
@@ -298,6 +363,7 @@ def _build_system_prompt(
     composable: list[dict[str, Any]],
     session_id: str,
     source_image_overrides: dict[str, str | None],
+    source_results: dict[str, _SourceVlResult] | None = None,
 ) -> str:
     parts: list[str] = []
     parts.append(
@@ -315,6 +381,7 @@ def _build_system_prompt(
         slots=inputs,
         session_id=session_id,
         source_image_overrides=source_image_overrides,
+        source_results=source_results,
     )
     if extras:
         parts.append("Additional context:")
@@ -364,11 +431,18 @@ def _input_slot_additions(
     slots: list[dict[str, Any]],
     session_id: str,
     source_image_overrides: dict[str, str | None],
+    source_results: dict[str, _SourceVlResult] | None = None,
 ) -> list[str]:
     """Render each input slot to a system-prompt fragment. Unknown
     kinds and unresolved references are silently skipped — the
     editor surfaces those as warnings; the runner does not fail
-    the call over a missing family or a misconfigured source slot."""
+    the call over a missing family or a misconfigured source slot.
+
+    ``source_results``, when provided, is mutated in place: every
+    source-kind input slot's :class:`_SourceVlResult` is recorded
+    keyed by the slot's ``id`` so the caller can persist them back
+    onto the slot after a successful run. Slots with no ``id`` are
+    skipped (defence — the frontend always assigns one)."""
     parts: list[str] = []
     for s in slots:
         if s["kind"] == "system":
@@ -386,15 +460,18 @@ def _input_slot_additions(
                 if rendered:
                     parts.append(rendered)
         elif s["kind"] == "source":
-            rendered = _render_source(
+            label = s.get("label") or "source"
+            slot_id = s.get("id") if isinstance(s.get("id"), str) else None
+            result = _render_source(
                 conn,
                 endpoint=endpoint,
                 slot=s,
                 session_id=session_id,
-                resolved_image_id=source_image_overrides.get(s.get("id") or ""),
+                resolved_image_id=source_image_overrides.get(slot_id or ""),
             )
-            if rendered:
-                parts.append(rendered)
+            if source_results is not None and slot_id:
+                source_results[slot_id] = result
+            parts.append(_format_source_for_prompt(label, result))
         # loras: see module docstring.
     return parts
 
@@ -406,44 +483,68 @@ def _render_source(
     slot: dict[str, Any],
     session_id: str,
     resolved_image_id: str | None,
-) -> str | None:
-    """Run a VL pass on the bound session image and return a
-    system-prompt fragment. Soft failures (no image bound, model
-    missing, image not on disk, upstream LM error) are reported
-    inline as a one-liner so the LLM still sees that the user
-    intended to attach an image — better than silently dropping
-    context. ``LmError`` from the upstream call is *not* re-raised:
-    the agent's own composition pass should still proceed."""
-    label = slot.get("label") or "source"
+) -> _SourceVlResult:
+    """Run a VL pass on the bound session image and return a structured
+    result with the description (or a one-line soft-failure message).
+    Soft failures (no image bound, model missing, image not on disk,
+    upstream LM error) are reported as ``warning`` so the LLM still
+    sees that the user intended to attach an image — better than
+    silently dropping context. ``LmError`` from the upstream call is
+    *not* re-raised: the agent's own composition pass should still
+    proceed.
+
+    The runner persists this result back onto the input slot after a
+    successful run so the UI can show "what the VL model saw" without
+    re-running the analysis. ``summary`` and ``warning`` are mutually
+    exclusive — exactly one is non-null on return."""
     cfg = slot.get("source") or {}
+    when = int(time.time())
+
+    def fail(msg: str, *, filename: str | None = None) -> _SourceVlResult:
+        return _SourceVlResult(
+            summary=None, warning=msg, image_filename=filename, when=when,
+        )
+
     if not resolved_image_id:
-        return f"[{label}] no image bound (configure a source slot)."
+        return fail("no image bound (configure a source slot).")
     image_row = source_image_repo.get(conn, resolved_image_id)
     if image_row is None or image_row.get("session_id") != session_id:
-        return f"[{label}] bound image not found on this session."
+        return fail("bound image not found on this session.")
+    image_filename = image_row.get("original_filename")
 
     vl_model = (cfg.get("vl_model") or "").strip()
     if not vl_model:
-        return f"[{label}] no VL model selected — image was not analysed."
+        return fail(
+            "no VL model selected — image was not analysed.",
+            filename=image_filename,
+        )
     model_row = settings_repo.get_lm_model(conn, vl_model)
     if model_row is None or not model_row["enabled"] or not model_row["vision"]:
-        return (
-            f"[{label}] VL model {vl_model!r} is disabled or not "
-            "vision-capable — image was not analysed."
+        return fail(
+            f"VL model {vl_model!r} is disabled or not vision-capable — "
+            "image was not analysed.",
+            filename=image_filename,
         )
 
     try:
         data_root = app_config.resolve_data_root().resolve()
         image_path = (data_root / image_row["path"]).resolve()
         if not str(image_path).startswith(str(data_root)) or not image_path.is_file():
-            return f"[{label}] bound image is missing on disk."
+            return fail(
+                "bound image is missing on disk.", filename=image_filename,
+            )
         ext = image_path.suffix.lower()
         content_type = _EXT_TO_CT.get(ext)
         if content_type is None:
-            return f"[{label}] unsupported image format ({ext!r})."
+            return fail(
+                f"unsupported image format ({ext!r}).",
+                filename=image_filename,
+            )
         image_bytes = image_path.read_bytes()
     except OSError as exc:
-        return f"[{label}] could not read image: {exc}."
+        return fail(
+            f"could not read image: {exc}.", filename=image_filename,
+        )
 
     sampling: dict[str, Any] = {}
     if isinstance(cfg.get("vl_temperature"), (int, float)):
@@ -461,8 +562,24 @@ def _render_source(
             sampling=sampling or None,
         )
     except lmstudio_client.LmError as exc:
-        return f"[{label}] VL call failed: {exc.detail}."
-    return f"[{label}] image description ({image_row['original_filename']}):\n{summary}"
+        return fail(
+            f"VL call failed: {exc.detail}.", filename=image_filename,
+        )
+    return _SourceVlResult(
+        summary=summary,
+        warning=None,
+        image_filename=image_filename,
+        when=when,
+    )
+
+
+def _format_source_for_prompt(label: str, result: _SourceVlResult) -> str:
+    """Render a :class:`_SourceVlResult` into the system-prompt
+    fragment shape the LLM expects."""
+    if result.summary is not None:
+        filename = result.image_filename or "(unknown filename)"
+        return f"[{label}] image description ({filename}):\n{result.summary}"
+    return f"[{label}] {result.warning or 'unknown VL state'}"
 
 
 def _render_prompt_guide(

@@ -26,6 +26,7 @@ const FAKE_SESSION = {
   }>,
   vl_model_name: null,
   prompt_model_name: null,
+  comfy_input_cleanup: "keep" as const,
   hidden: false,
   created_at: 1,
   updated_at: 1,

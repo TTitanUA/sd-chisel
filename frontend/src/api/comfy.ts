@@ -295,6 +295,49 @@ export type SlotMapResponse = {
   inferred_mode: InferredMode;
 };
 
+// Phase 3 only drives image inputs / outputs through these node
+// classes. Mirrors backend's IMAGE_LOADER_CLASSES / IMAGE_SAVER_CLASSES
+// so the UI can filter pickers + show a "LoadImage only" hint without
+// a round-trip.
+export const IMAGE_LOADER_CLASSES: ReadonlySet<string> = new Set([
+  "LoadImage",
+]);
+export const IMAGE_SAVER_CLASSES: ReadonlySet<string> = new Set([
+  "SaveImage",
+]);
+
+// --- Output slot map (PR-2 prep, symmetric to slot map) ----------------
+
+export type OutputKind = "image";
+
+export type OutputSlotDefinition = {
+  label: string;
+  node_id: string;
+  kind: OutputKind;
+};
+
+export type OutputSlotMapV1 = {
+  version: 1;
+  outputs: OutputSlotDefinition[];
+};
+
+export type OutputCandidate = {
+  node_id: string;
+  node_class_type: string;
+  node_display_name: string | null;
+  node_title: string | null;
+  node_in_catalog: boolean;
+  kind: OutputKind;
+  filename_prefix: string | null;
+};
+
+export type OutputSlotMapResponse = {
+  session_id: string;
+  workflow_id: string;
+  output_slot_map: OutputSlotMapV1;
+  candidates: OutputCandidate[];
+};
+
 export const comfyKeys = {
   workflows: () => ["comfy", "workflows"] as const,
   workflow: (id: string) => ["comfy", "workflows", id] as const,
@@ -302,6 +345,8 @@ export const comfyKeys = {
     ["comfy", "sessions", sessionId, "readiness"] as const,
   slotMap: (sessionId: string) =>
     ["comfy", "sessions", sessionId, "slot_map"] as const,
+  outputSlotMap: (sessionId: string) =>
+    ["comfy", "sessions", sessionId, "output_slot_map"] as const,
   agents: (sessionId: string) =>
     ["comfy", "sessions", sessionId, "agents"] as const,
   agent: (sessionId: string, agentId: string) =>
@@ -425,6 +470,15 @@ export const comfyApi = {
     apiFetch<SlotMapResponse>(
       `/api/comfy/sessions/${encodeURIComponent(sessionId)}/slot_map`,
       { method: "PUT", body: JSON.stringify({ slots }) },
+    ),
+  getOutputSlotMap: (sessionId: string) =>
+    apiFetch<OutputSlotMapResponse>(
+      `/api/comfy/sessions/${encodeURIComponent(sessionId)}/output_slot_map`,
+    ),
+  putOutputSlotMap: (sessionId: string, outputs: OutputSlotDefinition[]) =>
+    apiFetch<OutputSlotMapResponse>(
+      `/api/comfy/sessions/${encodeURIComponent(sessionId)}/output_slot_map`,
+      { method: "PUT", body: JSON.stringify({ outputs }) },
     ),
   // --- agents -----------------------------------------------------------
   listAgents: (sessionId: string) =>
@@ -580,6 +634,29 @@ export function useSaveSlotMap(sessionId: string | null | undefined) {
     onSuccess: (data) => {
       if (sessionId) {
         client.setQueryData(comfyKeys.slotMap(sessionId), data);
+      }
+    },
+  });
+}
+
+export function useOutputSlotMap(sessionId: string | null | undefined) {
+  return useQuery({
+    queryKey: sessionId
+      ? comfyKeys.outputSlotMap(sessionId)
+      : ["comfy", "output_slot_map", "unset"],
+    queryFn: () => comfyApi.getOutputSlotMap(sessionId as string),
+    enabled: !!sessionId,
+  });
+}
+
+export function useSaveOutputSlotMap(sessionId: string | null | undefined) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (outputs: OutputSlotDefinition[]) =>
+      comfyApi.putOutputSlotMap(sessionId as string, outputs),
+    onSuccess: (data) => {
+      if (sessionId) {
+        client.setQueryData(comfyKeys.outputSlotMap(sessionId), data);
       }
     },
   });

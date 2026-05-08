@@ -51,71 +51,120 @@ export function MappingTreeDrawer({
                 : "Workflow not loaded."}
             </div>
           )}
-          {rows.map((node) => (
-            <div key={node.nodeId} className={styles.node}>
-              <div className={styles.nodeHead}>
-                <span className={styles.nodeId}>#{node.nodeId}</span>
-                <span className={styles.classType}>{node.classType}</span>
-                {node.title && (
-                  <span className={styles.title}>{node.title}</span>
-                )}
-              </div>
-              <div className={styles.inputs}>
-                {node.inputs.map((input) => {
-                  const isActive =
-                    active?.nodeId === node.nodeId &&
-                    active.inputName === input.name;
-                  const live = resolveLiveValue(input, {
-                    agents,
-                    sourceSlots,
-                    session,
-                  });
-                  const placeholder =
-                    live.source === "llm" ? "no value yet — run agent" : "—";
-                  const valueText =
-                    live.value === null || live.value === undefined
-                      ? placeholder
-                      : formatValue(live.value);
-                  return (
-                    <button
-                      key={input.name}
-                      type="button"
-                      className={`${styles.inputRow} ${isActive ? styles.active : ""}`}
-                      data-mapped={!!input.mappedSlot}
-                      onClick={() =>
-                        setActive({
-                          nodeId: node.nodeId,
-                          inputName: input.name,
-                        })
+          {rows.map((node) => {
+            const saver = node.outputSaver;
+            return (
+              <div
+                key={node.nodeId}
+                className={styles.node}
+                data-saver={!!saver}
+              >
+                <div className={styles.nodeHead}>
+                  <span className={styles.nodeId}>#{node.nodeId}</span>
+                  <span className={styles.classType}>{node.classType}</span>
+                  {node.title && (
+                    <span className={styles.title}>{node.title}</span>
+                  )}
+                  {saver && (
+                    <span
+                      className={styles.outputClaim}
+                      data-claimed={saver.outputLabel !== null}
+                      title={
+                        saver.outputLabel
+                          ? "This SaveImage is captured into the session output map"
+                          : "SaveImage nodes are reserved for the output map — open the Outputs panel to include this one"
                       }
                     >
-                      <span className={styles.inputName}>{input.name}</span>
-                      <span
-                        className={styles.inputValue}
-                        title={formatValueFull(live.value)}
-                      >
-                        {valueText}
-                      </span>
-                      {input.mappedSlot ? (
-                        <span
-                          className={styles.pill}
-                          data-binding={input.mappedSlot.binding}
+                      {saver.outputLabel
+                        ? `Output › ${saver.outputLabel}`
+                        : "Reserved for output"}
+                    </span>
+                  )}
+                </div>
+                <div className={styles.inputs}>
+                  {node.inputs.map((input) => {
+                    if (saver) {
+                      // Saver-node inputs are owned by the output slot
+                      // map; rendering them as buttons would invite a
+                      // rejected PUT. Show a locked, non-interactive row.
+                      return (
+                        <div
+                          key={input.name}
+                          className={styles.lockedRow}
+                          title="Saver-node inputs are owned by the output map; map this node in the Outputs panel instead."
                         >
-                          ↳ {input.mappedSlot.label}
+                          <span className={styles.inputName}>
+                            {input.name}
+                          </span>
+                          <span
+                            className={styles.inputValue}
+                            title={formatValueFull(input.rawValue)}
+                          >
+                            {formatValue(input.rawValue)}
+                          </span>
+                          <span className={styles.lockHint}>
+                            managed by Outputs
+                          </span>
+                        </div>
+                      );
+                    }
+                    const isActive =
+                      active?.nodeId === node.nodeId &&
+                      active.inputName === input.name;
+                    const live = resolveLiveValue(input, {
+                      agents,
+                      sourceSlots,
+                      session,
+                    });
+                    const placeholder =
+                      live.source === "llm"
+                        ? "no value yet — run agent"
+                        : "—";
+                    const valueText =
+                      live.value === null || live.value === undefined
+                        ? placeholder
+                        : formatValue(live.value);
+                    return (
+                      <button
+                        key={input.name}
+                        type="button"
+                        className={`${styles.inputRow} ${isActive ? styles.active : ""}`}
+                        data-mapped={!!input.mappedSlot}
+                        onClick={() =>
+                          setActive({
+                            nodeId: node.nodeId,
+                            inputName: input.name,
+                          })
+                        }
+                      >
+                        <span className={styles.inputName}>{input.name}</span>
+                        <span
+                          className={styles.inputValue}
+                          title={formatValueFull(live.value)}
+                        >
+                          {valueText}
                         </span>
-                      ) : input.candidate ? (
-                        <span className={styles.addHint}>
-                          + map ({SLOT_KIND_LABEL[input.candidate.kind]})
-                        </span>
-                      ) : (
-                        <span className={styles.dim}>(unsupported)</span>
-                      )}
-                    </button>
-                  );
-                })}
+                        {input.mappedSlot ? (
+                          <span
+                            className={styles.pill}
+                            data-binding={input.mappedSlot.binding}
+                          >
+                            ↳ {input.mappedSlot.label}
+                          </span>
+                        ) : input.candidate ? (
+                          <span className={styles.addHint}>
+                            + map ({SLOT_KIND_LABEL[input.candidate.kind]})
+                          </span>
+                        ) : (
+                          <span className={styles.dim}>(unsupported)</span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </MappingTreeShell>

@@ -34,6 +34,8 @@ export function imageDisplayName(image: Pick<SourceImage, "image_number">): stri
 
 export type SamplingBundle = Record<string, number>;
 
+export type ComfyInputCleanup = "keep" | "delete";
+
 export type Session = {
   id: string;
   project_id: string;
@@ -50,6 +52,7 @@ export type Session = {
   summarize_settings?: SamplingBundle | null;
   generate_settings?: SamplingBundle | null;
   comfy_workflow_id?: string | null;
+  comfy_input_cleanup: ComfyInputCleanup;
   hidden: boolean;
   created_at: number;
   updated_at: number;
@@ -75,6 +78,8 @@ export type SessionUpdate = {
   chat_settings?: SamplingBundle | null;
   summarize_settings?: SamplingBundle | null;
   generate_settings?: SamplingBundle | null;
+  // Per-session ComfyUI input cleanup policy. Absent leaves the column alone.
+  comfy_input_cleanup?: ComfyInputCleanup;
 };
 
 export type Action = "analyze" | "chat" | "summarize" | "generate";

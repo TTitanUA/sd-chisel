@@ -44,6 +44,13 @@ class WorkflowOut(StrictModel):
     ``version: 1`` and are upgraded on read by
     :func:`app.services.comfy_slot_map_service.upgrade_slot_map`).
     See :class:`SlotMapOut` for the response contract."""
+    output_slot_map: dict[str, Any] | None = None
+    """PR-2 output slot list — which SaveImage nodes Phase 3's
+    generation cycle will collect. ``None`` means no map saved yet;
+    the editor seeds it from :func:`app.services.
+    comfy_output_slot_service.auto_default_outputs`. Stored shape is
+    ``{"version": 1, "outputs": [...]}``. See :class:`OutputSlotMapOut`
+    for the session-scoped response contract."""
 
 
 class WorkflowList(StrictModel):
@@ -257,6 +264,32 @@ DEFAULT_BINDING: dict[SlotKind, SlotBinding] = {
 
 # Kinds that, when wired as ``user_image``, mean the session is i2i.
 USER_IMAGE_KINDS: frozenset[SlotKind] = frozenset({"image", "image_alpha"})
+
+
+# --- Phase 3 prep: which class_types sd-chisel can drive end-to-end -------
+#
+# The Phase 3 generation cycle uploads each session image to ComfyUI's
+# input dir and patches the workflow's loader nodes with the returned
+# filename, then it copies the workflow's saver-node outputs back into
+# ``data/images/<sid>/output/<gid>/``. Both halves only know one node
+# class apiece — ``LoadImage`` for input, ``SaveImage`` for output —
+# because their input shapes (filename string + optional subfolder; and
+# ``filename_prefix`` + ``images`` wire) are the only ones we model.
+# Custom loaders / savers (LoadImageBatch, LoadImageFromUrl, the various
+# SaveImageS3 derivatives, etc.) declare similar combo flags but expect
+# different inputs, so they wouldn't survive the patch step. The slot
+# classifier and the output-slot service both gate on these sets.
+
+IMAGE_LOADER_CLASSES: frozenset[str] = frozenset({"LoadImage"})
+"""Node classes whose ``image_upload``-flagged inputs we treat as
+``image`` / ``image_alpha`` slot candidates. Any other class with the
+same flag is ignored — we cannot patch it correctly."""
+
+IMAGE_SAVER_CLASSES: frozenset[str] = frozenset({"SaveImage"})
+"""Node classes that emit ``image`` outputs sd-chisel can capture. The
+output-slot map only offers candidates from this set; SaveImage results
+sd-chisel did not map are reported as "untracked" warnings rather than
+copied."""
 
 
 # A label may not collide with another label and must be filesystem /
@@ -511,3 +544,69 @@ class AgentRunRequest(StrictModel):
     prompt rather than aborting the run."""
 
     source_image_overrides: dict[str, str | None] | None = None
+
+
+# --- Output slot map (Phase 3 prep, symmetric to slot_map) ----------------
+#
+# Where ``slot_map_json`` declares which of the workflow's *inputs*
+# sd-chisel fills, ``output_slot_map_json`` declares which of the
+# workflow's *outputs* sd-chisel captures. Phase 3's generation cycle
+# walks this list when copying SaveImage results from ComfyUI's output
+# dir into ``data/images/<sid>/output/<gid>/<label>.<ext>``. Outputs not
+# in the map are reported as "untracked" warnings, not collected.
+#
+# Stored shape on ``comfy_workflows.output_slot_map_json``:
+#
+#     {"version": 1, "outputs": [
+#         {"label": "final", "node_id": "9",  "kind": "image"},
+#         {"label": "small", "node_id": "12", "kind": "image"},
+#     ]}
+#
+# Only ``kind: "image"`` is supported in PR-2; the field is reserved so
+# follow-ups (latent dumps, animated outputs) extend without a schema
+# break. Validator rejects (a) labels that don't pass ``_LABEL_PATTERN``,
+# (b) duplicate labels, (c) ``node_id`` not in :data:`IMAGE_SAVER_CLASSES`.
+
+OutputKind = Literal["image"]
+
+
+ALL_OUTPUT_KINDS: tuple[OutputKind, ...] = ("image",)
+
+
+class OutputSlotDefinition(StrictModel):
+    """One labelled output slot — a SaveImage node we will collect."""
+    label: str = Field(min_length=1, max_length=64, pattern=_LABEL_PATTERN)
+    node_id: str = Field(min_length=1)
+    kind: OutputKind = "image"
+
+
+class OutputSlotMapV1(StrictModel):
+    version: Literal[1] = 1
+    outputs: list[OutputSlotDefinition] = Field(default_factory=list)
+
+
+class OutputCandidate(StrictModel):
+    """One eligible output node the editor can offer."""
+    node_id: str
+    node_class_type: str
+    node_display_name: str | None
+    node_title: str | None
+    node_in_catalog: bool
+    kind: OutputKind = "image"
+    filename_prefix: str | None = None
+    """The ``filename_prefix`` literal from SaveImage's inputs, when
+    present in the graph. Used by the editor to pre-fill a sensible
+    default label (e.g. ``ComfyUI`` → label ``comfyui``)."""
+
+
+class OutputSlotMapOut(StrictModel):
+    session_id: str
+    workflow_id: str
+    output_slot_map: OutputSlotMapV1
+    candidates: list[OutputCandidate]
+
+
+class OutputSlotMapUpdate(StrictModel):
+    """Body of PUT /api/comfy/sessions/{id}/output_slot_map. Send the
+    full desired list — replaced atomically."""
+    outputs: list[OutputSlotDefinition]

@@ -8,6 +8,16 @@ from pathlib import Path
 _VERSION_RE = re.compile(r"^(\d{3,})_.+\.sql$")
 
 
+# Resolved path of the bundled migrations dir (``backend/migrations/``).
+# Both the ``db-init`` CLI and the FastAPI startup hook read from this
+# constant so the two code paths can never drift to different
+# directories. ``Path(__file__)`` walks: storage → app → backend →
+# migrations.
+DEFAULT_MIGRATIONS_DIR: Path = (
+    Path(__file__).resolve().parent.parent.parent / "migrations"
+)
+
+
 def _ensure_table(conn: sqlite3.Connection) -> None:
     conn.execute(
         "CREATE TABLE IF NOT EXISTS schema_migrations ("

@@ -27,6 +27,8 @@ from app.models.comfy import (
     NodeList,
     NodeOut,
     NodeUpdate,
+    OutputSlotMapOut,
+    OutputSlotMapUpdate,
     PackDetailOut,
     PackList,
     ReadinessOut,
@@ -44,6 +46,7 @@ from app.services import (
     comfy_agent_service,
     comfy_client,
     comfy_import_service,
+    comfy_output_slot_service,
     comfy_readiness,
     comfy_slot_map_service,
     lmstudio_client,
@@ -79,6 +82,7 @@ def _to_out(row: dict) -> dict:
         "graph_hash": row["graph_hash"],
         "created_at": row["created_at"],
         "slot_map": row.get("slot_map"),
+        "output_slot_map": row.get("output_slot_map"),
     }
 
 
@@ -279,6 +283,61 @@ def put_session_slot_map(
         "slot_map": payload,
         "candidates": candidates,
         "inferred_mode": comfy_slot_map_service.infer_mode(payload),
+    }
+
+
+# --- output slot map (Phase 3 prep, symmetric to slot_map) ----------------
+
+
+@router.get(
+    "/api/comfy/sessions/{session_id}/output_slot_map",
+    response_model=OutputSlotMapOut,
+)
+def get_session_output_slot_map(session_id: str, conn: Conn) -> dict:
+    workflow = _resolve_comfy_session_workflow(conn, session_id)
+    candidates = comfy_output_slot_service.compute_output_candidates(
+        conn=conn, graph=workflow["graph"],
+    )
+    upgraded = comfy_output_slot_service.upgrade_output_slot_map(
+        raw=workflow.get("output_slot_map"), candidates=candidates,
+    )
+    return {
+        "session_id": session_id,
+        "workflow_id": workflow["id"],
+        "output_slot_map": upgraded,
+        "candidates": candidates,
+    }
+
+
+@router.put(
+    "/api/comfy/sessions/{session_id}/output_slot_map",
+    response_model=OutputSlotMapOut,
+)
+def put_session_output_slot_map(
+    session_id: str, body: OutputSlotMapUpdate, conn: Conn,
+) -> dict:
+    workflow = _resolve_comfy_session_workflow(conn, session_id)
+    candidates = comfy_output_slot_service.compute_output_candidates(
+        conn=conn, graph=workflow["graph"],
+    )
+    incoming = [slot.model_dump() for slot in body.outputs]
+    try:
+        normalised = comfy_output_slot_service.validate_output_slots(
+            outputs=incoming, candidates=candidates,
+        )
+    except comfy_output_slot_service.OutputSlotMapValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    payload = {"version": 1, "outputs": normalised}
+    repo.set_output_slot_map(
+        conn,
+        workflow_id=workflow["id"],
+        output_slot_map=payload,
+    )
+    return {
+        "session_id": session_id,
+        "workflow_id": workflow["id"],
+        "output_slot_map": payload,
+        "candidates": candidates,
     }
 
 

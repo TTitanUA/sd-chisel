@@ -1087,6 +1087,16 @@ LM Studio card):
 - `comfyui_api_key` — optional auth header for reverse-proxied or
   cloud ComfyUI. Read but not yet attached to outbound requests
   outside the connection check (Phase 3 will use it).
+- `comfyui_input_dir`, `comfyui_output_dir` — optional explicit
+  overrides for ComfyUI's input / output directories. Used by Phase 3
+  to upload session images and (when enabled) clean them up, and to
+  read SaveImage results back. When unset, the resolver
+  (`app.services.comfy_paths`) falls back to
+  `<comfyui_path>/{input,output}` — the ComfyUI default. The settings
+  GET response carries both the raw override (`input_dir` /
+  `output_dir`) and the resolved effective path
+  (`effective_input_dir` / `effective_output_dir`) so the UI can show
+  exactly where files will go.
 
 Endpoints: `GET /api/settings/comfyui`, `PUT /api/settings/comfyui`,
 `POST /api/settings/comfyui/check`. The check runs `GET /system_stats`
@@ -1150,11 +1160,23 @@ time: any wired `binding=user_image` slot ⇒ `i2i`, otherwise
 Legacy `i2i` / `t2i` (non-comfy) sessions keep their explicit
 `session_type` column.
 
+**Per-session input cleanup policy.** Each session row carries a
+`comfy_input_cleanup` column (`keep` | `delete`, default `keep`) the
+user toggles in Session settings. It tells Phase 3 what to do with
+files sd-chisel uploaded into ComfyUI's input dir after a generation
+finishes: `keep` leaves them (cheap re-runs, easier debugging);
+`delete` removes them via direct filesystem access. `delete` only
+works when the input dir is reachable from sd-chisel's process —
+when the resolver returns no path, Phase 3 will soft-degrade to
+`keep` and surface a one-line warning. The column is read by every
+session type but only consumed by `comfy` / `comfy_mock`.
+
 ### 10.3. Workflow uploads
 
 `comfy_workflows` stores API-format graphs alongside `graph_hash`
-(sha256 of the canonicalised graph) and `slot_map_json` (Phase 2,
-see §10.6). Endpoints:
+(sha256 of the canonicalised graph), `slot_map_json` (Phase 2.5,
+see §10.6), and `output_slot_map_json` (PR-2 prep, the SaveImage
+capture list — also §10.6). Endpoints:
 
 - `POST /api/comfy/workflows` — upload. `?on_conflict=error|replace
   |rename` controls duplicate-hash behaviour; the `error` default
@@ -1251,8 +1273,16 @@ A closed enum, set per slot:
 - `text`, `multiline_text` — `STRING` inputs in the graph.
   Multiline is set from the `STRING` widget's `multiline` flag.
 - `image`, `image_alpha` — combos flagged `image_upload=true` /
-  `mask=true` in the catalog's raw schema (LoadImage-style
-  pickers).
+  `mask=true` in the catalog's raw schema, **and only when the
+  declaring node's class is `LoadImage`**. sd-chisel's Phase 3
+  generation cycle uploads via `/upload/image` and patches
+  `inputs.image` (+ optional `inputs.subfolder`) on the loader; that
+  contract is specific to the core `LoadImage` node. Custom loaders
+  (`LoadImageFromUrl`, `LoadImageBatch`, …) declare the same flags
+  but expect different inputs and would silently produce wrong
+  results, so they are downgraded to `enum` candidates that the user
+  can still freeze manually. The validator enforces the same
+  constraint as defence in depth.
 - `number_int`, `number_float`, `boolean` — primitive scalars
   (INT / FLOAT / BOOLEAN widgets). Range / step / default are
   carried over from the schema in the candidate's metadata.
@@ -1332,6 +1362,54 @@ no migration SQL was needed.
 Slots are independent: saving partial lists is fine; generation
 (Phase 3) will simply skip the unbound graph inputs and let the
 workflow's baked literals stand.
+
+#### Output slot map (PR-2 prep, symmetric to slot map)
+
+Where the slot map declares which workflow *inputs* sd-chisel fills,
+the **output slot map** declares which workflow *outputs* it
+captures. Phase 3's generation cycle reads this map to know which
+SaveImage results to copy into
+`data/images/<session_id>/output/<generation_id>/<label>.<ext>`;
+SaveImage results not in the map are reported as "untracked"
+warnings and left alone in ComfyUI's output dir.
+
+Stored on `comfy_workflows.output_slot_map_json` as
+`{"version": 1, "outputs": [{"label": "...", "node_id": "...",
+"kind": "image"}]}`. Only `kind: "image"` is supported in PR-2;
+the field is reserved so follow-ups (latent dumps, animated
+outputs) can extend without a schema break.
+
+**Class allow-list.** Output candidates are only emitted for nodes
+whose `class_type == "SaveImage"`. Custom savers (`SaveImageS3`,
+`SaveImageWebsocket`, video encoders) declare similar IMAGE outputs
+but expect different on-disk artefacts; PR-2 keeps the surface
+narrow and rejects them at the validator. The constant lives in
+`app.models.comfy.IMAGE_SAVER_CLASSES` alongside the LoadImage
+allow-list for symmetry.
+
+**Read-time seeding.** When the column is NULL the API seeds one
+output per SaveImage candidate, label derived from each node's
+`filename_prefix` literal (sanitised through a safe-identifier
+filter; `output_<node_id>` when the prefix is empty / colliding).
+The user can rename labels through the editor; saved labels round-
+trip verbatim and are filtered against the live SaveImage set on
+every GET (entries pointing at a node that's no longer SaveImage-
+eligible are silently dropped).
+
+**Validation.** `validate_output_slots` rejects empty labels,
+duplicate labels, labels that don't match the same safe-identifier
+pattern as input slots, and `node_id` values not in the candidate
+set (i.e. not a SaveImage in the live graph).
+
+**API.**
+
+- `GET /api/comfy/sessions/{id}/output_slot_map` — returns
+  `{session_id, workflow_id, output_slot_map: {version, outputs[]},
+  candidates: [...]}`. Candidate iteration order is lexical by
+  node id so the seed list is deterministic.
+- `PUT /api/comfy/sessions/{id}/output_slot_map` — full-replace
+  with body `{outputs: [...]}`. 422 on the rejection scenarios
+  above.
 
 ### 10.7. Phase 3 prep — dynamic orchestrator schema
 
@@ -1414,6 +1492,27 @@ Brief drawer + SSE wiring for the header `Generate` button (it
 replaces the `GenerateModal` for comfy). None of this exists yet —
 the comfy workspace ends at slot mapping plus payload composition
 for now.
+
+PR-2 has prepared the surrounding contracts the cycle will consume:
+
+- **Generation id.** Each Phase 3 run is stamped with a
+  `YYYYMMDD-HHMMSS-rrrrrr` id (UTC stamp + six-hex random suffix —
+  see `app.utils.generation_id`). The format sorts lexicographically
+  in chronological order, is filesystem-safe on every supported
+  platform, and gives 16M random combinations per second
+  (collision-free in practice). Used as both the history-row
+  identifier and the on-disk folder name.
+- **On-disk layout.** Outputs land at
+  `data/images/<session_id>/output/<generation_id>/<label>.<ext>`,
+  one file per output slot from §10.6's output map. SaveImage
+  results not in the map are reported as "untracked" warnings on
+  the run row, not copied. Inputs sd-chisel uploaded into ComfyUI
+  for that run live in the resolved `comfyui_input_dir`; the
+  per-session `comfy_input_cleanup` policy decides whether they
+  survive the run.
+- **Loader / saver allow-list.** Phase 3's patch + capture steps
+  only drive `LoadImage` / `SaveImage` nodes (§10.6 + §10.1). The
+  classifier and validators already enforce this end-to-end.
 
 **Superseded by §10.8 — agents redesign.** The single-shot
 "orchestrator owns every `binding=llm` slot" model described above

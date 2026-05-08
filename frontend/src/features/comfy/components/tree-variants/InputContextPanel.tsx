@@ -87,7 +87,8 @@ export function InputContextPanel({
     );
   }
 
-  const { input } = activeRow;
+  const { node, input } = activeRow;
+  const saver = node.outputSaver;
   return (
     <div className={styles.editorBody}>
       <div className={styles.editorIntro}>
@@ -101,7 +102,15 @@ export function InputContextPanel({
         )}
       </div>
       <ValueSummary input={input} />
-      {input.mappedSlot ? (
+      {saver ? (
+        <em className={styles.editorEmpty}>
+          This input belongs to <code>{node.classType}</code>, a saver node
+          owned by the output slot map. {saver.outputLabel
+            ? `It is captured as output "${saver.outputLabel}". `
+            : "Include it in the Outputs panel to capture its result. "}
+          Saver-node inputs are not slot-mappable.
+        </em>
+      ) : input.mappedSlot ? (
         <EditMapped helpers={helpers} input={input} />
       ) : input.candidate ? (
         <CreateForm helpers={helpers} candidate={input.candidate} />
@@ -318,6 +327,12 @@ function EditMapped({
               create one (Main / Scene reference / Text-only reference).
             </span>
           )}
+          <span className={styles.fieldHint}>
+            sd-chisel uploads the bound source image to ComfyUI's input
+            directory and patches the <code>LoadImage</code> node at
+            generation time. Only <code>LoadImage</code> nodes are
+            supported as image sources.
+          </span>
         </label>
       )}
 

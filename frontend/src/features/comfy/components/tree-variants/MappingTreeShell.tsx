@@ -14,7 +14,12 @@
  *  See docs/comfy-agents-ui-mock-plan.md.
  */
 import { useMemo, useState, type ReactNode } from "react";
-import type { CandidateBuckets, Workflow } from "@/api/comfy";
+import {
+  useOutputSlotMap,
+  type CandidateBuckets,
+  type Workflow,
+} from "@/api/comfy";
+import { useComfy } from "../../state/useComfy";
 import { SlotSaveBar } from "../slot-variants/SlotSaveBar";
 import type { SlotDraftHelpers } from "../slot-variants/useSlotDraft";
 import { InputContextPanel, type ActiveInput } from "./InputContextPanel";
@@ -42,10 +47,23 @@ export function MappingTreeShell({
   treeLabel: string;
   children: (props: MappingTreeShellChildProps) => ReactNode;
 }) {
+  const { session } = useComfy();
+  const outputSlotMapQuery = useOutputSlotMap(session.id);
   const [active, setActive] = useState<ActiveInput | null>(null);
   const rows = useMemo(
-    () => buildMappingRows(workflow, helpers.draft ?? [], candidates),
-    [workflow, helpers.draft, candidates],
+    () =>
+      buildMappingRows(
+        workflow,
+        helpers.draft ?? [],
+        candidates,
+        outputSlotMapQuery.data?.output_slot_map ?? null,
+      ),
+    [
+      workflow,
+      helpers.draft,
+      candidates,
+      outputSlotMapQuery.data?.output_slot_map,
+    ],
   );
   const draft = helpers.draft ?? [];
   return (

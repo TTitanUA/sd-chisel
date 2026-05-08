@@ -9,6 +9,7 @@ import { useLoras, useModels, type Lora } from "@/api/library";
 import {
   sessionsApi,
   useSessionInvalidation,
+  type ComfyInputCleanup,
   type PinnedLora,
   type Session,
 } from "@/api/sessions";
@@ -38,6 +39,9 @@ export function SessionSettingsDrawer({
   const [vlModel, setVlModel] = useState(session.vl_model_name ?? "");
   const [promptModel, setPromptModel] = useState(session.prompt_model_name ?? "");
   const [loraSearch, setLoraSearch] = useState("");
+  const [comfyInputCleanup, setComfyInputCleanup] = useState<ComfyInputCleanup>(
+    session.comfy_input_cleanup,
+  );
 
   // Auto-pick favorite for prompt model when session has no value yet.
   useEffect(() => {
@@ -48,6 +52,13 @@ export function SessionSettingsDrawer({
     if (favorite) setPromptModel(favorite.name);
   }, [promptModel, promptChoices.data]);
 
+  // Comfy sessions configure their diffusion model, negative-prompt
+  // toggle, and LoRAs through agents + the workflow's slot map, not
+  // through the session row. Declared up here so the save mutation
+  // below doesn't close over an uninitialized binding.
+  const isComfyLike =
+    session.session_type === "comfy" || session.session_type === "comfy_mock";
+
   const save = useMutation({
     mutationFn: () =>
       sessionsApi.updateSession(session.id, {
@@ -57,6 +68,10 @@ export function SessionSettingsDrawer({
         pinned_loras: pinned,
         vl_model_name: vlModel || null,
         prompt_model_name: promptModel || null,
+        // Only ship the cleanup field for comfy-like sessions; legacy
+        // i2i / t2i ignore it on the backend, but sending it would
+        // bump every session's updated_at unnecessarily.
+        ...(isComfyLike ? { comfy_input_cleanup: comfyInputCleanup } : {}),
       }),
     onSuccess: () => {
       invalidate.session(session.id);
@@ -91,12 +106,6 @@ export function SessionSettingsDrawer({
   const filteredLoras = (loras.data ?? []).filter((l) =>
     `${l.name} ${l.display_name}`.toLowerCase().includes(loraSearch.toLowerCase()),
   );
-
-  // Comfy sessions configure their diffusion model, negative-prompt
-  // toggle, and LoRAs through agents + the workflow's slot map, not
-  // through the session row.
-  const isComfyLike =
-    session.session_type === "comfy" || session.session_type === "comfy_mock";
 
   const noLmModels =
     !vlChoices.isLoading
@@ -192,6 +201,34 @@ export function SessionSettingsDrawer({
                 <Link to="/settings/lmstudio" onClick={() => onOpenChange(false)}>
                   Configure LMStudio →
                 </Link>
+              </div>
+            )}
+
+            {isComfyLike && (
+              <div className={styles.labelBlock}>
+                <span>ComfyUI input cleanup</span>
+                <select
+                  className={styles.select}
+                  value={comfyInputCleanup}
+                  onChange={(e) =>
+                    setComfyInputCleanup(
+                      e.currentTarget.value as ComfyInputCleanup,
+                    )
+                  }
+                >
+                  <option value="keep">Keep — leave uploaded files in input/</option>
+                  <option value="delete">Delete — remove uploaded files after each run</option>
+                </select>
+                <span style={{
+                  fontSize: 12, color: "var(--text-subtle)", marginTop: 4,
+                }}>
+                  When the resolved input dir isn't reachable (set it on{" "}
+                  <Link to="/settings/comfyui" onClick={() => onOpenChange(false)}>
+                    ComfyUI settings
+                  </Link>
+                  ), <code>delete</code> soft-degrades to <code>keep</code> at
+                  generation time.
+                </span>
               </div>
             )}
 

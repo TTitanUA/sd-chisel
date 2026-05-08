@@ -65,13 +65,16 @@ def set_lmstudio(
 
 def get_comfyui(conn: sqlite3.Connection) -> dict[str, Any]:
     row = conn.execute(
-        "SELECT comfyui_url, comfyui_path, comfyui_api_key, updated_at "
+        "SELECT comfyui_url, comfyui_path, comfyui_api_key, "
+        "comfyui_input_dir, comfyui_output_dir, updated_at "
         "FROM app_settings WHERE id = 1",
     ).fetchone()
     return dict(row) if row is not None else {
         "comfyui_url": None,
         "comfyui_path": None,
         "comfyui_api_key": None,
+        "comfyui_input_dir": None,
+        "comfyui_output_dir": None,
         "updated_at": 0,
     }
 
@@ -82,13 +85,25 @@ def set_comfyui(
     url: str | None,
     install_path: str | None,
     api_key: str | None,
+    input_dir: str | None,
+    output_dir: str | None,
 ) -> dict[str, Any]:
+    """Update the ComfyUI section of ``app_settings``. ``input_dir`` /
+    ``output_dir`` override the install-path-relative defaults — pass
+    ``None`` to clear an override (the resolver falls back to
+    ``<comfyui_path>/{input,output}``)."""
     now = _now()
     path_clean = (install_path or "").strip() or None
+    input_clean = (input_dir or "").strip() or None
+    output_clean = (output_dir or "").strip() or None
     conn.execute(
         "UPDATE app_settings SET comfyui_url = ?, comfyui_path = ?, "
-        "comfyui_api_key = ?, updated_at = ? WHERE id = 1",
-        (_normalize_url(url), path_clean, (api_key or None), now),
+        "comfyui_api_key = ?, comfyui_input_dir = ?, "
+        "comfyui_output_dir = ?, updated_at = ? WHERE id = 1",
+        (
+            _normalize_url(url), path_clean, (api_key or None),
+            input_clean, output_clean, now,
+        ),
     )
     return get_comfyui(conn)
 

@@ -45,13 +45,22 @@ def _row_to_dict(row: sqlite3.Row | None) -> dict[str, Any] | None:
     d["graph"] = json.loads(d.pop("graph_json"))
     raw_slot_map = d.pop("slot_map_json", None)
     d["slot_map"] = json.loads(raw_slot_map) if raw_slot_map else None
+    raw_output_map = d.pop("output_slot_map_json", None)
+    d["output_slot_map"] = (
+        json.loads(raw_output_map) if raw_output_map else None
+    )
     return d
+
+
+_WORKFLOW_COLS = (
+    "id, name, graph_json, graph_hash, slot_map_json, "
+    "output_slot_map_json, created_at"
+)
 
 
 def get_workflow(conn: sqlite3.Connection, workflow_id: str) -> dict[str, Any] | None:
     row = conn.execute(
-        "SELECT id, name, graph_json, graph_hash, slot_map_json, created_at "
-        "FROM comfy_workflows WHERE id = ?",
+        f"SELECT {_WORKFLOW_COLS} FROM comfy_workflows WHERE id = ?",
         (workflow_id,),
     ).fetchone()
     return _row_to_dict(row)
@@ -69,8 +78,8 @@ def find_by_hash(conn: sqlite3.Connection, graph_hash: str) -> dict[str, Any] | 
     """First (oldest) workflow with this hash, or None. Used for
     upload-time collision detection."""
     row = conn.execute(
-        "SELECT id, name, graph_json, graph_hash, slot_map_json, created_at "
-        "FROM comfy_workflows WHERE graph_hash = ? ORDER BY created_at LIMIT 1",
+        f"SELECT {_WORKFLOW_COLS} FROM comfy_workflows "
+        "WHERE graph_hash = ? ORDER BY created_at LIMIT 1",
         (graph_hash,),
     ).fetchone()
     return _row_to_dict(row)
@@ -160,6 +169,39 @@ def set_slot_map(
     )
     conn.execute(
         "UPDATE comfy_workflows SET slot_map_json = ? WHERE id = ?",
+        (encoded, workflow_id),
+    )
+    return get_workflow(conn, workflow_id)
+
+
+def set_output_slot_map(
+    conn: sqlite3.Connection,
+    *,
+    workflow_id: str,
+    output_slot_map: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    """Persist an output slot map for the workflow. Returns the
+    refreshed row, or None if the workflow id is unknown.
+
+    ``output_slot_map`` is the JSON payload to write verbatim. PR-2
+    writes ``{"version": 1, "outputs": [...]}``. Passing ``None`` clears
+    the column — read-time falls back to
+    :func:`comfy_output_slot_service.auto_default_outputs`.
+    """
+    if conn.execute(
+        "SELECT 1 FROM comfy_workflows WHERE id = ?", (workflow_id,),
+    ).fetchone() is None:
+        return None
+    encoded = (
+        None
+        if output_slot_map is None
+        else json.dumps(
+            output_slot_map, sort_keys=True, separators=(",", ":"),
+            ensure_ascii=False,
+        )
+    )
+    conn.execute(
+        "UPDATE comfy_workflows SET output_slot_map_json = ? WHERE id = ?",
         (encoded, workflow_id),
     )
     return get_workflow(conn, workflow_id)

@@ -58,6 +58,19 @@ export type SourceInputConfig = {
   vl_prompt: string;
   vl_temperature: number | null;
   vl_max_tokens: number | null;
+  /** Most recent VL output for this slot — written by the agent runner
+   *  after a successful run. ``last_summary`` carries the model output
+   *  on success; ``last_warning`` carries a one-line soft-failure
+   *  message (no image bound, model disabled, file missing, upstream
+   *  LM error, …). They're mutually exclusive — exactly one is non-null
+   *  after a run. ``last_image_filename`` is the resolved session image
+   *  the run pointed at. ``last_at`` is unix-seconds when the VL pass
+   *  finished (or short-circuited). All four are absent until the first
+   *  run. */
+  last_summary?: string | null;
+  last_warning?: string | null;
+  last_image_filename?: string | null;
+  last_at?: number | null;
 };
 
 /** Picks a base-model family from the Library to use as the agent's
@@ -120,6 +133,63 @@ export function readInputSlots(
   const raw = modelParams[STORAGE_KEY];
   if (!Array.isArray(raw)) return [];
   return raw.filter(isValidInputSlot).map(migrateLegacyShape);
+}
+
+
+/** Strip runner-written read-only fields (``last_summary``,
+ *  ``last_warning``, ``last_image_filename``, ``last_at``) from every
+ *  source-kind slot. The editor uses this to compare its local draft
+ *  to the server snapshot for "is the form dirty?" — those fields
+ *  arrive from a successful run, not from user edits, so a fresh run
+ *  must NOT make the form look dirty. The same shape is also useful
+ *  when overlaying server-side run-results onto a draft that has
+ *  unsaved edits. */
+export function stripRunResults(slots: AgentInputSlot[]): AgentInputSlot[] {
+  return slots.map((s) => {
+    if (s.kind !== "source" || !s.source) return s;
+    const {
+      last_summary: _ls,
+      last_warning: _lw,
+      last_image_filename: _lf,
+      last_at: _la,
+      ...rest
+    } = s.source;
+    void _ls;
+    void _lw;
+    void _lf;
+    void _la;
+    return { ...s, source: rest };
+  });
+}
+
+
+/** Overlay each server slot's run-result fields onto the matching
+ *  draft slot. Slots match by ``id``; non-source kinds are passed
+ *  through. Used by the editor's sync-effect: when the agent record
+ *  refreshes (e.g. after ``/run``), the latest VL output should appear
+ *  in the form even if the user has unsaved edits to other fields on
+ *  the same slot. */
+export function overlayRunResults(
+  draft: AgentInputSlot[],
+  server: AgentInputSlot[],
+): AgentInputSlot[] {
+  const byId = new Map<string, AgentInputSlot>();
+  for (const s of server) byId.set(s.id, s);
+  return draft.map((slot) => {
+    if (slot.kind !== "source" || !slot.source) return slot;
+    const peer = byId.get(slot.id);
+    if (!peer || peer.kind !== "source" || !peer.source) return slot;
+    return {
+      ...slot,
+      source: {
+        ...slot.source,
+        last_summary: peer.source.last_summary ?? null,
+        last_warning: peer.source.last_warning ?? null,
+        last_image_filename: peer.source.last_image_filename ?? null,
+        last_at: peer.source.last_at ?? null,
+      },
+    };
+  });
 }
 
 function migrateLegacyShape(slot: AgentInputSlot): AgentInputSlot {
