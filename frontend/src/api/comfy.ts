@@ -351,6 +351,9 @@ export const comfyKeys = {
     ["comfy", "sessions", sessionId, "agents"] as const,
   agent: (sessionId: string, agentId: string) =>
     ["comfy", "sessions", sessionId, "agents", agentId] as const,
+  jobs: (sessionId: string) =>
+    ["comfy", "sessions", sessionId, "jobs"] as const,
+  job: (jobId: string) => ["comfy", "jobs", jobId] as const,
   packs: () => ["comfy", "packs"] as const,
   pack: (name: string) => ["comfy", "packs", name] as const,
   nodes: (q?: string, pack?: string, hasDescription?: boolean) =>
@@ -514,6 +517,22 @@ export const comfyApi = {
       `/api/comfy/sessions/${encodeURIComponent(sessionId)}/agents/${encodeURIComponent(agentId)}/run`,
       { method: "POST", body: JSON.stringify(body ?? {}) },
     ),
+  // --- Single Run jobs --------------------------------------------------
+  startSingleRun: (sessionId: string, body: SingleRunBody) =>
+    apiFetch<SingleRunStartResponse>(
+      `/api/comfy/sessions/${encodeURIComponent(sessionId)}/single_run`,
+      { method: "POST", body: JSON.stringify(body) },
+    ),
+  listJobs: (sessionId: string) =>
+    apiFetch<{ jobs: ComfyJob[] }>(
+      `/api/comfy/jobs?session_id=${encodeURIComponent(sessionId)}`,
+    ).then((r) => r.jobs),
+  getJob: (jobId: string) =>
+    apiFetch<ComfyJob>(`/api/comfy/jobs/${encodeURIComponent(jobId)}`),
+  deleteJob: (jobId: string) =>
+    apiFetch<void>(`/api/comfy/jobs/${encodeURIComponent(jobId)}`, {
+      method: "DELETE",
+    }),
 };
 
 /** Parse a 409 conflict body returned from createWorkflow. */
@@ -721,4 +740,133 @@ export function useSeedDefaultAgent(sessionId: string | null | undefined) {
       }
     },
   });
+}
+
+// --- Single Run jobs ----------------------------------------------------
+
+export type SingleRunBody = {
+  payload_overrides?: Record<string, unknown>;
+  image_bindings?: Record<string, string | null>;
+  rerun_agents?: boolean;
+};
+
+export type SingleRunStartResponse = {
+  job_id: string;
+  generation_id: string;
+  stream_url: string;
+};
+
+export type ComfyJobOutput = {
+  id: string;
+  slot_label: string | null;
+  node_id: string;
+  output_index: number;
+  path: string;
+  url: string;
+  is_primary: boolean;
+  created_at: number;
+};
+
+export type ComfyJobStatus =
+  | "queued"
+  | "running"
+  | "success"
+  | "error"
+  | "cancelled";
+
+export type ComfyJob = {
+  id: string;
+  session_id: string;
+  workflow_id: string;
+  prompt_id: string | null;
+  generation_id: string;
+  payload: Record<string, unknown>;
+  slot_map_snapshot: SlotDefinition[];
+  agents_snapshot: Agent[];
+  status: ComfyJobStatus;
+  error_message: string | null;
+  started_at: number;
+  finished_at: number | null;
+  outputs: ComfyJobOutput[];
+};
+
+/** SSE event from /api/comfy/jobs/{id}/stream. The shape mirrors what
+ *  the orchestrator publishes — `stage` is mandatory; per-stage fields
+ *  are duck-typed. The frontend renders a per-stage status pill from
+ *  the (stage, event) tuple and pulls per-event details (image URLs,
+ *  warnings, agent outputs) from the rest of the keys. */
+export type ComfyRunEvent = {
+  stage: string;
+  event?: string;
+  ts?: number;
+} & Record<string, unknown>;
+
+export function useJobs(sessionId: string | null | undefined) {
+  return useQuery({
+    queryKey: sessionId ? comfyKeys.jobs(sessionId) : ["comfy", "jobs", "unset"],
+    queryFn: () => comfyApi.listJobs(sessionId as string),
+    enabled: !!sessionId,
+  });
+}
+
+export function useJob(jobId: string | null | undefined) {
+  return useQuery({
+    queryKey: jobId ? comfyKeys.job(jobId) : ["comfy", "jobs", "unset"],
+    queryFn: () => comfyApi.getJob(jobId as string),
+    enabled: !!jobId,
+  });
+}
+
+export function useStartSingleRun(sessionId: string | null | undefined) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (body: SingleRunBody) =>
+      comfyApi.startSingleRun(sessionId as string, body),
+    onSuccess: () => {
+      if (sessionId) {
+        void client.invalidateQueries({ queryKey: comfyKeys.jobs(sessionId) });
+      }
+    },
+  });
+}
+
+export function useDeleteJob(sessionId: string | null | undefined) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (jobId: string) => comfyApi.deleteJob(jobId),
+    onSuccess: () => {
+      if (sessionId) {
+        void client.invalidateQueries({ queryKey: comfyKeys.jobs(sessionId) });
+      }
+    },
+  });
+}
+
+/** Subscribe to /api/comfy/jobs/{id}/stream as SSE. Returns a cleanup
+ *  function the caller invokes on unmount or "user navigated away".
+ *  Live events go to ``onEvent``; fatal connection failures go to
+ *  ``onError``. */
+export function subscribeToJobStream(
+  jobId: string,
+  onEvent: (e: ComfyRunEvent) => void,
+  onError?: (err: Error) => void,
+): () => void {
+  const url = `${API_BASE}/api/comfy/jobs/${encodeURIComponent(jobId)}/stream`;
+  const es = new EventSource(url);
+  es.onmessage = (msg) => {
+    try {
+      onEvent(JSON.parse(msg.data) as ComfyRunEvent);
+    } catch (err) {
+      onError?.(err instanceof Error ? err : new Error("parse failed"));
+    }
+  };
+  es.onerror = () => {
+    // EventSource auto-reconnects on transient drops. If the channel
+    // was reaped after the run finished, the server returns 404 and
+    // EventSource keeps trying — close the stream cleanly so the
+    // caller can fall back to GET /jobs/{id}.
+    es.close();
+    onError?.(new Error("stream closed"));
+  };
+  return () => es.close();
 }

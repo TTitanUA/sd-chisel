@@ -1,9 +1,8 @@
-/** Modal that explodes a JobSnapshot into a 3-panel inspection view:
+/** Modal that explodes a comfy_jobs row into a 3-panel inspection view:
  *  state (every agent's prompt + last_value), bindings (workflow slot
- *  → resolved value), result (placeholder image full-size).
- *  See docs/comfy-agents-ui-mock-plan.md. */
+ *  → resolved value), result (primary output full-size). */
 import { useState } from "react";
-import type { JobSnapshot } from "../mocks/job-snapshots";
+import type { ComfyJob } from "@/api/comfy";
 import styles from "./SnapshotViewer.module.css";
 
 type Tab = "state" | "bindings" | "result";
@@ -12,20 +11,21 @@ export function SnapshotViewer({
   job,
   onClose,
 }: {
-  job: JobSnapshot;
+  job: ComfyJob;
   onClose: () => void;
 }) {
   const [tab, setTab] = useState<Tab>("result");
+  const primary = job.outputs.find((o) => o.is_primary) ?? job.outputs[0];
 
   return (
     <div className={styles.backdrop} onClick={onClose}>
       <div className={styles.panel} onClick={(e) => e.stopPropagation()}>
         <header className={styles.header}>
           <div>
-            <div className={styles.title}>{job.workflowName}</div>
+            <div className={styles.title}>{job.generation_id}</div>
             <div className={styles.subtitle}>
-              {new Date(job.createdAt).toLocaleString()} · job{" "}
-              <code>{job.id.slice(0, 8)}</code>
+              {new Date(job.started_at * 1000).toLocaleString()} · job{" "}
+              <code>{job.id.slice(0, 8)}</code> · {job.status}
             </div>
           </div>
           <div className={styles.tabs}>
@@ -56,21 +56,25 @@ export function SnapshotViewer({
         <div className={styles.body}>
           {tab === "result" && (
             <div className={styles.resultWrap}>
-              {job.resultDataUrl ? (
+              {primary ? (
                 <img
-                  src={job.resultDataUrl}
-                  alt="result"
+                  src={primary.url}
+                  alt={primary.slot_label ?? "result"}
                   className={styles.resultImage}
                 />
               ) : (
-                <div className={styles.empty}>No result image stored.</div>
+                <div className={styles.empty}>
+                  {job.error_message
+                    ? `Run failed: ${job.error_message}`
+                    : "No result image stored."}
+                </div>
               )}
             </div>
           )}
 
           {tab === "bindings" && (
             <div className={styles.list}>
-              {Object.entries(job.boundValues).map(([label, value]) => (
+              {Object.entries(job.payload).map(([label, value]) => (
                 <div key={label} className={styles.bindingRow}>
                   <div className={styles.bindingLabel}>{label}</div>
                   <pre className={styles.bindingValue}>{stringify(value)}</pre>
@@ -81,7 +85,7 @@ export function SnapshotViewer({
 
           {tab === "state" && (
             <div className={styles.list}>
-              {job.agents.map((a) => (
+              {job.agents_snapshot.map((a) => (
                 <div key={a.id} className={styles.agent}>
                   <div className={styles.agentName}>{a.name}</div>
                   <div className={styles.agentMeta}>

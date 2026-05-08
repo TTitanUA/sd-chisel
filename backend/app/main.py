@@ -9,6 +9,7 @@ from fastapi.responses import FileResponse
 from app import config as app_config
 from app.api.chat import router as chat_router
 from app.api.comfy import router as comfy_router
+from app.api.comfy_jobs import router as comfy_jobs_router
 from app.api.library import router as library_router
 from app.api.prompt import router as prompt_router
 from app.api.sessions import router as sessions_router
@@ -74,6 +75,7 @@ app.add_middleware(
 
 app.include_router(chat_router)
 app.include_router(comfy_router)
+app.include_router(comfy_jobs_router)
 app.include_router(library_router)
 app.include_router(prompt_router)
 app.include_router(sessions_router)

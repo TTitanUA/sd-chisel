@@ -1,21 +1,23 @@
 /**
- * ComfyMock state provider — reconciles real API hooks (workflow,
- * slot map, agents, sources) with browser-only state (chat, jobs,
- * selected agent, running flags) and exposes the action set the
- * variants render against.
+ * Comfy session state provider — bridges the real backend (agents,
+ * slot map, jobs, Single Run pipeline) with the browser-only surfaces
+ * still on this side (chat reference panel, source-slot indirection)
+ * and exposes the action set every panel renders against.
  *
- * Per-agent run + workflow-level Generate are emulated client-side
- * (10 s LLM, 1.5 s queue) and PATCH the agent's `last_value`s back
- * to the backend so they persist across reload exactly the way real
- * runs will.
- *
- * See docs/comfy-agents-ui-mock-plan.md.
+ * Single Run lifecycle:
+ *   user clicks Single Run
+ *     → `startSingleRun` mutation POSTs /single_run
+ *     → on success we open an SSE stream against the returned URL
+ *     → events flow into `runState.events` for the Run Viewer (iter 5)
+ *     → on `stage=done` the stream closes, the jobs query invalidates,
+ *       and the gallery picks up the new card
  */
 import {
   createContext,
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -23,28 +25,25 @@ import { useQueryClient } from "@tanstack/react-query";
 import {
   comfyApi,
   comfyKeys,
+  subscribeToJobStream,
   useAgents,
+  useDeleteJob,
+  useJobs,
   useSlotMap,
+  useStartSingleRun,
   type Agent,
+  type ComfyJob,
+  type ComfyRunEvent,
   type SlotMapResponse,
 } from "@/api/comfy";
 import { ApiError } from "@/api/client";
 import type { Session } from "@/api/sessions";
 import { emulateChatReply } from "../mocks/chat-emulator";
-import { renderFakeResult } from "../mocks/fake-result";
-import {
-  deleteSnapshot as removeSnapshot,
-  loadSnapshots,
-  saveSnapshot,
-  type JobSnapshot,
-} from "../mocks/job-snapshots";
 import {
   loadSourceSlots,
   saveSourceSlots,
   type SourceSlot,
 } from "./source-slots";
-
-const WORKFLOW_QUEUE_DELAY_MS = 1_500;
 
 /** Pull the FastAPI ``detail`` field out of an ApiError body. The
  *  comfy router uses HTTPException with a string detail for every
@@ -99,6 +98,19 @@ export type ChatMessage = {
   createdAt: number;
 };
 
+/** Snapshot of an in-flight Single Run. Cleared once the server emits
+ *  `stage=done` and the gallery query has reconciled. */
+export type RunState = {
+  jobId: string;
+  generationId: string;
+  events: ComfyRunEvent[];
+  /** The latest stage we saw — `validate | snapshot | agents | unload_lm
+   *  | upload_inputs | patch | queue | execute | save | cleanup | done`. */
+  currentStage: string;
+  /** True from the moment the POST resolves until `stage=done` arrives. */
+  inProgress: boolean;
+};
+
 export type ComfyContextShape = {
   session: Session;
   // Real, server-backed (TanStack Query handles caching).
@@ -106,9 +118,11 @@ export type ComfyContextShape = {
   agentsLoading: boolean;
   slotMap: SlotMapResponse | null;
   slotMapLoading: boolean;
-  // Browser-only.
+  jobs: ComfyJob[];
+  jobsLoading: boolean;
+  // Browser-only — track A wires real chat; iter 3 (deferred) drops
+  // the source-slot indirection.
   chat: ChatMessage[];
-  jobs: JobSnapshot[];
   /** Per-session, browser-only source-slot table. Mock layer of
    *  indirection between agents and session source images — agents
    *  bind to slot ids, slots map to images. */
@@ -118,6 +132,10 @@ export type ComfyContextShape = {
   /** Per-agent surface for the most recent /run failure. Cleared on
    *  the next successful run. */
   agentRunErrors: Record<string, string>;
+  /** Live Single Run state, or null when no run is in flight. */
+  runState: RunState | null;
+  /** Convenience: !!runState (older surface name kept stable so the
+   *  agents-panel footer doesn't need to re-thread props). */
   isRunningWorkflow: boolean;
   workflowGenerateError: string | null;
   // Actions.
@@ -144,13 +162,17 @@ export function ComfyProvider({
   const queryClient = useQueryClient();
   const agentsQuery = useAgents(sessionId);
   const slotMapQuery = useSlotMap(sessionId);
+  const jobsQuery = useJobs(sessionId);
+  const startSingleRun = useStartSingleRun(sessionId);
+  const deleteJobMutation = useDeleteJob(sessionId);
 
   const agents = useMemo(() => agentsQuery.data ?? [], [agentsQuery.data]);
   const slotMap = slotMapQuery.data ?? null;
+  const jobs = useMemo(() => jobsQuery.data ?? [], [jobsQuery.data]);
 
-  // Browser-only state.
+  // Browser-only state — track A wires real chat; iter 3 (deferred)
+  // cleans up the source-slot indirection.
   const [chat, setChat] = useState<ChatMessage[]>([]);
-  const [jobs, setJobs] = useState<JobSnapshot[]>(() => loadSnapshots(sessionId));
   const [sourceSlots, setSourceSlotsState] = useState<SourceSlot[]>(() =>
     loadSourceSlots(sessionId),
   );
@@ -161,10 +183,20 @@ export function ComfyProvider({
   const [agentRunErrors, setAgentRunErrors] = useState<Record<string, string>>(
     {},
   );
-  const [isRunningWorkflow, setIsRunningWorkflow] = useState(false);
+  const [runState, setRunState] = useState<RunState | null>(null);
   const [workflowGenerateError, setWorkflowGenerateError] = useState<string | null>(
     null,
   );
+  const streamCleanupRef = useRef<(() => void) | null>(null);
+
+  // Cancel any active SSE stream on unmount or session change so we
+  // don't leak EventSources across the workspace lifetime.
+  useEffect(() => {
+    return () => {
+      streamCleanupRef.current?.();
+      streamCleanupRef.current = null;
+    };
+  }, [sessionId]);
 
   // Auto-select the first agent once one exists, to keep variants from
   // having to handle the "no selection" edge case at every render.
@@ -245,92 +277,96 @@ export function ComfyProvider({
       setWorkflowGenerateError("Slot map not loaded yet.");
       return;
     }
-    // Validate every binding=llm slot has a bound agent output with a
-    // non-null last_value. Mirrors PR6's eventual server-side check.
-    const llmSlots = slotMap.slot_map.slots.filter((s) => s.binding === "llm");
-    const boundValues: Record<string, unknown> = {};
-    const missing: string[] = [];
-    for (const ws of llmSlots) {
-      let found = false;
-      for (const a of agents) {
-        for (const out of a.output_slots) {
-          if (
-            out.bound_to?.workflow_slot_label === ws.label &&
-            out.last_value !== null &&
-            out.last_value !== undefined
-          ) {
-            boundValues[ws.label] = out.last_value;
-            found = true;
-            break;
-          }
-        }
-        if (found) break;
-      }
-      if (!found) missing.push(ws.label);
-    }
-    if (missing.length > 0) {
-      setWorkflowGenerateError(
-        `Missing values for: ${missing.join(", ")}. Run the agents that fill these slots.`,
-      );
-      return;
-    }
-    // Frozen + user_image slots round out the snapshot. user_image
-    // slots resolve via metadata.source_slot_id → SourceSlot.id →
-    // SourceSlot.source_image_id → session.source_images.id. Empty
-    // pointers fall back to "(no image)" (the user is expected to
-    // configure a source slot before they generate).
+    // Resolve image_bindings for every binding=user_image slot. The
+    // backend takes a flat slot_label → session_image_id map; the
+    // SourceSlot indirection (metadata.source_slot_id → slot.id →
+    // image_id) lives client-side until iter 3 lands.
+    const imageBindings: Record<string, string | null> = {};
     for (const ws of slotMap.slot_map.slots) {
+      if (ws.binding !== "user_image") continue;
       const meta = (ws.metadata ?? {}) as Record<string, unknown>;
-      if (ws.binding === "frozen") {
-        boundValues[ws.label] = meta.value;
-      } else if (ws.binding === "user_image") {
-        const slotId =
-          typeof meta.source_slot_id === "string" ? meta.source_slot_id : null;
-        const ss = slotId
-          ? sourceSlots.find((s) => s.id === slotId) ?? null
-          : null;
-        const image = ss?.source_image_id
-          ? session.source_images.find((s) => s.id === ss.source_image_id)
-          : null;
-        boundValues[ws.label] = image?.original_filename ?? "(no image)";
-      }
+      const slotId =
+        typeof meta.source_slot_id === "string" ? meta.source_slot_id : null;
+      const ss = slotId
+        ? sourceSlots.find((s) => s.id === slotId) ?? null
+        : null;
+      imageBindings[ws.label] = ss?.source_image_id ?? null;
     }
 
-    setIsRunningWorkflow(true);
     try {
-      await new Promise((resolve) =>
-        setTimeout(resolve, WORKFLOW_QUEUE_DELAY_MS),
-      );
-      const jobId = crypto.randomUUID();
-      const resultDataUrl = renderFakeResult({
-        jobId,
-        workflowName: session.name ?? "untitled",
-        boundValues,
+      const result = await startSingleRun.mutateAsync({
+        image_bindings: imageBindings,
       });
-      const snapshot: JobSnapshot = {
-        id: jobId,
-        createdAt: Date.now(),
-        workflowId: session.comfy_workflow_id ?? "",
-        workflowName: session.name ?? "untitled",
-        slotMap: slotMap.slot_map,
-        agents: agents.map((a) => ({ ...a })),
-        sources: session.source_images.map((s) => ({
-          id: s.id,
-          original_filename: s.original_filename,
-          image_number: s.image_number,
-          is_main: s.is_main,
-          url: s.url,
-        })),
-        boundValues,
-        resultDataUrl,
-        status: "success",
-      };
-      const next = saveSnapshot(sessionId, snapshot);
-      setJobs(next);
-    } finally {
-      setIsRunningWorkflow(false);
+      // Open the SSE stream and attach to runState; the orchestrator
+      // emits per-stage events that the gallery / Run Viewer (iter 5)
+      // pick up.
+      streamCleanupRef.current?.();
+      setRunState({
+        jobId: result.job_id,
+        generationId: result.generation_id,
+        events: [],
+        currentStage: "validate",
+        inProgress: true,
+      });
+      const cleanup = subscribeToJobStream(
+        result.job_id,
+        (event) => {
+          setRunState((prev) => {
+            if (prev === null || prev.jobId !== result.job_id) return prev;
+            const stage = typeof event.stage === "string"
+              ? event.stage
+              : prev.currentStage;
+            const inProgress = !(
+              event.stage === "done" ||
+              (event.stage === "execute" && event.event === "failed")
+            );
+            return {
+              ...prev,
+              events: [...prev.events, event],
+              currentStage: stage,
+              inProgress,
+            };
+          });
+          if (event.stage === "done") {
+            // Pipeline finished — refresh gallery + agents (last_value
+            // changed) and tear the stream down.
+            void queryClient.invalidateQueries({
+              queryKey: comfyKeys.jobs(sessionId),
+            });
+            void queryClient.invalidateQueries({
+              queryKey: comfyKeys.agents(sessionId),
+            });
+            streamCleanupRef.current?.();
+            streamCleanupRef.current = null;
+          }
+        },
+        (err) => {
+          // Stream torn down — either run finished and the channel
+          // was reaped (refresh gallery to pick up the row) or a
+          // transient drop. Mirror the error to the user; the gallery
+          // refresh either way confirms what actually happened.
+          setRunState((prev) =>
+            prev ? { ...prev, inProgress: false } : prev,
+          );
+          setWorkflowGenerateError(err.message);
+          void queryClient.invalidateQueries({
+            queryKey: comfyKeys.jobs(sessionId),
+          });
+        },
+      );
+      streamCleanupRef.current = cleanup;
+    } catch (err) {
+      const message =
+        err instanceof ApiError
+          ? extractDetail(err) ?? err.message
+          : err instanceof Error
+          ? err.message
+          : "Single Run failed";
+      setWorkflowGenerateError(message);
     }
-  }, [agents, session, sessionId, slotMap, sourceSlots]);
+  }, [
+    slotMap, sourceSlots, startSingleRun, sessionId, queryClient,
+  ]);
 
   const sendChat = useCallback(async (text: string) => {
     const trimmed = text.trim();
@@ -356,11 +392,12 @@ export function ComfyProvider({
 
   const deleteJob = useCallback(
     (jobId: string) => {
-      const next = removeSnapshot(sessionId, jobId);
-      setJobs(next);
+      deleteJobMutation.mutate(jobId);
     },
-    [sessionId],
+    [deleteJobMutation],
   );
+
+  const isRunningWorkflow = runState !== null && runState.inProgress;
 
   const value = useMemo<ComfyContextShape>(
     () => ({
@@ -369,12 +406,14 @@ export function ComfyProvider({
       agentsLoading: agentsQuery.isLoading,
       slotMap,
       slotMapLoading: slotMapQuery.isLoading,
-      chat,
       jobs,
+      jobsLoading: jobsQuery.isLoading,
+      chat,
       sourceSlots,
       selectedAgentId,
       runningAgentIds,
       agentRunErrors,
+      runState,
       isRunningWorkflow,
       workflowGenerateError,
       selectAgent,
@@ -391,12 +430,14 @@ export function ComfyProvider({
       agentsQuery.isLoading,
       slotMap,
       slotMapQuery.isLoading,
-      chat,
       jobs,
+      jobsQuery.isLoading,
+      chat,
       sourceSlots,
       selectedAgentId,
       runningAgentIds,
       agentRunErrors,
+      runState,
       isRunningWorkflow,
       workflowGenerateError,
       selectAgent,

@@ -29,6 +29,23 @@ def session_sources_dir(session_id: str, *, data_root: Path | None = None) -> Pa
     return d
 
 
+def session_output_dir(
+    session_id: str,
+    generation_id: str,
+    *,
+    data_root: Path | None = None,
+) -> Path:
+    """Per-run output subdirectory matching the §10.7 layout
+    `data/images/<session_id>/output/<generation_id>/`. Single Run
+    captures every SaveImage file under here; the gallery serves
+    them via the existing static-images mount."""
+    if not _SAFE_ID.match(generation_id):
+        raise ValueError(f"unsafe generation id: {generation_id!r}")
+    d = session_image_dir(session_id, data_root=data_root) / "output" / generation_id
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
 def remove_session_images(session_id: str, *, data_root: Path | None = None) -> None:
     _validate_session_id(session_id)
     root = data_root or resolve_data_root()

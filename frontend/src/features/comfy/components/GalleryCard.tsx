@@ -1,6 +1,8 @@
-/** One card in the gallery — a job snapshot. Click → opens the
- *  SnapshotViewer modal. See docs/comfy-agents-ui-mock-plan.md. */
-import type { JobSnapshot } from "../mocks/job-snapshots";
+/** One card in the gallery — a real Single Run job (comfy_jobs row).
+ *  Click → opens the SnapshotViewer modal with the run's frozen
+ *  payload + agents snapshot + outputs. */
+import type { ComfyJob } from "@/api/comfy";
+import { useComfy } from "../state/useComfy";
 import styles from "./GalleryCard.module.css";
 
 export function GalleryCard({
@@ -8,36 +10,41 @@ export function GalleryCard({
   onOpen,
   onDelete,
 }: {
-  job: JobSnapshot;
+  job: ComfyJob;
   onOpen: () => void;
   onDelete: () => void;
 }) {
+  const primary = job.outputs.find((o) => o.is_primary) ?? job.outputs[0];
+  const slotCount = Object.keys(job.payload).length;
   return (
-    <div className={styles.card}>
+    <div className={`${styles.card} ${job.status === "error" ? styles.errored : ""}`}>
       <button
         type="button"
         className={styles.thumb}
         onClick={onOpen}
         title="Open snapshot"
       >
-        {job.resultDataUrl ? (
-          <img src={job.resultDataUrl} alt={job.workflowName} />
+        {primary ? (
+          <img src={primary.url} alt={primary.slot_label ?? "result"} />
         ) : (
-          <div className={styles.placeholder}>no result</div>
+          <div className={styles.placeholder}>
+            {job.status === "error" ? "error" : "no result"}
+          </div>
         )}
       </button>
       <div className={styles.meta}>
         <div className={styles.metaRow}>
-          <span className={styles.name}>{job.workflowName}</span>
-          <span className={styles.time}>{formatTime(job.createdAt)}</span>
+          <span className={styles.name}>{job.generation_id}</span>
+          <span className={styles.time}>{formatTime(job.started_at)}</span>
         </div>
         <div className={styles.metaRow}>
           <span className={styles.dim}>
-            {Object.keys(job.boundValues).length} slots
-            {" · "}
-            {job.agents.length} agents
+            {job.status} · {slotCount} slots · {job.agents_snapshot.length} agents
           </span>
         </div>
+        {job.error_message && (
+          <div className={styles.errorMsg}>{job.error_message}</div>
+        )}
         <div className={styles.actions}>
           <button type="button" onClick={onOpen}>
             Open snapshot
@@ -52,6 +59,8 @@ export function GalleryCard({
 }
 
 export function RunningJobCard() {
+  const { runState } = useComfy();
+  const stage = runState?.currentStage ?? "validate";
   return (
     <div className={`${styles.card} ${styles.running}`}>
       <div className={styles.thumb}>
@@ -59,15 +68,17 @@ export function RunningJobCard() {
       </div>
       <div className={styles.meta}>
         <div className={styles.metaRow}>
-          <span className={styles.name}>Generating…</span>
+          <span className={styles.name}>Running…</span>
         </div>
-        <div className={styles.dim}>queued · running · result fetch</div>
+        <div className={styles.dim}>stage: {stage}</div>
       </div>
     </div>
   );
 }
 
-function formatTime(epochMs: number): string {
-  const d = new Date(epochMs);
+/** Epoch seconds → locale string. The repo stores started_at as a
+ *  unix timestamp in seconds; multiply for the JS Date constructor. */
+function formatTime(epochSeconds: number): string {
+  const d = new Date(epochSeconds * 1000);
   return d.toLocaleString();
 }
