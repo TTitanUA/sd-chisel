@@ -126,8 +126,9 @@ describe("ComfyWorkspace", () => {
     renderWorkspace();
     await waitFor(() => expect(screen.getByText("comfy smoke")).toBeInTheDocument());
     await waitFor(() =>
-      expect(screen.getByRole("button", { name: /Generate workflow/i })).toBeInTheDocument(),
+      expect(screen.getByRole("button", { name: /Single Run/i })).toBeInTheDocument(),
     );
+    expect(screen.getByRole("button", { name: /Batch Run/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Agent editor/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Node tree/i })).toBeInTheDocument();
     expect(screen.getByTitle("Agents")).toBeInTheDocument();

@@ -1,6 +1,6 @@
 /** Gallery — a grid of past job snapshots, newest first. While a
  *  workflow is generating, a RunningJobCard pins to the top. Click a
- *  card → SnapshotViewer modal. See docs/comfy-agents-ui-mock-plan.md. */
+ *  card → SnapshotViewer modal. */
 import { useState } from "react";
 import { useComfy } from "../state/useComfy";
 import { GalleryCard, RunningJobCard } from "./GalleryCard";
@@ -24,8 +24,8 @@ export function GalleryPanel() {
         {isRunningWorkflow && <RunningJobCard />}
         {jobs.length === 0 && !isRunningWorkflow && (
           <div className={styles.empty}>
-            No runs yet. Press <strong>Generate workflow</strong> in the
-            header once every binding=llm slot is filled.
+            No runs yet. Press <strong>Single Run</strong> in the agents
+            panel once every binding=llm slot is filled.
           </div>
         )}
         {jobs.map((job) => (

@@ -163,3 +163,60 @@
   font-size: 10px;
   color: var(--text);
 }
+
+.runFooter {
+  flex-shrink: 0;
+  border-top: 1px solid var(--border);
+  background: var(--bg-sunken);
+  padding: 8px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.runError {
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--danger);
+}
+
+.runRow {
+  display: flex;
+  gap: 6px;
+}
+
+.singleRun {
+  flex: 1;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 7px 10px;
+  background: var(--accent);
+  color: white;
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: filter 120ms;
+}
+
+.singleRun:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.singleRun:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.batchRun {
+  flex: 1;
+  font: inherit;
+  font-size: 12px;
+  padding: 7px 10px;
+  background: transparent;
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: not-allowed;
+  opacity: 0.6;
+}

@@ -1,10 +1,10 @@
-/** Vertical list of agents + "create" actions. The "+ add" button
- *  expands an inline name input rather than using the native
+/** Vertical list of agents + "create" actions, plus the Single Run /
+ *  Batch Run footer that drives the workflow pipeline. The "+ add"
+ *  button expands an inline name input rather than using the native
  *  `window.prompt` (which is blocked in some sandboxed iframes and
  *  feels alien on a non-modal flow). The header also shows a
  *  coverage hint: how many `binding=llm` workflow slots still need
- *  an agent. See docs/comfy-agents-ui-mock-plan.md.
- */
+ *  an agent. */
 import { useMemo, useState } from "react";
 import { useCreateAgent, useSeedDefaultAgent } from "@/api/comfy";
 import { useComfy } from "../state/useComfy";
@@ -20,6 +20,9 @@ export function AgentsList() {
     runningAgentIds,
     agentsLoading,
     slotMap,
+    runWorkflow,
+    isRunningWorkflow,
+    workflowGenerateError,
   } = useComfy();
   const create = useCreateAgent(session.id);
   const seed = useSeedDefaultAgent(session.id);
@@ -51,6 +54,19 @@ export function AgentsList() {
     setAdding(false);
     setDraftName("");
   }
+
+  // Single Run is enabled iff every binding=llm slot has a bound
+  // agent output AND we're not already running. Disabled-state
+  // tooltip surfaces the missing slot labels (or the most recent
+  // error from a prior run).
+  const singleRunDisabledReason = (() => {
+    if (isRunningWorkflow) return "Run in progress…";
+    if (coverage && coverage.unbound.length > 0) {
+      return `Bind agent outputs to: ${coverage.unbound.map((s) => s.label).join(", ")}`;
+    }
+    if (workflowGenerateError) return workflowGenerateError;
+    return null;
+  })();
 
   return (
     <div className={styles.panel}>
@@ -165,6 +181,31 @@ export function AgentsList() {
             onSelect={() => selectAgent(a.id)}
           />
         ))}
+      </div>
+
+      <div className={styles.runFooter}>
+        {workflowGenerateError && !isRunningWorkflow && (
+          <div className={styles.runError}>{workflowGenerateError}</div>
+        )}
+        <div className={styles.runRow}>
+          <button
+            type="button"
+            className={styles.singleRun}
+            onClick={runWorkflow}
+            disabled={singleRunDisabledReason !== null}
+            title={singleRunDisabledReason ?? "Run the full pipeline"}
+          >
+            {isRunningWorkflow ? "Running…" : "Single Run"}
+          </button>
+          <button
+            type="button"
+            className={styles.batchRun}
+            disabled
+            title="Batch Run — coming in next phase"
+          >
+            Batch Run
+          </button>
+        </div>
       </div>
     </div>
   );

@@ -1,12 +1,11 @@
-/** Header bar — project + session crumbs + Session settings + Generate
- *  workflow button. Uses ComfyProvider for the workflow run state and
- *  validation message that surfaces under the button when a slot is
- *  unbound or empty. */
+/** Header bar — project + session crumbs, knobs toggle, Session
+ *  settings. Generation lives next to the agents that produce its
+ *  inputs (Single Run / Batch Run buttons in the agents-panel
+ *  footer), so this header stays purely navigational. */
 import { useProjects, type Session } from "@/api/sessions";
 import { Button } from "@/components/atoms/Button";
 import { Icon } from "@/components/atoms/Icon";
 import styles from "@/components/templates/WorkspaceLayout.module.css";
-import { useComfy } from "../state/useComfy";
 
 export function ComfyHeader({
   session,
@@ -21,7 +20,6 @@ export function ComfyHeader({
   knobsOpen: boolean;
   onToggleKnobs: () => void;
 }) {
-  const { runWorkflow, isRunningWorkflow, workflowGenerateError } = useComfy();
   const projects = useProjects();
   const project = (projects.data ?? []).find((p) => p.id === projectId);
 
@@ -48,23 +46,6 @@ export function ComfyHeader({
         >
           Session settings
         </Button>
-        <div style={{ display: "flex", flexDirection: "column", gap: 2, alignItems: "flex-end" }}>
-          <Button
-            size="sm"
-            variant="primary"
-            icon={<Icon name="Sparkles" size={12} />}
-            onClick={runWorkflow}
-            disabled={isRunningWorkflow}
-            title={workflowGenerateError ?? "Run the workflow with current state"}
-          >
-            {isRunningWorkflow ? "Generating…" : "Generate workflow"}
-          </Button>
-          {workflowGenerateError && (
-            <span style={{ fontSize: 10, color: "var(--danger)", maxWidth: 320, textAlign: "right" }}>
-              {workflowGenerateError}
-            </span>
-          )}
-        </div>
       </div>
     </header>
   );
