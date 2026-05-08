@@ -1685,9 +1685,7 @@ exposes layout CSS variables as sliders + manual numeric
 inputs, persisted per knob in localStorage. Job snapshots — one
 per workflow Generate — persist to localStorage keyed by session
 id, capped at 50 with LRU eviction; opening a snapshot reveals
-the full agent + binding state that produced the result. See
-`docs/comfy-agents-ui-mock-plan.md` for the original variant
-exploration that produced this layout.
+the full agent + binding state that produced the result.
 
 **Source-slot indirection.** Mock-only per-session table
 (`state/source-slots.ts`, localStorage-backed) sitting between
