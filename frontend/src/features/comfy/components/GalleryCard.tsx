@@ -1,6 +1,9 @@
 /** One card in the gallery — a real Single Run job (comfy_jobs row).
- *  Click → opens the SnapshotViewer modal with the run's frozen
- *  payload + agents snapshot + outputs. */
+ *  Stripped to just the result thumbnail + a colour-coded border:
+ *  click opens the SnapshotViewer modal that owns every action and
+ *  every byte of metadata. The hover tooltip carries enough context
+ *  (generation id, timestamp, status) to identify the card without
+ *  opening it. */
 import type { ComfyJob } from "@/api/comfy";
 import { useComfy } from "../state/useComfy";
 import styles from "./GalleryCard.module.css";
@@ -8,53 +11,42 @@ import styles from "./GalleryCard.module.css";
 export function GalleryCard({
   job,
   onOpen,
-  onDelete,
 }: {
   job: ComfyJob;
   onOpen: () => void;
-  onDelete: () => void;
 }) {
   const primary = job.outputs.find((o) => o.is_primary) ?? job.outputs[0];
   const slotCount = Object.keys(job.payload).length;
+  const tooltip =
+    `${job.generation_id}\n` +
+    `${formatTime(job.started_at)}\n` +
+    `${job.status} · ${slotCount} slot(s) · ${job.agents_snapshot.length} agent(s)` +
+    (job.error_message ? `\n${job.error_message}` : "");
+  const stateClass =
+    job.status === "error"
+      ? styles.errored
+      : job.status === "cancelled"
+      ? styles.cancelled
+      : "";
   return (
-    <div className={`${styles.card} ${job.status === "error" ? styles.errored : ""}`}>
-      <button
-        type="button"
-        className={styles.thumb}
-        onClick={onOpen}
-        title="Open snapshot"
-      >
-        {primary ? (
-          <img src={primary.url} alt={primary.slot_label ?? "result"} />
-        ) : (
-          <div className={styles.placeholder}>
-            {job.status === "error" ? "error" : "no result"}
-          </div>
-        )}
-      </button>
-      <div className={styles.meta}>
-        <div className={styles.metaRow}>
-          <span className={styles.name}>{job.generation_id}</span>
-          <span className={styles.time}>{formatTime(job.started_at)}</span>
+    <button
+      type="button"
+      className={`${styles.card} ${stateClass}`}
+      onClick={onOpen}
+      title={tooltip}
+    >
+      {primary ? (
+        <img
+          className={styles.thumbImg}
+          src={primary.url}
+          alt={primary.slot_label ?? "result"}
+        />
+      ) : (
+        <div className={styles.placeholder}>
+          {job.status === "error" ? "error" : "no result"}
         </div>
-        <div className={styles.metaRow}>
-          <span className={styles.dim}>
-            {job.status} · {slotCount} slots · {job.agents_snapshot.length} agents
-          </span>
-        </div>
-        {job.error_message && (
-          <div className={styles.errorMsg}>{job.error_message}</div>
-        )}
-        <div className={styles.actions}>
-          <button type="button" onClick={onOpen}>
-            Open snapshot
-          </button>
-          <button type="button" onClick={onDelete} className={styles.delete}>
-            Delete
-          </button>
-        </div>
-      </div>
-    </div>
+      )}
+    </button>
   );
 }
 
@@ -62,16 +54,11 @@ export function RunningJobCard() {
   const { runState } = useComfy();
   const stage = runState?.currentStage ?? "validate";
   return (
-    <div className={`${styles.card} ${styles.running}`}>
-      <div className={styles.thumb}>
-        <div className={styles.spinner}>●●●</div>
-      </div>
-      <div className={styles.meta}>
-        <div className={styles.metaRow}>
-          <span className={styles.name}>Running…</span>
-        </div>
-        <div className={styles.dim}>stage: {stage}</div>
-      </div>
+    <div
+      className={`${styles.card} ${styles.running}`}
+      title={`Running — stage: ${stage}`}
+    >
+      <div className={styles.spinner}>●●●</div>
     </div>
   );
 }

@@ -62,6 +62,23 @@
   border-color: var(--accent);
 }
 
+.delete {
+  font: inherit;
+  font-size: 11px;
+  padding: 5px 12px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-muted);
+  cursor: pointer;
+  margin-right: 4px;
+}
+
+.delete:hover {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
 .close {
   background: transparent;
   border: none;

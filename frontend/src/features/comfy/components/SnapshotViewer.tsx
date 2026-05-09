@@ -1,6 +1,10 @@
 /** Modal that explodes a comfy_jobs row into a 3-panel inspection view:
  *  state (every agent's prompt + last_value), bindings (workflow slot
- *  → resolved value), result (primary output full-size). */
+ *  → resolved value), result (primary output full-size).
+ *
+ *  The gallery card surface is image-only; every action lives here:
+ *  Delete (drops the row + files server-side), Close (×). Tab strip
+ *  between Result / Bindings / State for inspection. */
 import { useState } from "react";
 import type { ComfyJob } from "@/api/comfy";
 import styles from "./SnapshotViewer.module.css";
@@ -10,12 +14,22 @@ type Tab = "state" | "bindings" | "result";
 export function SnapshotViewer({
   job,
   onClose,
+  onDelete,
 }: {
   job: ComfyJob;
   onClose: () => void;
+  onDelete: () => void;
 }) {
   const [tab, setTab] = useState<Tab>("result");
   const primary = job.outputs.find((o) => o.is_primary) ?? job.outputs[0];
+
+  function handleDelete() {
+    if (!confirm(`Delete run ${job.generation_id}? This drops files too.`)) {
+      return;
+    }
+    onDelete();
+    onClose();
+  }
 
   return (
     <div className={styles.backdrop} onClick={onClose}>
@@ -48,7 +62,15 @@ export function SnapshotViewer({
               Result
             </button>
           </div>
-          <button className={styles.close} onClick={onClose}>
+          <button
+            type="button"
+            className={styles.delete}
+            onClick={handleDelete}
+            title="Delete this run + its output files"
+          >
+            Delete
+          </button>
+          <button className={styles.close} onClick={onClose} title="Close">
             ×
           </button>
         </header>

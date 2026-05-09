@@ -24,8 +24,8 @@ export function GalleryPanel() {
         {isRunningWorkflow && <RunningJobCard />}
         {jobs.length === 0 && !isRunningWorkflow && (
           <div className={styles.empty}>
-            No runs yet. Press <strong>Single Run</strong> in the agents
-            panel once every binding=llm slot is filled.
+            No runs yet. Open the <strong>Single Run</strong> tab and
+            press Start once every binding=llm slot is filled.
           </div>
         )}
         {jobs.map((job) => (
@@ -33,12 +33,15 @@ export function GalleryPanel() {
             key={job.id}
             job={job}
             onOpen={() => setOpenJobId(job.id)}
-            onDelete={() => deleteJob(job.id)}
           />
         ))}
       </div>
       {openJob && (
-        <SnapshotViewer job={openJob} onClose={() => setOpenJobId(null)} />
+        <SnapshotViewer
+          job={openJob}
+          onClose={() => setOpenJobId(null)}
+          onDelete={() => deleteJob(openJob.id)}
+        />
       )}
     </div>
   );
