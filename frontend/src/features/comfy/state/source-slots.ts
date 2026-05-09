@@ -1,19 +1,15 @@
-/** Per-session "source slots" — a layer of indirection between agents
- *  and session source images.
- *
- *  Today an agent's source-input picks an image directly. Once we
- *  start composing multi-step / multi-agent flows, the same image
- *  will be referenced from many places (one VL pass for "main",
- *  another for "ref_in_scene", and so on). A slot table fixes that:
- *  agents bind to a slot id, slots map to an image and carry a
- *  purpose (main / scene reference / text-only reference) plus a
- *  human-readable key.
- *
- *  This is a frontend-only mock persisted in localStorage keyed by
- *  session.id. When the real Source-slot table lands on the backend,
- *  this file is the migration canary. See
- *  docs/comfy-agents-ui-mock-plan.md.
+/** Per-session source slots — display name + purpose + description +
+ *  bound image. Until iter 8 these lived in localStorage; now the
+ *  authoritative store is `comfy_session_source_slots` on the
+ *  backend. This module exports the legacy types + UI constants so
+ *  the panels can keep their existing shape, plus a one-time
+ *  migration helper that copies any leftover localStorage entries
+ *  into the server (preserving ids so workflow / agent references
+ *  that point at them still resolve).
  */
+
+import { comfyApi, type ServerSourceSlot } from "@/api/comfy";
+import { ApiError } from "@/api/client";
 
 export const SOURCE_PURPOSES = ["main", "ref_in_scene", "ref_text_only"] as const;
 export type SourcePurpose = (typeof SOURCE_PURPOSES)[number];
@@ -31,46 +27,32 @@ export const SOURCE_PURPOSE_HINT: Record<SourcePurpose, string> = {
     "Reference used by VL analysis only, never composited into the scene.",
 };
 
+/** Legacy in-memory shape — what the SourcesPanel and ComfyProvider
+ *  pass around. Maps 1-to-1 with `ServerSourceSlot` minus the
+ *  audit columns; we strip those at the data-load boundary so panels
+ *  stay agnostic. */
 export type SourceSlot = {
   id: string;
-  key: string; // unique within session; auto-numbered "Image N" by default
+  key: string;
   purpose: SourcePurpose;
   description: string | null;
-  source_image_id: string | null; // bound session.source_images.id, or null
+  source_image_id: string | null;
 };
+
+export function fromServerSlot(s: ServerSourceSlot): SourceSlot {
+  return {
+    id: s.id,
+    key: s.key,
+    purpose: s.purpose as SourcePurpose,
+    description: s.description,
+    source_image_id: s.source_image_id,
+  };
+}
 
 const STORAGE_PREFIX = "comfymock:source-slots:";
 
 function storageKey(sessionId: string): string {
   return `${STORAGE_PREFIX}${sessionId}`;
-}
-
-export function loadSourceSlots(sessionId: string): SourceSlot[] {
-  try {
-    const raw = localStorage.getItem(storageKey(sessionId));
-    if (!raw) return [];
-    const parsed = JSON.parse(raw) as unknown;
-    if (!Array.isArray(parsed)) return [];
-    return parsed.filter(isValidSourceSlot);
-  } catch {
-    return [];
-  }
-}
-
-export function saveSourceSlots(
-  sessionId: string,
-  slots: SourceSlot[],
-): SourceSlot[] {
-  try {
-    if (slots.length === 0) {
-      localStorage.removeItem(storageKey(sessionId));
-    } else {
-      localStorage.setItem(storageKey(sessionId), JSON.stringify(slots));
-    }
-  } catch {
-    /* quota — silent. The next save attempt will retry. */
-  }
-  return slots;
 }
 
 function isValidSourceSlot(v: unknown): v is SourceSlot {
@@ -86,26 +68,84 @@ function isValidSourceSlot(v: unknown): v is SourceSlot {
   );
 }
 
-/** Build a fresh slot with an auto-numbered "Image N" key. The
- *  first slot gets purpose=main; subsequent slots default to
- *  ref_in_scene. */
-export function makeSourceSlot(existing: SourceSlot[]): SourceSlot {
-  const id = crypto.randomUUID().replace(/-/g, "").slice(0, 16);
-  const key = nextImageKey(existing);
-  const purpose: SourcePurpose = existing.length === 0 ? "main" : "ref_in_scene";
-  return {
-    id,
-    key,
-    purpose,
-    description: null,
-    source_image_id: null,
-  };
+/** One-time migration: when the server returns no slots for a session
+ *  but localStorage has some, POST them back (preserving ids), then
+ *  clear localStorage. Idempotent — once the backend has any slot
+ *  for the session, we never touch localStorage again.
+ *
+ *  Returns true when at least one slot was migrated; the caller can
+ *  invalidate the slots query so the freshly-migrated rows render.
+ */
+export async function migrateLocalStorageSlots(
+  sessionId: string,
+  serverSlots: ServerSourceSlot[],
+): Promise<boolean> {
+  if (serverSlots.length > 0) {
+    // Backend already authoritative — clear any stale localStorage
+    // copy so subsequent reloads don't try to migrate twice.
+    try {
+      localStorage.removeItem(storageKey(sessionId));
+    } catch {
+      /* ignore */
+    }
+    return false;
+  }
+  let raw: string | null;
+  try {
+    raw = localStorage.getItem(storageKey(sessionId));
+  } catch {
+    return false;
+  }
+  if (!raw) return false;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return false;
+  }
+  if (!Array.isArray(parsed)) return false;
+  const slots = parsed.filter(isValidSourceSlot);
+  if (slots.length === 0) {
+    try {
+      localStorage.removeItem(storageKey(sessionId));
+    } catch {
+      /* ignore */
+    }
+    return false;
+  }
+  let migrated = 0;
+  for (const [position, slot] of slots.entries()) {
+    try {
+      await comfyApi.createSourceSlot(sessionId, {
+        id: slot.id,
+        key: slot.key,
+        purpose: slot.purpose,
+        description: slot.description,
+        source_image_id: slot.source_image_id,
+        position,
+      });
+      migrated += 1;
+    } catch (err) {
+      // 409 on duplicate id / key means the server already has the
+      // row — keep going. Anything else: bail; the user can retry by
+      // reloading.
+      if (err instanceof ApiError && err.status === 409) continue;
+      console.warn("[source-slots] migration step failed", err);
+      return false;
+    }
+  }
+  try {
+    localStorage.removeItem(storageKey(sessionId));
+  } catch {
+    /* ignore */
+  }
+  return migrated > 0;
 }
 
-/** Pick "Image N" with N = lowest unused integer ≥ 1 among existing
- *  keys that match `Image \d+`. Custom keys are ignored — if the user
- *  has renamed slots to anything else, we just pick the next number
- *  past their explicit "Image N"s. */
+/** Auto-numbered "Image N" key — same logic as before, used by the
+ *  + slot button when creating fresh slots. The backend uses the same
+ *  unique-key invariant, so callers can pass the suggested key
+ *  through directly. */
 export function nextImageKey(existing: SourceSlot[]): string {
   const taken = new Set<number>();
   for (const s of existing) {
@@ -117,8 +157,10 @@ export function nextImageKey(existing: SourceSlot[]): string {
   return `Image ${n}`;
 }
 
-/** Look up a slot by its id (cheap; the list is short). Returns null
- *  when the slot was deleted or never existed. */
+export function nextPurpose(existing: SourceSlot[]): SourcePurpose {
+  return existing.length === 0 ? "main" : "ref_in_scene";
+}
+
 export function findSlot(
   slots: SourceSlot[],
   id: string | null | undefined,

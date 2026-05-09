@@ -27,21 +27,27 @@ import {
   comfyKeys,
   subscribeToJobStream,
   useAgents,
+  useCreateSourceSlot,
   useDeleteJob,
+  useDeleteSourceSlot,
   useJobs,
   useSlotMap,
+  useSourceSlots,
   useStartSingleRun,
+  useUpdateSourceSlot,
   type Agent,
   type ComfyJob,
   type ComfyRunEvent,
   type SlotMapResponse,
+  type SourceSlotCreateBody,
+  type SourceSlotPatchBody,
 } from "@/api/comfy";
 import { ApiError } from "@/api/client";
 import type { Session } from "@/api/sessions";
 import { emulateChatReply } from "../mocks/chat-emulator";
 import {
-  loadSourceSlots,
-  saveSourceSlots,
+  fromServerSlot,
+  migrateLocalStorageSlots,
   type SourceSlot,
 } from "./source-slots";
 
@@ -120,13 +126,14 @@ export type ComfyContextShape = {
   slotMapLoading: boolean;
   jobs: ComfyJob[];
   jobsLoading: boolean;
-  // Browser-only — track A wires real chat; iter 3 (deferred) drops
-  // the source-slot indirection.
+  // Browser-only — track A wires real chat.
   chat: ChatMessage[];
-  /** Per-session, browser-only source-slot table. Mock layer of
-   *  indirection between agents and session source images — agents
-   *  bind to slot ids, slots map to images. */
+  /** Per-session named source slots — server-backed (was localStorage
+   *  pre-iter-8). Each slot maps to one ``session_source_images`` row;
+   *  agents and workflow `binding=user_image` slots reference these by
+   *  id. */
   sourceSlots: SourceSlot[];
+  sourceSlotsLoading: boolean;
   selectedAgentId: string | null;
   runningAgentIds: ReadonlySet<string>;
   /** Per-agent surface for the most recent /run failure. Cleared on
@@ -140,7 +147,12 @@ export type ComfyContextShape = {
   workflowGenerateError: string | null;
   // Actions.
   selectAgent: (id: string | null) => void;
-  setSourceSlots: (slots: SourceSlot[]) => void;
+  /** Granular source-slot CRUD — POST/PATCH/DELETE round-trips with
+   *  optimistic invalidation. The legacy `setSourceSlots(arr)` setter
+   *  is gone; panels call these directly. */
+  addSourceSlot: (body: SourceSlotCreateBody) => Promise<SourceSlot | null>;
+  patchSourceSlot: (slotId: string, patch: SourceSlotPatchBody) => Promise<void>;
+  removeSourceSlot: (slotId: string) => Promise<void>;
   runAgent: (agentId: string) => Promise<void>;
   runWorkflow: () => Promise<void>;
   /** Clear ``runState`` once the run terminates. The Run Viewer
@@ -170,17 +182,40 @@ export function ComfyProvider({
   const jobsQuery = useJobs(sessionId);
   const startSingleRun = useStartSingleRun(sessionId);
   const deleteJobMutation = useDeleteJob(sessionId);
+  const sourceSlotsQuery = useSourceSlots(sessionId);
+  const createSlotMutation = useCreateSourceSlot(sessionId);
+  const updateSlotMutation = useUpdateSourceSlot(sessionId);
+  const deleteSlotMutation = useDeleteSourceSlot(sessionId);
 
   const agents = useMemo(() => agentsQuery.data ?? [], [agentsQuery.data]);
   const slotMap = slotMapQuery.data ?? null;
   const jobs = useMemo(() => jobsQuery.data ?? [], [jobsQuery.data]);
-
-  // Browser-only state — track A wires real chat; iter 3 (deferred)
-  // cleans up the source-slot indirection.
-  const [chat, setChat] = useState<ChatMessage[]>([]);
-  const [sourceSlots, setSourceSlotsState] = useState<SourceSlot[]>(() =>
-    loadSourceSlots(sessionId),
+  const sourceSlots = useMemo(
+    () => (sourceSlotsQuery.data ?? []).map(fromServerSlot),
+    [sourceSlotsQuery.data],
   );
+
+  // One-time localStorage → server migration: when the server returns
+  // an empty list and there's a stale localStorage copy, POST every
+  // entry (preserving its id so workflow / agent references keep
+  // resolving), then clear localStorage. Idempotent — once the server
+  // has any slot for the session, we never read localStorage again.
+  const migratedRef = useRef(false);
+  useEffect(() => {
+    if (migratedRef.current) return;
+    const data = sourceSlotsQuery.data;
+    if (data === undefined) return; // still loading
+    migratedRef.current = true;
+    void migrateLocalStorageSlots(sessionId, data ?? []).then((didMigrate) => {
+      if (didMigrate) {
+        void queryClient.invalidateQueries({
+          queryKey: comfyKeys.sourceSlots(sessionId),
+        });
+      }
+    });
+  }, [sessionId, sourceSlotsQuery.data, queryClient]);
+
+  const [chat, setChat] = useState<ChatMessage[]>([]);
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
   const [runningAgentIds, setRunningAgentIds] = useState<Set<string>>(
     () => new Set(),
@@ -219,12 +254,39 @@ export function ComfyProvider({
     setSelectedAgentId(id);
   }, []);
 
-  const setSourceSlots = useCallback(
-    (slots: SourceSlot[]) => {
-      const next = saveSourceSlots(sessionId, slots);
-      setSourceSlotsState(next);
+  const addSourceSlot = useCallback(
+    async (body: SourceSlotCreateBody) => {
+      try {
+        const created = await createSlotMutation.mutateAsync(body);
+        return fromServerSlot(created);
+      } catch (err) {
+        console.warn("[source-slots] create failed", err);
+        return null;
+      }
     },
-    [sessionId],
+    [createSlotMutation],
+  );
+
+  const patchSourceSlot = useCallback(
+    async (slotId: string, patch: SourceSlotPatchBody) => {
+      try {
+        await updateSlotMutation.mutateAsync({ slotId, body: patch });
+      } catch (err) {
+        console.warn("[source-slots] update failed", err);
+      }
+    },
+    [updateSlotMutation],
+  );
+
+  const removeSourceSlot = useCallback(
+    async (slotId: string) => {
+      try {
+        await deleteSlotMutation.mutateAsync(slotId);
+      } catch (err) {
+        console.warn("[source-slots] delete failed", err);
+      }
+    },
+    [deleteSlotMutation],
   );
 
   const runAgent = useCallback(
@@ -488,6 +550,7 @@ export function ComfyProvider({
       jobsLoading: jobsQuery.isLoading,
       chat,
       sourceSlots,
+      sourceSlotsLoading: sourceSlotsQuery.isLoading,
       selectedAgentId,
       runningAgentIds,
       agentRunErrors,
@@ -495,7 +558,9 @@ export function ComfyProvider({
       isRunningWorkflow,
       workflowGenerateError,
       selectAgent,
-      setSourceSlots,
+      addSourceSlot,
+      patchSourceSlot,
+      removeSourceSlot,
       runAgent,
       runWorkflow,
       dismissRun,
@@ -513,6 +578,7 @@ export function ComfyProvider({
       jobsQuery.isLoading,
       chat,
       sourceSlots,
+      sourceSlotsQuery.isLoading,
       selectedAgentId,
       runningAgentIds,
       agentRunErrors,
@@ -520,7 +586,9 @@ export function ComfyProvider({
       isRunningWorkflow,
       workflowGenerateError,
       selectAgent,
-      setSourceSlots,
+      addSourceSlot,
+      patchSourceSlot,
+      removeSourceSlot,
       runAgent,
       runWorkflow,
       dismissRun,

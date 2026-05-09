@@ -354,6 +354,8 @@ export const comfyKeys = {
   jobs: (sessionId: string) =>
     ["comfy", "sessions", sessionId, "jobs"] as const,
   job: (jobId: string) => ["comfy", "jobs", jobId] as const,
+  sourceSlots: (sessionId: string) =>
+    ["comfy", "sessions", sessionId, "source_slots"] as const,
   packs: () => ["comfy", "packs"] as const,
   pack: (name: string) => ["comfy", "packs", name] as const,
   nodes: (q?: string, pack?: string, hasDescription?: boolean) =>
@@ -516,6 +518,30 @@ export const comfyApi = {
     apiFetch<Agent>(
       `/api/comfy/sessions/${encodeURIComponent(sessionId)}/agents/${encodeURIComponent(agentId)}/run`,
       { method: "POST", body: JSON.stringify(body ?? {}) },
+    ),
+  // --- source slots (server-side, replaces localStorage) ----------------
+  listSourceSlots: (sessionId: string) =>
+    apiFetch<{ slots: ServerSourceSlot[] }>(
+      `/api/comfy/sessions/${encodeURIComponent(sessionId)}/source_slots`,
+    ).then((r) => r.slots),
+  createSourceSlot: (sessionId: string, body: SourceSlotCreateBody) =>
+    apiFetch<ServerSourceSlot>(
+      `/api/comfy/sessions/${encodeURIComponent(sessionId)}/source_slots`,
+      { method: "POST", body: JSON.stringify(body) },
+    ),
+  updateSourceSlot: (
+    sessionId: string,
+    slotId: string,
+    body: SourceSlotPatchBody,
+  ) =>
+    apiFetch<ServerSourceSlot>(
+      `/api/comfy/sessions/${encodeURIComponent(sessionId)}/source_slots/${encodeURIComponent(slotId)}`,
+      { method: "PATCH", body: JSON.stringify(body) },
+    ),
+  deleteSourceSlot: (sessionId: string, slotId: string) =>
+    apiFetch<void>(
+      `/api/comfy/sessions/${encodeURIComponent(sessionId)}/source_slots/${encodeURIComponent(slotId)}`,
+      { method: "DELETE" },
     ),
   // --- Single Run jobs --------------------------------------------------
   startSingleRun: (sessionId: string, body: SingleRunBody) =>
@@ -838,6 +864,94 @@ export function useDeleteJob(sessionId: string | null | undefined) {
       if (sessionId) {
         void client.invalidateQueries({ queryKey: comfyKeys.jobs(sessionId) });
       }
+    },
+  });
+}
+
+// --- Server-side source slots (replaces the localStorage table) -------
+
+export type SourcePurpose = "main" | "ref_in_scene" | "ref_text_only";
+
+export type ServerSourceSlot = {
+  id: string;
+  session_id: string;
+  position: number;
+  key: string;
+  purpose: SourcePurpose;
+  description: string | null;
+  source_image_id: string | null;
+  created_at: number;
+  updated_at: number;
+};
+
+export type SourceSlotCreateBody = {
+  /** Optional explicit id — used by the localStorage migration shim
+   *  so workflow / agent references that point at existing slot ids
+   *  keep resolving. Omit for new slots. */
+  id?: string;
+  key: string;
+  purpose?: SourcePurpose;
+  description?: string | null;
+  source_image_id?: string | null;
+  position?: number;
+};
+
+export type SourceSlotPatchBody = Partial<{
+  key: string;
+  purpose: SourcePurpose;
+  description: string | null;
+  source_image_id: string | null;
+  position: number;
+}>;
+
+export function useSourceSlots(sessionId: string | null | undefined) {
+  return useQuery({
+    queryKey: sessionId
+      ? comfyKeys.sourceSlots(sessionId)
+      : ["comfy", "source_slots", "unset"],
+    queryFn: () => comfyApi.listSourceSlots(sessionId as string),
+    enabled: !!sessionId,
+  });
+}
+
+export function useCreateSourceSlot(sessionId: string | null | undefined) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (body: SourceSlotCreateBody) =>
+      comfyApi.createSourceSlot(sessionId as string, body),
+    onSuccess: () => {
+      if (sessionId)
+        void client.invalidateQueries({
+          queryKey: comfyKeys.sourceSlots(sessionId),
+        });
+    },
+  });
+}
+
+export function useUpdateSourceSlot(sessionId: string | null | undefined) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ slotId, body }: { slotId: string; body: SourceSlotPatchBody }) =>
+      comfyApi.updateSourceSlot(sessionId as string, slotId, body),
+    onSuccess: () => {
+      if (sessionId)
+        void client.invalidateQueries({
+          queryKey: comfyKeys.sourceSlots(sessionId),
+        });
+    },
+  });
+}
+
+export function useDeleteSourceSlot(sessionId: string | null | undefined) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (slotId: string) =>
+      comfyApi.deleteSourceSlot(sessionId as string, slotId),
+    onSuccess: () => {
+      if (sessionId)
+        void client.invalidateQueries({
+          queryKey: comfyKeys.sourceSlots(sessionId),
+        });
     },
   });
 }

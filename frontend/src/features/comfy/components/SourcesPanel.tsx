@@ -24,7 +24,8 @@ import { useComfy } from "../state/useComfy";
 import {
   SOURCE_PURPOSES,
   SOURCE_PURPOSE_LABEL,
-  makeSourceSlot,
+  nextImageKey,
+  nextPurpose,
   type SourcePurpose,
   type SourceSlot,
 } from "../state/source-slots";
@@ -37,7 +38,13 @@ import styles from "./SourcesPanel.module.css";
 const DND_MIME = "application/x-comfymock-source-image";
 
 export function SourcesPanel() {
-  const { session, sourceSlots, setSourceSlots } = useComfy();
+  const {
+    session,
+    sourceSlots,
+    addSourceSlot,
+    patchSourceSlot,
+    removeSourceSlot,
+  } = useComfy();
   const fileInput = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
   const [openSlotId, setOpenSlotId] = useState<string | null>(null);
@@ -74,21 +81,30 @@ export function SourcesPanel() {
     refresh();
   };
 
-  // Slot mutations write through setSourceSlots which persists to
-  // localStorage immediately — no separate save bar needed.
+  // Granular CRUD — each call is one server round-trip with optimistic
+  // refresh via TanStack Query invalidation in the hooks.
   function patchSlot(id: string, patch: Partial<SourceSlot>) {
-    setSourceSlots(
-      sourceSlots.map((s) => (s.id === id ? { ...s, ...patch } : s)),
-    );
+    void patchSourceSlot(id, {
+      // Drop fields the user didn't touch — Pydantic distinguishes
+      // "absent" (leave alone) from "explicit null" (clear).
+      ...(patch.key !== undefined && { key: patch.key }),
+      ...(patch.purpose !== undefined && { purpose: patch.purpose }),
+      ...("description" in patch && { description: patch.description ?? null }),
+      ...("source_image_id" in patch && {
+        source_image_id: patch.source_image_id ?? null,
+      }),
+    });
   }
   function deleteSlot(id: string) {
-    setSourceSlots(sourceSlots.filter((s) => s.id !== id));
     if (openSlotId === id) setOpenSlotId(null);
+    void removeSourceSlot(id);
   }
-  function addSlot() {
-    const slot = makeSourceSlot(sourceSlots);
-    setSourceSlots([...sourceSlots, slot]);
-    setOpenSlotId(slot.id);
+  async function addSlot() {
+    const slot = await addSourceSlot({
+      key: nextImageKey(sourceSlots),
+      purpose: nextPurpose(sourceSlots),
+    });
+    if (slot) setOpenSlotId(slot.id);
   }
 
   // Drag-and-drop wiring. We consider a drag valid only when the
