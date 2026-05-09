@@ -173,6 +173,35 @@ def test_interrupt_raises_on_5xx():
         _run(comfy_client.interrupt(endpoint=ENDPOINT, transport=_async_transport(handler)))
 
 
+# --- free_memory ---------------------------------------------------------
+
+
+def test_free_memory_posts_to_api_free_with_payload():
+    captured: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["url"] = str(request.url)
+        captured["body"] = request.read()
+        return httpx.Response(200, text="")
+
+    _run(comfy_client.free_memory(
+        endpoint=ENDPOINT, transport=_async_transport(handler),
+    ))
+    assert captured["url"] == "http://localhost:8188/api/free"
+    assert b'"unload_models":true' in captured["body"]
+    assert b'"free_memory":true' in captured["body"]
+
+
+def test_free_memory_raises_on_4xx():
+    def handler(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(500, text="boom")
+
+    with pytest.raises(comfy_client.ComfyError):
+        _run(comfy_client.free_memory(
+            endpoint=ENDPOINT, transport=_async_transport(handler),
+        ))
+
+
 # --- shape failure helpers ------------------------------------------------
 
 

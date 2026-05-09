@@ -262,8 +262,9 @@ the scenes", upgrade to β in a follow-up.
   named event on the run's SSE channel so the viewer can render
   per-stage status and values as they arrive. The pipeline is
   serial; failure at any stage flips the run to `error`,
-  short-circuits remaining stages, and still runs the cleanup
-  stage so we don't leak uploaded files.
+  short-circuits remaining stages, and still runs the
+  `unload_comfy` + `cleanup` stages so we don't leak VRAM or
+  uploaded files.
 
   1. **`validate`** — walk every `binding=llm` slot, confirm the
      bound agent output exists; walk every required
@@ -314,18 +315,24 @@ the scenes", upgrade to β in a follow-up.
   9. **`save`** — flip `comfy_jobs.status='success'`, stamp
      `finished_at`. Emit `save_finished` with the gallery card
      payload (job id, primary image URL).
-  10. **`cleanup`** — run the per-session `comfy_input_cleanup`
+  10. **`unload_comfy`** — POST `/api/free` on ComfyUI with
+      `unload_models=true` + `free_memory=true` so the checkpoint
+      / VAE / LoRAs vacate VRAM. Mirrors `unload_lm` at the start;
+      same soft-fail rules — a dead ComfyUI socket emits a
+      warning and continues. Always runs (the run already
+      finished — the only question is whether the unload landed).
+  11. **`cleanup`** — run the per-session `comfy_input_cleanup`
       policy on the uploaded files. Emit `cleanup_finished`
       (with a per-slot kept/deleted summary) or
       `cleanup_warning` when `delete` had to soft-degrade to
       `keep`.
-  11. **`done`** — final terminator event with the run's overall
+  12. **`done`** — final terminator event with the run's overall
       status (`success` / `error` / `cancelled`).
 
   On `execution_error` from ComfyUI: flip `status='error'`,
   persist `error_message`, emit `execute_failed`, then still run
-  the `cleanup` stage (which becomes the orchestrator's only
-  finally-block).
+  the `unload_comfy` + `cleanup` stages — both are
+  always-run finally arms.
 
 - Returns `{job_id, generation_id, stream_url}`. The SSE channel
   at `stream_url` is opened by the frontend immediately after the
@@ -386,7 +393,7 @@ Two regions:
 
 - **Top — pipeline strip.** Compact horizontal stage list
   (`validate → snapshot → agents → unload_lm → upload_inputs →
-  patch → queue → execute → save → cleanup`). Each stage shows
+  patch → queue → execute → save → unload_comfy → cleanup`). Each stage shows
   pending / running / success / failed / skipped state and the
   per-stage elapsed time once finished. Clicking a finished
   stage scrolls its events into focus in the bottom region.

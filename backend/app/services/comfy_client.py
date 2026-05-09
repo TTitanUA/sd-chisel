@@ -298,6 +298,36 @@ async def interrupt(
         raise ComfyError("upstream", f"{resp.status_code}: {resp.text[:200]}")
 
 
+async def free_memory(
+    *,
+    endpoint: dict[str, Any],
+    unload_models: bool = True,
+    free_memory: bool = True,
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> None:
+    """POST /api/free — drop loaded models / VRAM.
+
+    Fire-and-forget — ComfyUI returns 200 with no body once the unload
+    completes. The orchestrator calls this after a Single Run finishes
+    so the next session (or LMStudio for the next run's agents) can
+    reclaim the VRAM. Soft-fails on connection errors via the caller's
+    try/except — the run already succeeded, so an unload failure is a
+    warning, not an error.
+    """
+    server_root, headers = _resolve(endpoint)
+    url = f"{server_root}/api/free"
+    payload = {"unload_models": unload_models, "free_memory": free_memory}
+    try:
+        async with httpx.AsyncClient(transport=transport, timeout=DEFAULT_TIMEOUT) as client:
+            resp = await client.post(url, headers=headers, json=payload)
+    except httpx.TimeoutException as exc:
+        raise ComfyError("timeout", str(exc)) from exc
+    except httpx.HTTPError as exc:
+        raise ComfyError("upstream", str(exc)) from exc
+    if resp.status_code >= 400:
+        raise ComfyError("upstream", f"{resp.status_code}: {resp.text[:200]}")
+
+
 async def stream_events(
     *,
     endpoint: dict[str, Any],

@@ -5,27 +5,32 @@ appears".
 Stages (each emits ``{"stage": <name>, "event": ..., ...}`` to the
 job's ``RunChannel``):
 
-1. ``validate``       — confirm every binding=llm slot has a bound
-                        agent output, every required user_image slot
-                        has an image picked. Raises before snapshot.
-2. ``snapshot``       — create the comfy_jobs row, flip to running.
-3. ``agents``         — for each agent: emit started, run via
-                        comfy_agent_runner, emit finished.
-4. ``unload_lm``      — best-effort LMStudio unload-all to free VRAM.
-5. ``upload_inputs``  — upload session source images for every wired
-                        user_image slot; the returned ComfyUI filename
-                        becomes the slot's value.
-6. ``patch``          — run comfy_graph_patcher with the merged
-                        payload (agents' last_values + frozen +
-                        user_image filenames + overrides).
-7. ``queue``          — POST /api/prompt; capture prompt_id.
-8. ``execute``        — drive the WS consumer; on each `executed`
-                        event for a SaveImage in the output map,
-                        capture the file into
-                        data/images/<sid>/output/<gid>/<label>.<ext>.
-9. ``save``           — flip status to success.
-10. ``cleanup``       — apply the per-session input_cleanup policy.
-11. ``done``          — terminator event with overall status.
+1.  ``validate``       — confirm every binding=llm slot has a bound
+                          agent output, every required user_image slot
+                          has an image picked. Raises before snapshot.
+2.  ``snapshot``       — create the comfy_jobs row, flip to running.
+3.  ``agents``         — for each agent: emit started, run via
+                          comfy_agent_runner, emit finished.
+4.  ``unload_lm``      — best-effort LMStudio unload-all to free VRAM
+                          before ComfyUI loads its checkpoint.
+5.  ``upload_inputs``  — upload session source images for every wired
+                          user_image slot; the returned ComfyUI filename
+                          becomes the slot's value.
+6.  ``patch``          — run comfy_graph_patcher with the merged
+                          payload (agents' last_values + frozen +
+                          user_image filenames + overrides).
+7.  ``queue``          — POST /api/prompt; capture prompt_id.
+8.  ``execute``        — drive the WS consumer; on each `executed`
+                          event for a SaveImage in the output map,
+                          capture the file into
+                          data/images/<sid>/output/<gid>/<label>.<ext>.
+9.  ``save``           — flip status to success.
+10. ``unload_comfy``   — best-effort POST /api/free so ComfyUI drops
+                          checkpoint + VAE from VRAM. The next run
+                          (or any LMStudio call after) gets a clean
+                          slate. Soft-fail.
+11. ``cleanup``        — apply the per-session input_cleanup policy.
+12. ``done``           — terminator event with overall status.
 
 Most stages are best-effort with "warning" events on soft failure;
 a hard failure short-circuits to cleanup → done with status=error.
@@ -370,7 +375,19 @@ async def _run_pipeline(
             "trace": traceback.format_exc(limit=4),
         })
     finally:
-        # 10. cleanup — always runs, even on error.
+        # 10. unload_comfy — always runs so VRAM doesn't stay pinned by
+        #     ComfyUI between runs. Soft-fail; we don't want a dead
+        #     ComfyUI socket to crash the cleanup arm.
+        try:
+            await _stage_unload_comfy(channel=channel)
+        except Exception as exc:  # noqa: BLE001
+            _publish(channel, {
+                "stage": "unload_comfy",
+                "event": "warning",
+                "message": f"{type(exc).__name__}: {exc}",
+            })
+
+        # 11. cleanup — always runs, even on error.
         try:
             await _stage_cleanup(
                 channel=channel,
@@ -488,6 +505,42 @@ async def _stage_unload_lm(
     except Exception as exc:  # noqa: BLE001 — soft-fail
         _publish(channel, {
             "stage": "unload_lm",
+            "event": "warning",
+            "message": f"{type(exc).__name__}: {exc}",
+        })
+
+
+async def _stage_unload_comfy(
+    *, channel: comfy_run_streams.RunChannel,
+) -> None:
+    """Free ComfyUI's loaded models / VRAM after the run finishes.
+
+    Mirrors ``_stage_unload_lm`` at the start of the pipeline — same
+    soft-fail semantics. The endpoint resolver is the same one
+    `_stage_queue` uses; if ComfyUI is unreachable we emit a warning
+    and continue (the next run's `queue` stage will surface the
+    upstream error if it persists).
+    """
+    _publish(channel, {"stage": "unload_comfy", "event": "started"})
+    try:
+        with connect() as conn:
+            cfg = settings_repo.get_comfyui(conn)
+        if not cfg.get("comfyui_url"):
+            _publish(channel, {
+                "stage": "unload_comfy",
+                "event": "warning",
+                "message": "ComfyUI URL not configured; skipping unload",
+            })
+            return
+        endpoint = {
+            "server_root": cfg["comfyui_url"],
+            "api_key": cfg["comfyui_api_key"],
+        }
+        await comfy_client.free_memory(endpoint=endpoint)
+        _publish(channel, {"stage": "unload_comfy", "event": "succeeded"})
+    except Exception as exc:  # noqa: BLE001 — soft-fail, the run is done
+        _publish(channel, {
+            "stage": "unload_comfy",
             "event": "warning",
             "message": f"{type(exc).__name__}: {exc}",
         })

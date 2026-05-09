@@ -26,6 +26,7 @@ const STAGES = [
   "queue",
   "execute",
   "save",
+  "unload_comfy",
   "cleanup",
 ] as const;
 
