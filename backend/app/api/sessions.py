@@ -83,6 +83,7 @@ def _session_to_api_dict(conn: sqlite3.Connection, row: dict) -> dict:
         "generate_settings": row.get("generate_settings"),
         "comfy_workflow_id": row.get("comfy_workflow_id"),
         "comfy_input_cleanup": row.get("comfy_input_cleanup") or "keep",
+        "comfy_restart_after_run": bool(row.get("comfy_restart_after_run", False)),
         "hidden": bool(row.get("hidden", False)),
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
@@ -245,6 +246,7 @@ def update_session(session_id: str, body: SessionUpdate, conn: Conn):
         prompt_model_name=body.prompt_model_name,
         action_bundles=action_bundles or None,
         comfy_input_cleanup=body.comfy_input_cleanup,
+        comfy_restart_after_run=body.comfy_restart_after_run,
     )
     if row is None:
         raise _not_found("session", session_id)

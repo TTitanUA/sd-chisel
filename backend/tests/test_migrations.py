@@ -187,10 +187,12 @@ def test_app_lifespan_applies_migrations_to_fresh_db(tmp_path, monkeypatch):
             }
             assert "schema_migrations" in tables
             assert "sessions" in tables
-            # Migration 018 lands the comfy_input_cleanup column.
+            # Migration 018 lands the comfy_input_cleanup column;
+            # migration 021 lands the comfy_restart_after_run column.
             session_cols = {
                 r[1] for r in conn.execute("PRAGMA table_info(sessions)")
             }
             assert "comfy_input_cleanup" in session_cols
+            assert "comfy_restart_after_run" in session_cols
         finally:
             conn.close()

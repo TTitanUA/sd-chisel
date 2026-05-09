@@ -20,6 +20,7 @@ const baseSession: Session = {
   source_images: [],
   pinned_loras: [],
   comfy_input_cleanup: "keep",
+  comfy_restart_after_run: false,
   hidden: false,
   created_at: 0,
   updated_at: 0,
@@ -103,5 +104,47 @@ describe("SessionSettingsDrawer delete", () => {
     renderDrawer();
     await userEvent.click(screen.getByRole("button", { name: /delete session/i }));
     expect(deleteSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe("SessionSettingsDrawer comfy restart toggle", () => {
+  beforeEach(() => {
+    vi.spyOn(libraryApi, "useLoras").mockReturnValue({ data: [] } as unknown as LorasResult);
+    vi.spyOn(libraryApi, "useModels").mockReturnValue({ data: [] } as unknown as ModelsResult);
+    vi.spyOn(settingsApi, "useLmModelsForVision").mockReturnValue({ data: [] } as unknown as LmModelsResult);
+    vi.spyOn(settingsApi, "useLmModelsForChat").mockReturnValue({ data: [] } as unknown as LmModelsResult);
+  });
+  afterEach(() => vi.restoreAllMocks());
+
+  function renderComfyDrawer() {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const session: Session = { ...baseSession, session_type: "comfy" };
+    return render(
+      <QueryClientProvider client={qc}>
+        <MemoryRouter>
+          <SessionSettingsDrawer session={session} open={true} onOpenChange={() => {}} />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+  }
+
+  it("hides the restart toggle for legacy i2i / t2i sessions", () => {
+    renderDrawer();
+    expect(screen.queryByLabelText(/restart comfyui after each run/i))
+      .not.toBeInTheDocument();
+  });
+
+  it("ships comfy_restart_after_run=true to PATCH after the user toggles it", async () => {
+    const updateSpy = vi.spyOn(sessionsApi, "updateSession")
+      .mockResolvedValue(baseSession);
+    renderComfyDrawer();
+    await userEvent.click(
+      screen.getByLabelText(/restart comfyui after each run/i),
+    );
+    await userEvent.click(screen.getByRole("button", { name: /save changes/i }));
+    expect(updateSpy).toHaveBeenCalledWith(
+      "s1",
+      expect.objectContaining({ comfy_restart_after_run: true }),
+    );
   });
 });

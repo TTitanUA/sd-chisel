@@ -17,6 +17,7 @@ const SESSION: Session = {
   vl_model_name: null,
   prompt_model_name: null,
   comfy_input_cleanup: "keep",
+  comfy_restart_after_run: false,
   hidden: false,
   created_at: 1,
   updated_at: 1,

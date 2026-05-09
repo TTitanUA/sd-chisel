@@ -128,6 +128,7 @@ def _session_row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
     # Surface it on every session row so the API layer can echo it back
     # without branching on session_type.
     d["comfy_input_cleanup"] = d.get("comfy_input_cleanup") or "keep"
+    d["comfy_restart_after_run"] = bool(d.get("comfy_restart_after_run", 0))
     for a in action_settings_svc.ACTIONS:
         col = f"{a}_settings"
         d[col] = action_settings_svc.decode_bundle(d.get(col))
@@ -186,6 +187,7 @@ def update_session(
     prompt_model_name: str | None = None,
     action_bundles: dict[str, dict[str, Any] | None] | None = None,
     comfy_input_cleanup: str | None = None,
+    comfy_restart_after_run: bool | None = None,
 ) -> dict[str, Any] | None:
     """Update mutable session fields.
 
@@ -227,6 +229,9 @@ def update_session(
             )
         sets.append("comfy_input_cleanup = ?")
         params.append(comfy_input_cleanup)
+    if comfy_restart_after_run is not None:
+        sets.append("comfy_restart_after_run = ?")
+        params.append(1 if comfy_restart_after_run else 0)
     sets.append("updated_at = ?")
     params.append(now)
     params.append(session_id)

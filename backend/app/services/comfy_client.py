@@ -298,6 +298,94 @@ async def interrupt(
         raise ComfyError("upstream", f"{resp.status_code}: {resp.text[:200]}")
 
 
+async def memory_snapshot(
+    *,
+    endpoint: dict[str, Any],
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> dict[str, int]:
+    """GET /api/system_stats — return a small dict of RAM + VRAM totals
+    (system RAM from the top-level ``system`` block, VRAM from the
+    first reported CUDA device). Used by the orchestrator to report a
+    freed-bytes delta around the unload_comfy stage so the user can
+    see the unload had effect (otherwise ComfyUI's /api/free returns
+    200 with no body and the operation is invisible).
+
+    Note on RAM: ComfyUI processes ``free_memory`` by calling
+    ``e.reset()`` + scheduling ``gc.collect()`` on the worker thread.
+    Python's allocator (pymalloc) holds onto arenas after collection,
+    so the process's resident set in Task Manager will not always
+    drop — but ``ram_free`` from /api/system_stats reflects what the
+    OS reports, which is the closest signal we have.
+    """
+    server_root, headers = _resolve(endpoint)
+    url = f"{server_root}/api/system_stats"
+    try:
+        async with httpx.AsyncClient(transport=transport, timeout=DEFAULT_TIMEOUT) as client:
+            resp = await client.get(url, headers=headers)
+    except httpx.TimeoutException as exc:
+        raise ComfyError("timeout", str(exc)) from exc
+    except httpx.HTTPError as exc:
+        raise ComfyError("upstream", str(exc)) from exc
+    if resp.status_code >= 400:
+        raise ComfyError("upstream", f"{resp.status_code}: {resp.text[:200]}")
+    body = resp.json() if isinstance(resp.json(), dict) else {}
+    if not isinstance(body, dict):
+        return {}
+    out: dict[str, int] = {}
+    system = body.get("system") if isinstance(body, dict) else None
+    if isinstance(system, dict):
+        out["ram_total"] = int(system.get("ram_total") or 0)
+        out["ram_free"] = int(system.get("ram_free") or 0)
+    devices = body.get("devices") if isinstance(body, dict) else None
+    if isinstance(devices, list) and devices and isinstance(devices[0], dict):
+        d = devices[0]
+        out["vram_total"] = int(d.get("vram_total") or 0)
+        out["vram_free"] = int(d.get("vram_free") or 0)
+        out["torch_vram_total"] = int(d.get("torch_vram_total") or 0)
+        out["torch_vram_free"] = int(d.get("torch_vram_free") or 0)
+    return out
+
+
+async def manager_reboot(
+    *,
+    endpoint: dict[str, Any],
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> None:
+    """POST /manager/reboot — bounce the ComfyUI Python process via the
+    ComfyUI-Manager extension. The endpoint returns 200 (or simply
+    closes the connection) and the ComfyUI process exits and is
+    restarted by the launcher (Manager spawns a watchdog).
+
+    Requires the ComfyUI-Manager custom node to be installed on the
+    target ComfyUI server. If not installed, the endpoint 404s — the
+    caller turns that into a soft warning (the run already succeeded).
+
+    Connection-reset / read-timeout errors are EXPECTED here because
+    the server kills its own listener mid-response; we treat any of
+    those as success.
+    """
+    server_root, headers = _resolve(endpoint)
+    url = f"{server_root}/manager/reboot"
+    try:
+        async with httpx.AsyncClient(
+            transport=transport, timeout=httpx.Timeout(5.0, connect=5.0),
+        ) as client:
+            resp = await client.post(url, headers=headers)
+    except (httpx.RemoteProtocolError, httpx.ReadError, httpx.ReadTimeout):
+        # Server tore the socket down while answering — this is the
+        # normal happy path for a process-restart endpoint.
+        return
+    except httpx.HTTPError as exc:
+        raise ComfyError("upstream", str(exc)) from exc
+    if resp.status_code == 404:
+        raise ComfyError(
+            "upstream",
+            "ComfyUI-Manager not installed (POST /manager/reboot returned 404)",
+        )
+    if resp.status_code >= 400:
+        raise ComfyError("upstream", f"{resp.status_code}: {resp.text[:200]}")
+
+
 async def free_memory(
     *,
     endpoint: dict[str, Any],

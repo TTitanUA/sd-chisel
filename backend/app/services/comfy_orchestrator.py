@@ -419,6 +419,20 @@ async def _run_pipeline(
                 "message": f"{type(exc).__name__}: {exc}",
             })
 
+        # 10b. restart_comfy — opt-in per session. Bounces the ComfyUI
+        #      Python process so pymalloc-held arenas (Windows-specific
+        #      issue, see README) actually return to the OS. Soft-fail
+        #      on missing Manager / unreachable host. Skipped silently
+        #      when the session toggle is off.
+        try:
+            await _stage_restart_comfy(channel=channel, session_id=session_id)
+        except Exception as exc:  # noqa: BLE001
+            _publish(channel, {
+                "stage": "restart_comfy",
+                "event": "warning",
+                "message": f"{type(exc).__name__}: {exc}",
+            })
+
         # 11. cleanup — always runs, even on error.
         try:
             await _stage_cleanup(
@@ -568,11 +582,88 @@ async def _stage_unload_comfy(
             "server_root": cfg["comfyui_url"],
             "api_key": cfg["comfyui_api_key"],
         }
+        # Snapshot RAM + VRAM around the unload so the user sees a
+        # concrete freed-bytes delta in the run trace. ComfyUI's
+        # /api/free returns 200 immediately but processes the flags
+        # asynchronously on its worker thread (set_flag → notify →
+        # next worker iteration runs unload_all_models + e.reset +
+        # gc.collect + soft_empty_cache). Sleep ~1.5s to let that
+        # full sequence settle before re-querying — gc.collect on a
+        # large heap can take several hundred ms.
+        before = await comfy_client.memory_snapshot(endpoint=endpoint)
         await comfy_client.free_memory(endpoint=endpoint)
-        _publish(channel, {"stage": "unload_comfy", "event": "succeeded"})
+        await asyncio.sleep(1.5)
+        after = await comfy_client.memory_snapshot(endpoint=endpoint)
+
+        def _delta_mb(key: str) -> float | None:
+            if not before or not after:
+                return None
+            return round(
+                ((after.get(key, 0) or 0) - (before.get(key, 0) or 0))
+                / (1024 * 1024),
+                1,
+            )
+
+        def _mb(key: str) -> float | None:
+            if not after:
+                return None
+            return round((after.get(key, 0) or 0) / (1024 * 1024), 1)
+
+        _publish(channel, {
+            "stage": "unload_comfy",
+            "event": "succeeded",
+            # Positive = bytes returned to free pool, negative = pool shrank.
+            "vram_freed_mb": _delta_mb("vram_free"),
+            "ram_freed_mb": _delta_mb("ram_free"),
+            "vram_free_mb_after": _mb("vram_free"),
+            "ram_free_mb_after": _mb("ram_free"),
+            "torch_vram_total_mb_after": _mb("torch_vram_total"),
+        })
     except Exception as exc:  # noqa: BLE001 — soft-fail, the run is done
         _publish(channel, {
             "stage": "unload_comfy",
+            "event": "warning",
+            "message": f"{type(exc).__name__}: {exc}",
+        })
+
+
+async def _stage_restart_comfy(
+    *, channel: comfy_run_streams.RunChannel, session_id: str,
+) -> None:
+    """Optional follow-up to ``unload_comfy``: send POST /manager/reboot
+    to ComfyUI-Manager so the whole Python process restarts.
+
+    Only fires when the session's ``comfy_restart_after_run`` column is
+    1. The default is 0 because the reboot adds a 30 s+ cold-start to
+    the next run and disconnects every other client of that ComfyUI
+    instance — see README.md for the rationale and the cheaper
+    PYTHONMALLOC=malloc alternative. Soft-fails on every error path
+    (the actual run already succeeded).
+    """
+    with connect() as conn:
+        session = session_repo.get_session(conn, session_id) or {}
+    if not session.get("comfy_restart_after_run"):
+        return  # opt-in column off — emit nothing, keep the log quiet
+    _publish(channel, {"stage": "restart_comfy", "event": "started"})
+    try:
+        with connect() as conn:
+            cfg = settings_repo.get_comfyui(conn)
+        if not cfg.get("comfyui_url"):
+            _publish(channel, {
+                "stage": "restart_comfy",
+                "event": "warning",
+                "message": "ComfyUI URL not configured; skipping restart",
+            })
+            return
+        endpoint = {
+            "server_root": cfg["comfyui_url"],
+            "api_key": cfg["comfyui_api_key"],
+        }
+        await comfy_client.manager_reboot(endpoint=endpoint)
+        _publish(channel, {"stage": "restart_comfy", "event": "succeeded"})
+    except Exception as exc:  # noqa: BLE001 — soft-fail, the run is done
+        _publish(channel, {
+            "stage": "restart_comfy",
             "event": "warning",
             "message": f"{type(exc).__name__}: {exc}",
         })

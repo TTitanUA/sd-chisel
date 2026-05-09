@@ -87,6 +87,7 @@ class SessionOut(StrictModel):
     generate_settings: dict | None = None
     comfy_workflow_id: str | None = None
     comfy_input_cleanup: ComfyInputCleanup = "keep"
+    comfy_restart_after_run: bool = False
     hidden: bool = False
     created_at: int
     updated_at: int
@@ -127,3 +128,7 @@ class SessionUpdate(StrictModel):
     comfy_input_cleanup: ComfyInputCleanup | None = None
     """Per-session policy for ComfyUI input cleanup. ``None`` leaves the
     column alone; pass ``"keep"`` / ``"delete"`` to update."""
+    comfy_restart_after_run: bool | None = None
+    """Per-session opt-in: bounce the ComfyUI process after every Single
+    Run via POST /manager/reboot (requires ComfyUI-Manager). ``None``
+    leaves the column alone; ``True`` / ``False`` updates it."""

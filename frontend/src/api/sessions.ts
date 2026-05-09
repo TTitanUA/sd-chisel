@@ -53,6 +53,7 @@ export type Session = {
   generate_settings?: SamplingBundle | null;
   comfy_workflow_id?: string | null;
   comfy_input_cleanup: ComfyInputCleanup;
+  comfy_restart_after_run: boolean;
   hidden: boolean;
   created_at: number;
   updated_at: number;
@@ -80,6 +81,9 @@ export type SessionUpdate = {
   generate_settings?: SamplingBundle | null;
   // Per-session ComfyUI input cleanup policy. Absent leaves the column alone.
   comfy_input_cleanup?: ComfyInputCleanup;
+  // Per-session opt-in: restart ComfyUI between runs (POST /manager/reboot
+  // via ComfyUI-Manager). Absent leaves the column alone.
+  comfy_restart_after_run?: boolean;
 };
 
 export type Action = "analyze" | "chat" | "summarize" | "generate";

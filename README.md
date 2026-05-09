@@ -87,3 +87,43 @@ cd frontend && pnpm test
 ## Data
 
 All runtime state — sqlite DB + uploaded images — lives under `./data/` at the repo root. This directory is git-ignored. Delete it to reset everything.
+
+## ComfyUI memory between runs
+
+After every Single Run sd-chisel automatically POSTs `/api/free` to ComfyUI with `{"unload_models": true, "free_memory": true}`. ComfyUI's worker thread picks the flags up at the next iteration and runs `unload_all_models()` + `e.reset()` + `gc.collect()` + `soft_empty_cache()`. The unload event in the run trace reports the freed delta — `vram_freed_mb`, `ram_freed_mb`, and the post-unload absolutes — so you can see the operation actually had effect rather than guessing from Task Manager.
+
+**VRAM does come back.** `torch_vram_total` typically drops to a few tens of MB right after the unload — that's the PyTorch CUDA pool being released to the driver.
+
+**RAM is the awkward one.** Even when `gc.collect()` actually deletes every model reference, Python's `pymalloc` allocator on Windows hangs onto its arenas across collections. The ComfyUI process's resident set in Task Manager will look unchanged for runs in a row, then suddenly drop, and you cannot reliably force it to drop sooner from outside the process. This is a Python/Windows quirk, not a sd-chisel or ComfyUI bug.
+
+If RAM growth across runs is a problem for you, you have two options:
+
+### 1 · Recommended: launch ComfyUI with `PYTHONMALLOC=malloc`
+
+This switches Python from `pymalloc` (which retains arenas) to the system allocator, which on Windows is much more willing to return pages to the OS after `gc.collect()`. There is no measurable performance cost for ComfyUI's workload — pymalloc's win is on tiny short-lived allocations, not the large tensors / numpy buffers that dominate here.
+
+```powershell
+# Windows (PowerShell) — set per-launch:
+$env:PYTHONMALLOC = "malloc"
+python main.py
+```
+
+```bash
+# Linux / macOS (bash):
+PYTHONMALLOC=malloc python main.py
+```
+
+This is the cheap, transparent fix and should be the first thing you try.
+
+### 2 · Opt-in per session: bounce ComfyUI between runs
+
+Open the session settings drawer for any comfy session and tick **"Restart ComfyUI after each run (aggressive cleanup)"**. With it on, the orchestrator follows the standard `unload_comfy` stage with a `restart_comfy` stage that POSTs `/manager/reboot` to [ComfyUI-Manager](https://github.com/ltdrdata/ComfyUI-Manager). The whole Python process exits and is respawned by Manager's watchdog — guaranteed RAM reclaim because the OS frees the entire process address space.
+
+Turn it on with eyes open:
+
+- **Cold start cost.** The next run waits 30 s+ while ComfyUI re-imports custom nodes and warms up.
+- **Disconnects every other client** of that ComfyUI instance — any browser tab on `:8188`, any other tool talking to its API.
+- **Requires the ComfyUI-Manager custom node.** Without it, `POST /manager/reboot` 404s and the run trace surfaces a warning. The run itself still succeeded.
+- The setting is **per session and defaults to off**. Other sessions on the same ComfyUI instance are unaffected unless you flip their toggle too.
+
+Use it only when sustained RAM growth is actually a problem and `PYTHONMALLOC=malloc` isn't enough.

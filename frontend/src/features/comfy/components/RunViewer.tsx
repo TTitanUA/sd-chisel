@@ -103,6 +103,9 @@ function eventSummary(e: ComfyRunEvent): string {
     "agent_id", "name", "model", "slot_label", "comfy_filename",
     "filename", "node_id", "prompt_id", "client_id", "url", "value", "max",
     "message", "kept", "unloaded", "patched_count",
+    "vram_freed_mb", "ram_freed_mb",
+    "vram_free_mb_after", "ram_free_mb_after",
+    "torch_vram_total_mb_after",
   ]) {
     const v = e[k as keyof ComfyRunEvent];
     if (v === undefined || v === null) continue;

@@ -197,6 +197,46 @@ def test_patch_session_round_trips_comfy_input_cleanup(client):
     assert restored["comfy_input_cleanup"] == "keep"
 
 
+def test_session_comfy_restart_after_run_defaults_to_false(client):
+    pid = client.post("/api/projects", json={"name": "P"}).json()["id"]
+    sid = client.post(
+        f"/api/projects/{pid}/sessions",
+        json={"session_type": "i2i", "name": "s", "model_name": None, "use_negative": True},
+    ).json()["id"]
+    body = client.get(f"/api/sessions/{sid}").json()
+    assert body["comfy_restart_after_run"] is False
+
+
+def test_patch_session_round_trips_comfy_restart_after_run(client):
+    pid = client.post("/api/projects", json={"name": "P"}).json()["id"]
+    sid = client.post(
+        f"/api/projects/{pid}/sessions",
+        json={"session_type": "i2i", "name": "s", "model_name": None, "use_negative": True},
+    ).json()["id"]
+
+    base = {
+        "name": "s",
+        "model_name": None,
+        "use_negative": True,
+        "pinned_loras": [],
+    }
+    flipped = client.patch(
+        f"/api/sessions/{sid}",
+        json={**base, "comfy_restart_after_run": True},
+    ).json()
+    assert flipped["comfy_restart_after_run"] is True
+
+    # Absent field on PATCH leaves the value alone.
+    untouched = client.patch(f"/api/sessions/{sid}", json=base).json()
+    assert untouched["comfy_restart_after_run"] is True
+
+    restored = client.patch(
+        f"/api/sessions/{sid}",
+        json={**base, "comfy_restart_after_run": False},
+    ).json()
+    assert restored["comfy_restart_after_run"] is False
+
+
 def test_patch_session_rejects_unknown_comfy_input_cleanup(client):
     pid = client.post("/api/projects", json={"name": "P"}).json()["id"]
     sid = client.post(

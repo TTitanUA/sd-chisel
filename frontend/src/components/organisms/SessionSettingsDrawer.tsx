@@ -42,6 +42,9 @@ export function SessionSettingsDrawer({
   const [comfyInputCleanup, setComfyInputCleanup] = useState<ComfyInputCleanup>(
     session.comfy_input_cleanup,
   );
+  const [comfyRestartAfterRun, setComfyRestartAfterRun] = useState<boolean>(
+    session.comfy_restart_after_run,
+  );
 
   // Auto-pick favorite for prompt model when session has no value yet.
   useEffect(() => {
@@ -71,7 +74,12 @@ export function SessionSettingsDrawer({
         // Only ship the cleanup field for comfy-like sessions; legacy
         // i2i / t2i ignore it on the backend, but sending it would
         // bump every session's updated_at unnecessarily.
-        ...(isComfyLike ? { comfy_input_cleanup: comfyInputCleanup } : {}),
+        ...(isComfyLike
+          ? {
+              comfy_input_cleanup: comfyInputCleanup,
+              comfy_restart_after_run: comfyRestartAfterRun,
+            }
+          : {}),
       }),
     onSuccess: () => {
       invalidate.session(session.id);
@@ -229,6 +237,60 @@ export function SessionSettingsDrawer({
                   ), <code>delete</code> soft-degrades to <code>keep</code> at
                   generation time.
                 </span>
+              </div>
+            )}
+
+            {isComfyLike && (
+              <div className={styles.labelBlock}>
+                <label style={{
+                  display: "flex", gap: 8, alignItems: "flex-start",
+                  cursor: "pointer",
+                }}>
+                  <input
+                    type="checkbox"
+                    checked={comfyRestartAfterRun}
+                    onChange={(e) =>
+                      setComfyRestartAfterRun(e.currentTarget.checked)
+                    }
+                    style={{ marginTop: 3, flexShrink: 0 }}
+                  />
+                  <span style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                    <span>Restart ComfyUI after each run (aggressive cleanup)</span>
+                    <span style={{ fontSize: 12, color: "var(--text-subtle)" }}>
+                      Default: off. With this on, after every Single Run
+                      sd-chisel POSTs <code>/manager/reboot</code> so the
+                      ComfyUI Python process bounces and pymalloc-held RAM
+                      arenas (Windows quirk) actually return to the OS.
+                      Trade-offs:
+                    </span>
+                    <ul style={{
+                      fontSize: 12, color: "var(--text-subtle)",
+                      margin: "0 0 0 16px", padding: 0, lineHeight: 1.5,
+                    }}>
+                      <li>
+                        Adds <strong>30 s+ cold start</strong> to the next
+                        run while ComfyUI re-imports custom nodes.
+                      </li>
+                      <li>
+                        <strong>Disconnects every other client</strong> of
+                        the same ComfyUI instance (browser tab on :8188,
+                        other apps using its API).
+                      </li>
+                      <li>
+                        Requires the{" "}
+                        <strong>ComfyUI-Manager</strong> custom node — without
+                        it the reboot endpoint 404s and the run trace shows
+                        a warning (the run itself still succeeded).
+                      </li>
+                    </ul>
+                    <span style={{ fontSize: 12, color: "var(--text-subtle)" }}>
+                      Cheaper alternative: launch ComfyUI with{" "}
+                      <code>PYTHONMALLOC=malloc</code> so the system
+                      allocator returns RAM on its own. See README →
+                      "ComfyUI memory between runs".
+                    </span>
+                  </span>
+                </label>
               </div>
             )}
 

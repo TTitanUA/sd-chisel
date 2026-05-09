@@ -1171,6 +1171,18 @@ when the resolver returns no path, Phase 3 will soft-degrade to
 `keep` and surface a one-line warning. The column is read by every
 session type but only consumed by `comfy` / `comfy_mock`.
 
+**Per-session ComfyUI restart policy.** Sibling column
+`comfy_restart_after_run` (boolean, default off, migration 021) opts
+the session into a follow-up `restart_comfy` stage in the Single Run
+finally block. When set, the orchestrator POSTs `/manager/reboot`
+(ComfyUI-Manager extension) right after `unload_comfy` so the
+ComfyUI Python process bounces and Windows-pymalloc-held RAM arenas
+finally return to the OS — see README's "ComfyUI memory between
+runs" section for the rationale and the cheaper `PYTHONMALLOC=malloc`
+alternative. Soft-fails on a missing Manager (404) or unreachable
+host with a warning event — the run itself already succeeded. The
+column is read by `comfy` / `comfy_mock`; legacy types ignore it.
+
 ### 10.3. Workflow uploads
 
 `comfy_workflows` stores API-format graphs alongside `graph_hash`
