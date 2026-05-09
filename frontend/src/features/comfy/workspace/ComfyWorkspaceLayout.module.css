@@ -13,28 +13,6 @@
   overflow: hidden;
 }
 
-.workspaceContent {
-  display: contents;
-  transition: opacity 200ms ease;
-}
-
-.locked {
-  pointer-events: none;
-  opacity: 0.55;
-  filter: saturate(0.7);
-}
-
-/* `display: contents` doesn't render a box, so the locked filter
- * needs an actual wrapper. When locked, switch to a flex column
- * so the children (shell + footer) lay out the same way they did
- * under the parent .outer. */
-.workspaceContent.locked {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-  min-height: 0;
-}
-
 .tabs {
   display: flex;
   flex-direction: column;
@@ -83,10 +61,68 @@
 
 .modeBar {
   display: flex;
-  gap: 4px;
+  align-items: center;
+  gap: 8px;
   padding: 6px 12px;
   background: var(--surface-alt);
   border-bottom: 1px solid var(--border);
+}
+
+.modeTabs {
+  display: flex;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+}
+
+.runActions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.runError {
+  font-size: 11px;
+  color: var(--danger);
+  max-width: 240px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.singleRun {
+  font: inherit !important;
+  font-size: 12px !important;
+  font-weight: 600 !important;
+  padding: 5px 14px !important;
+  background: var(--accent) !important;
+  color: white !important;
+  border: 1px solid var(--accent) !important;
+  border-radius: 4px !important;
+  cursor: pointer !important;
+  transition: filter 120ms;
+}
+
+.singleRun:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.singleRun:disabled {
+  opacity: 0.5 !important;
+  cursor: not-allowed !important;
+}
+
+.batchRun {
+  font: inherit !important;
+  font-size: 12px !important;
+  padding: 5px 14px !important;
+  background: transparent !important;
+  color: var(--text-muted) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 4px !important;
+  cursor: not-allowed !important;
+  opacity: 0.6 !important;
 }
 
 .modeBar button {

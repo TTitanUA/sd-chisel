@@ -9,7 +9,7 @@
  *  rest of the doc's mock-vs-real distinctions still apply (chat,
  *  per-agent /run and workflow Generate are emulated client-side
  *  until the matching backend endpoints land). */
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { comfyApi } from "@/api/comfy";
 import { AgentEditor } from "../components/AgentEditor";
@@ -43,10 +43,20 @@ const LEFT_TABS = [
 ] as const;
 
 type LeftTab = (typeof LEFT_TABS)[number]["id"];
-type CenterMode = "agent" | "tree";
+type CenterMode = "agent" | "tree" | "run";
 
 export function ComfyWorkspaceLayout({ knobsOpen }: { knobsOpen: boolean }) {
-  const { session, agents, selectedAgentId, slotMap, runState, isRunningWorkflow, dismissRun } = useComfy();
+  const {
+    session,
+    agents,
+    selectedAgentId,
+    slotMap,
+    runState,
+    isRunningWorkflow,
+    workflowGenerateError,
+    dismissRun,
+    runWorkflow,
+  } = useComfy();
   const knobs = useKnobs("d", KNOBS);
   const workflowQuery = useQuery({
     queryKey: ["comfy", "workflows", session.comfy_workflow_id],
@@ -63,6 +73,13 @@ export function ComfyWorkspaceLayout({ knobsOpen }: { knobsOpen: boolean }) {
     inputName: string;
   } | null>(null);
 
+  // Auto-switch to the Run pipeline tab the moment a run is queued.
+  useEffect(() => {
+    if (runState !== null) {
+      setCenterMode("run");
+    }
+  }, [runState?.jobId]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // The tree drawer needs its own slot-map draft so create / edit /
   // unmap can flow back to useSaveSlotMap.
   const treeHelpers = useSlotDraft(session.id);
@@ -72,17 +89,42 @@ export function ComfyWorkspaceLayout({ knobsOpen }: { knobsOpen: boolean }) {
     [agents, selectedAgentId],
   );
 
-  // Lock the workspace below the modal while a run is in flight —
-  // pointer-events: none + aria-hidden keep keyboard + screenreader
-  // focus contained inside the Run Viewer.
-  const lockedClass = isRunningWorkflow ? styles.locked : "";
+  // Single Run is enabled iff every binding=llm slot has a bound
+  // agent output AND we're not already running. Disabled tooltip
+  // surfaces the missing slot labels (or the most recent error).
+  const llmCoverage = useMemo(() => {
+    if (!slotMap) return null;
+    const llm = slotMap.slot_map.slots.filter((s) => s.binding === "llm");
+    if (llm.length === 0) return null;
+    const bound = new Set<string>();
+    for (const a of agents) {
+      for (const s of a.output_slots) {
+        if (s.bound_to?.workflow_slot_label)
+          bound.add(s.bound_to.workflow_slot_label);
+      }
+    }
+    return llm.filter((s) => !bound.has(s.label));
+  }, [slotMap, agents]);
+
+  const singleRunDisabledReason = (() => {
+    if (isRunningWorkflow) return "Run in progress…";
+    if (llmCoverage && llmCoverage.length > 0) {
+      return `Bind agent outputs to: ${llmCoverage.map((s) => s.label).join(", ")}`;
+    }
+    if (workflowGenerateError) return workflowGenerateError;
+    return null;
+  })();
+
+  // Dismissing the run trace falls back to whichever centre mode the
+  // user was on before. We keep "tree" as the default in case the
+  // first visit ever happened in run mode.
+  const handleDismissRun = () => {
+    dismissRun();
+    setCenterMode((prev) => (prev === "run" ? "tree" : prev));
+  };
 
   return (
     <div className={styles.outer}>
-      <div
-        className={`${styles.workspaceContent} ${lockedClass}`}
-        aria-hidden={isRunningWorkflow ? "true" : undefined}
-      >
       <div className={styles.shell}>
         <nav className={styles.tabs}>
           {LEFT_TABS.map((t) => (
@@ -107,18 +149,53 @@ export function ComfyWorkspaceLayout({ knobsOpen }: { knobsOpen: boolean }) {
 
         <main className={styles.main}>
           <div className={styles.modeBar}>
-            <button
-              className={centerMode === "agent" ? styles.modeActive : ""}
-              onClick={() => setCenterMode("agent")}
-            >
-              Agent editor
-            </button>
-            <button
-              className={centerMode === "tree" ? styles.modeActive : ""}
-              onClick={() => setCenterMode("tree")}
-            >
-              Node tree
-            </button>
+            <div className={styles.modeTabs}>
+              <button
+                className={centerMode === "agent" ? styles.modeActive : ""}
+                onClick={() => setCenterMode("agent")}
+              >
+                Agent editor
+              </button>
+              <button
+                className={centerMode === "tree" ? styles.modeActive : ""}
+                onClick={() => setCenterMode("tree")}
+              >
+                Node tree
+              </button>
+              {runState !== null && (
+                <button
+                  className={centerMode === "run" ? styles.modeActive : ""}
+                  onClick={() => setCenterMode("run")}
+                  title={runState.inProgress ? "Run in progress" : "Last run trace"}
+                >
+                  Pipeline {runState.inProgress ? "·  running" : ""}
+                </button>
+              )}
+            </div>
+            <div className={styles.runActions}>
+              {workflowGenerateError && !isRunningWorkflow && (
+                <span className={styles.runError} title={workflowGenerateError}>
+                  {workflowGenerateError}
+                </span>
+              )}
+              <button
+                type="button"
+                className={styles.singleRun}
+                onClick={runWorkflow}
+                disabled={singleRunDisabledReason !== null}
+                title={singleRunDisabledReason ?? "Run the full pipeline"}
+              >
+                {isRunningWorkflow ? "Running…" : "Single Run"}
+              </button>
+              <button
+                type="button"
+                className={styles.batchRun}
+                disabled
+                title="Batch Run — coming in next phase"
+              >
+                Batch Run
+              </button>
+            </div>
           </div>
           <div className={styles.modeBody}>
             {centerMode === "agent" && (
@@ -136,6 +213,14 @@ export function ComfyWorkspaceLayout({ knobsOpen }: { knobsOpen: boolean }) {
                 helpers={treeHelpers}
                 candidates={slotMap?.candidates ?? null}
               />
+            )}
+            {centerMode === "run" && runState !== null && (
+              <RunViewer onClose={handleDismissRun} />
+            )}
+            {centerMode === "run" && runState === null && (
+              <div className={styles.placeholder}>
+                No run trace — press Single Run to start one.
+              </div>
             )}
           </div>
         </main>
@@ -168,8 +253,6 @@ export function ComfyWorkspaceLayout({ knobsOpen }: { knobsOpen: boolean }) {
         inputName={drawerInput?.inputName ?? null}
         onClose={() => setDrawerInput(null)}
       />
-      </div>
-      {runState !== null && <RunViewer onClose={dismissRun} />}
     </div>
   );
 }
