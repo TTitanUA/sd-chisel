@@ -45,6 +45,11 @@ class RunChannel:
         self.subscribers: set[asyncio.Queue[dict[str, Any]]] = set()
         self.closed = False
         self.closed_at: float | None = None
+        # Set by the cancel endpoint; checked by the orchestrator at
+        # stage boundaries. Distinct from `closed` (which is the
+        # post-`done` GC flag) — a cancelled channel still publishes
+        # the cancellation events through to subscribers.
+        self.cancel_event = asyncio.Event()
 
     def publish(self, event: dict[str, Any]) -> None:
         self.events.append(event)

@@ -273,6 +273,15 @@ def _validate_and_snapshot(
 # --- pipeline -----------------------------------------------------------
 
 
+def _check_cancelled(channel: comfy_run_streams.RunChannel) -> None:
+    """Raise CancelledError when the cancel endpoint flipped the
+    channel's flag. Called at every stage boundary so a cancel posted
+    mid-pipeline takes effect at the next safe point rather than
+    abruptly tearing down whatever stage is in flight."""
+    if channel.cancel_event.is_set():
+        raise asyncio.CancelledError("user cancelled run")
+
+
 async def _run_pipeline(
     *,
     job_id: str,
@@ -289,6 +298,7 @@ async def _run_pipeline(
     error_message: str | None = None
     upload_subfolder: str | None = None
     try:
+        _check_cancelled(channel)
         # 3. agents
         if rerun_agents:
             await _stage_agents(
@@ -301,9 +311,11 @@ async def _run_pipeline(
                 agents_snapshot = agent_repo.list_agents(conn, session_id)
         else:
             _publish(channel, {"stage": "agents", "event": "skipped"})
+        _check_cancelled(channel)
 
         # 4. unload_lm — best-effort.
         await _stage_unload_lm(channel=channel)
+        _check_cancelled(channel)
 
         # 5. upload_inputs — for each binding=user_image slot.
         upload_subfolder = f"sd-chisel/{job_id}"
@@ -314,6 +326,7 @@ async def _run_pipeline(
             session_id=session_id,
             upload_subfolder=upload_subfolder,
         )
+        _check_cancelled(channel)
 
         # 6. patch.
         payload = _build_payload(
@@ -328,15 +341,26 @@ async def _run_pipeline(
         patch_result = comfy_graph_patcher.patch_graph(
             graph=graph, slot_map=slot_map_snapshot, payload=payload,
         )
+        # One slot_patched event per actually-written input so the
+        # event log shows which value landed where. The summary
+        # `succeeded` event keeps the warnings + count for the
+        # pipeline strip's running tally.
+        for (label, node_id, input_name) in patch_result.patched_inputs:
+            _publish(channel, {
+                "stage": "patch",
+                "event": "slot_patched",
+                "slot_label": label,
+                "node_id": node_id,
+                "input_name": input_name,
+                "value": payload.get(label),
+            })
         _publish(channel, {
             "stage": "patch",
             "event": "succeeded",
-            "patched": [
-                {"slot_label": l, "node_id": n, "input_name": i}
-                for (l, n, i) in patch_result.patched_inputs
-            ],
+            "patched_count": len(patch_result.patched_inputs),
             "warnings": list(patch_result.warnings),
         })
+        _check_cancelled(channel)
 
         # 7. queue.
         prompt_id = await _stage_queue(
@@ -358,6 +382,14 @@ async def _run_pipeline(
         with connect() as conn:
             comfy_jobs_repo.set_status(conn, job_id, "success")
         _publish(channel, {"stage": "save", "event": "succeeded"})
+    except asyncio.CancelledError:
+        final_status = "cancelled"
+        error_message = "cancelled by user"
+        _publish(channel, {
+            "stage": "execute",
+            "event": "cancelled",
+            "message": error_message,
+        })
     except ValidationError as exc:
         # Shouldn't happen — validation runs before snapshot — but
         # keep a defensive arm in case a downstream stage finds
@@ -640,6 +672,26 @@ async def _stage_queue(
     return prompt_id
 
 
+async def _watch_cancel_then_interrupt(
+    channel: comfy_run_streams.RunChannel,
+    endpoint: dict[str, Any],
+) -> None:
+    """Background task spawned by the execute stage. Waits on the
+    channel's cancel_event, then POSTs /api/interrupt so ComfyUI
+    actually stops the in-flight workflow. The WS loop sees
+    `executing: node=null` (or `execution_error`) shortly after and
+    breaks; the caller then raises CancelledError because the channel
+    flag is set."""
+    try:
+        await channel.cancel_event.wait()
+    except asyncio.CancelledError:
+        return
+    try:
+        await comfy_client.interrupt(endpoint=endpoint)
+    except Exception:  # noqa: BLE001 — best-effort
+        pass
+
+
 async def _stage_execute(
     *,
     channel: comfy_run_streams.RunChannel,
@@ -664,79 +716,94 @@ async def _stage_execute(
 
     client_id = _new_client_id(job_id)
     has_primary = False
-    async with comfy_client.event_stream(
-        endpoint=endpoint, client_id=client_id,
-    ) as events:
-        async for event in events:
-            etype = event.get("type")
-            data = event.get("data") or {}
-            ev_prompt_id = data.get("prompt_id")
-            if ev_prompt_id and ev_prompt_id != prompt_id:
-                # Another job's events on the same client_id — should
-                # not happen with our per-job client_id, but
-                # belt-and-braces.
-                continue
+    interrupt_watcher = asyncio.create_task(
+        _watch_cancel_then_interrupt(channel, endpoint),
+    )
+    try:
+        async with comfy_client.event_stream(
+            endpoint=endpoint, client_id=client_id,
+        ) as events:
+            async for event in events:
+                etype = event.get("type")
+                data = event.get("data") or {}
+                ev_prompt_id = data.get("prompt_id")
+                if ev_prompt_id and ev_prompt_id != prompt_id:
+                    # Another job's events on the same client_id —
+                    # should not happen with our per-job client_id,
+                    # but belt-and-braces.
+                    continue
 
-            if etype == "executing":
-                # When `node` is None the workflow is done; ComfyUI
-                # closes its end of the stream shortly after.
-                node_id = data.get("node")
-                if node_id is None:
+                if etype == "executing":
+                    # When `node` is None the workflow is done;
+                    # ComfyUI closes its end of the stream shortly
+                    # after.
+                    node_id = data.get("node")
+                    if node_id is None:
+                        _publish(channel, {
+                            "stage": "execute",
+                            "event": "execution_completed",
+                        })
+                        break
                     _publish(channel, {
                         "stage": "execute",
-                        "event": "execution_completed",
-                    })
-                    break
-                _publish(channel, {
-                    "stage": "execute",
-                    "event": "executing",
-                    "node_id": node_id,
-                })
-            elif etype == "progress":
-                _publish(channel, {
-                    "stage": "execute",
-                    "event": "progress",
-                    "value": data.get("value"),
-                    "max": data.get("max"),
-                    "node_id": data.get("node"),
-                })
-            elif etype == "executed":
-                node_id = str(data.get("node") or "")
-                images = (data.get("output") or {}).get("images") or []
-                slot_label = output_map_by_node.get(node_id)
-                for idx, img in enumerate(images):
-                    is_primary = not has_primary
-                    has_primary = True
-                    saved = await _save_output(
-                        endpoint=endpoint,
-                        session_id=session_id,
-                        generation_id=generation_id,
-                        slot_label=slot_label,
-                        node_id=node_id,
-                        output_index=idx,
-                        comfy_filename=str(img.get("filename") or ""),
-                        comfy_subfolder=str(img.get("subfolder") or ""),
-                        comfy_type=str(img.get("type") or "output"),
-                        is_primary=is_primary,
-                        job_id=job_id,
-                    )
-                    _publish(channel, {
-                        "stage": "execute",
-                        "event": "image_ready",
-                        "slot_label": slot_label,
+                        "event": "executing",
                         "node_id": node_id,
-                        "output_index": idx,
-                        "url": saved["url"],
-                        "is_primary": is_primary,
                     })
-            elif etype == "execution_error":
-                msg = data.get("exception_message") or "ComfyUI execution error"
-                raise RuntimeError(str(msg))
-            elif etype == "execution_success":
-                # ComfyUI emits this when the queue entry finishes
-                # cleanly. We've already broken on `executing` with
-                # node=None, but keep the arm for completeness.
-                break
+                elif etype == "progress":
+                    _publish(channel, {
+                        "stage": "execute",
+                        "event": "progress",
+                        "value": data.get("value"),
+                        "max": data.get("max"),
+                        "node_id": data.get("node"),
+                    })
+                elif etype == "executed":
+                    node_id = str(data.get("node") or "")
+                    images = (data.get("output") or {}).get("images") or []
+                    slot_label = output_map_by_node.get(node_id)
+                    for idx, img in enumerate(images):
+                        is_primary = not has_primary
+                        has_primary = True
+                        saved = await _save_output(
+                            endpoint=endpoint,
+                            session_id=session_id,
+                            generation_id=generation_id,
+                            slot_label=slot_label,
+                            node_id=node_id,
+                            output_index=idx,
+                            comfy_filename=str(img.get("filename") or ""),
+                            comfy_subfolder=str(img.get("subfolder") or ""),
+                            comfy_type=str(img.get("type") or "output"),
+                            is_primary=is_primary,
+                            job_id=job_id,
+                        )
+                        _publish(channel, {
+                            "stage": "execute",
+                            "event": "image_ready",
+                            "slot_label": slot_label,
+                            "node_id": node_id,
+                            "output_index": idx,
+                            "url": saved["url"],
+                            "is_primary": is_primary,
+                        })
+                elif etype == "execution_error":
+                    msg = data.get("exception_message") or "ComfyUI execution error"
+                    raise RuntimeError(str(msg))
+                elif etype == "execution_success":
+                    # ComfyUI emits this when the queue entry finishes
+                    # cleanly. We've already broken on `executing`
+                    # with node=None, but keep the arm for
+                    # completeness.
+                    break
+    finally:
+        interrupt_watcher.cancel()
+        try:
+            await interrupt_watcher
+        except asyncio.CancelledError:
+            pass
+    # If the cancel flag fired during the loop, propagate so the
+    # outer pipeline arm flips to status='cancelled'.
+    _check_cancelled(channel)
     _publish(channel, {"stage": "execute", "event": "succeeded"})
 
 

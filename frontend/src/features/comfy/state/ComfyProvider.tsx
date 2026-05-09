@@ -160,6 +160,10 @@ export type ComfyContextShape = {
    *  ``inProgress`` is true so the viewer's Close button is the
    *  only path to dismissal. */
   dismissRun: () => void;
+  /** Best-effort cancel of the in-flight run. POSTs to
+   *  /api/comfy/jobs/{id}/cancel; the orchestrator picks the flag up
+   *  at its next stage boundary. */
+  cancelRun: () => Promise<void>;
   sendChat: (text: string) => Promise<void>;
   clearChat: () => void;
   deleteJob: (jobId: string) => void;
@@ -461,6 +465,16 @@ export function ComfyProvider({
     setRunState((prev) => (prev && prev.inProgress ? prev : null));
   }, []);
 
+  const cancelRun = useCallback(async () => {
+    const id = runState?.jobId;
+    if (!id) return;
+    try {
+      await comfyApi.cancelJob(id);
+    } catch (err) {
+      console.warn("[runState] cancel failed", err);
+    }
+  }, [runState?.jobId]);
+
   // Browser-level nav block while a run is in flight — the browser's
   // native confirm is a fallback; the workspace layout adds a router
   // blocker for the in-app navigation paths.
@@ -564,6 +578,7 @@ export function ComfyProvider({
       runAgent,
       runWorkflow,
       dismissRun,
+      cancelRun,
       sendChat,
       clearChat,
       deleteJob,
@@ -592,6 +607,7 @@ export function ComfyProvider({
       runAgent,
       runWorkflow,
       dismissRun,
+      cancelRun,
       sendChat,
       clearChat,
       deleteJob,

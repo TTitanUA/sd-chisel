@@ -163,6 +163,16 @@
   flex-direction: column;
   flex-shrink: 0;
   min-height: 0;
+  /* Animate height when the workspace toggles to Single Run so the
+   * gallery zooms up to fit three rows of half-size cards. */
+  transition: height 320ms cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+/* Three-row zoom for Single Run. Card meta + actions ≈ 80 px,
+ * thumbnail 100 px square (110 - 5*2 padding), gap 6 px → row ≈ 188.
+ * 3 rows + gallery header + a little breathing room ≈ 600 px. */
+.footerZoom {
+  height: 600px;
 }
 
 .footerToggle {

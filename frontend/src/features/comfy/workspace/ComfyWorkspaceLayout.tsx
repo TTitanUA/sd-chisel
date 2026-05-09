@@ -55,7 +55,6 @@ export function ComfyWorkspaceLayout({ knobsOpen }: { knobsOpen: boolean }) {
     isRunningWorkflow,
     workflowGenerateError,
     dismissRun,
-    runWorkflow,
   } = useComfy();
   const knobs = useKnobs("d", KNOBS);
   const workflowQuery = useQuery({
@@ -73,7 +72,10 @@ export function ComfyWorkspaceLayout({ knobsOpen }: { knobsOpen: boolean }) {
     inputName: string;
   } | null>(null);
 
-  // Auto-switch to the Run pipeline tab the moment a run is queued.
+  // Auto-switch to the Single Run tab the moment a run is queued —
+  // resume-on-reload still wants the user to see the pipeline strip
+  // even though the click that opened the tab happened in a prior
+  // tab life.
   useEffect(() => {
     if (runState !== null) {
       setCenterMode("run");
@@ -89,9 +91,9 @@ export function ComfyWorkspaceLayout({ knobsOpen }: { knobsOpen: boolean }) {
     [agents, selectedAgentId],
   );
 
-  // Single Run is enabled iff every binding=llm slot has a bound
-  // agent output AND we're not already running. Disabled tooltip
-  // surfaces the missing slot labels (or the most recent error).
+  // Coverage check for the Start button inside the Run Viewer. The
+  // mode-bar Single Run button itself is always enabled — clicking
+  // it just opens the tab without firing.
   const llmCoverage = useMemo(() => {
     if (!slotMap) return null;
     const llm = slotMap.slot_map.slots.filter((s) => s.binding === "llm");
@@ -106,7 +108,7 @@ export function ComfyWorkspaceLayout({ knobsOpen }: { knobsOpen: boolean }) {
     return llm.filter((s) => !bound.has(s.label));
   }, [slotMap, agents]);
 
-  const singleRunDisabledReason = (() => {
+  const startDisabledReason = (() => {
     if (isRunningWorkflow) return "Run in progress…";
     if (llmCoverage && llmCoverage.length > 0) {
       return `Bind agent outputs to: ${llmCoverage.map((s) => s.label).join(", ")}`;
@@ -162,30 +164,28 @@ export function ComfyWorkspaceLayout({ knobsOpen }: { knobsOpen: boolean }) {
               >
                 Node tree
               </button>
-              {runState !== null && (
-                <button
-                  className={centerMode === "run" ? styles.modeActive : ""}
-                  onClick={() => setCenterMode("run")}
-                  title={runState.inProgress ? "Run in progress" : "Last run trace"}
-                >
-                  Pipeline {runState.inProgress ? "·  running" : ""}
-                </button>
-              )}
+              <button
+                className={centerMode === "run" ? styles.modeActive : ""}
+                onClick={() => setCenterMode("run")}
+                title={
+                  isRunningWorkflow
+                    ? "Run in progress"
+                    : runState
+                    ? "Open Single Run trace"
+                    : "Open Single Run"
+                }
+              >
+                Single Run{isRunningWorkflow ? " · running" : ""}
+              </button>
             </div>
             <div className={styles.runActions}>
-              {workflowGenerateError && !isRunningWorkflow && (
-                <span className={styles.runError} title={workflowGenerateError}>
-                  {workflowGenerateError}
-                </span>
-              )}
               <button
                 type="button"
                 className={styles.singleRun}
-                onClick={runWorkflow}
-                disabled={singleRunDisabledReason !== null}
-                title={singleRunDisabledReason ?? "Run the full pipeline"}
+                onClick={() => setCenterMode("run")}
+                title="Open Single Run"
               >
-                {isRunningWorkflow ? "Running…" : "Single Run"}
+                Single Run
               </button>
               <button
                 type="button"
@@ -214,20 +214,22 @@ export function ComfyWorkspaceLayout({ knobsOpen }: { knobsOpen: boolean }) {
                 candidates={slotMap?.candidates ?? null}
               />
             )}
-            {centerMode === "run" && runState !== null && (
-              <RunViewer onClose={handleDismissRun} />
-            )}
-            {centerMode === "run" && runState === null && (
-              <div className={styles.placeholder}>
-                No run trace — press Single Run to start one.
-              </div>
+            {centerMode === "run" && (
+              <RunViewer
+                onDismiss={handleDismissRun}
+                startDisabledReason={startDisabledReason}
+              />
             )}
           </div>
         </main>
       </div>
 
       {footerOpen && (
-        <footer className={styles.footer}>
+        <footer
+          className={`${styles.footer} ${
+            centerMode === "run" ? styles.footerZoom : ""
+          }`}
+        >
           <button
             className={styles.footerToggle}
             onClick={() => setFooterOpen(false)}

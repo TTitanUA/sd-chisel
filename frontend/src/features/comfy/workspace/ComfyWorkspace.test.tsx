@@ -125,8 +125,11 @@ describe("ComfyWorkspace", () => {
     vi.stubGlobal("fetch", stubFetch({ ready: true }));
     renderWorkspace();
     await waitFor(() => expect(screen.getByText("comfy smoke")).toBeInTheDocument());
+    // Single Run shows up twice (mode tab + action button). Use
+    // getAllByRole to assert presence without picking one.
     await waitFor(() =>
-      expect(screen.getByRole("button", { name: /Single Run/i })).toBeInTheDocument(),
+      expect(screen.getAllByRole("button", { name: /Single Run/i }).length)
+        .toBeGreaterThanOrEqual(1),
     );
     expect(screen.getByRole("button", { name: /Batch Run/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Agent editor/i })).toBeInTheDocument();

@@ -165,6 +165,36 @@ def list_jobs(
     return {"jobs": [_job_to_out(conn, r) for r in rows]}
 
 
+@router.post(
+    "/api/comfy/jobs/{job_id}/cancel",
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def cancel_job(job_id: str, conn: Conn) -> dict[str, Any]:
+    """Best-effort cancellation. Sets the run channel's cancel flag —
+    the orchestrator picks it up at its next stage boundary and the
+    interrupt watcher posts /api/interrupt to ComfyUI if the run is
+    in the execute stage. Returns 202 immediately; the actual
+    transition to `cancelled` lands as an SSE event and the row's
+    `status` updates a moment later.
+    """
+    row = comfy_jobs_repo.get_job(conn, job_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="job not found")
+    if row["status"] not in ("queued", "running"):
+        # Idempotent — cancelling a finished job is a no-op.
+        return {"job_id": job_id, "status": row["status"]}
+    channel = await comfy_run_streams.get_channel(job_id)
+    if channel is None:
+        # Channel was reaped (run finished long ago, status row not
+        # yet updated). Just flip the row.
+        comfy_jobs_repo.set_status(
+            conn, job_id, "cancelled", error_message="cancelled by user",
+        )
+        return {"job_id": job_id, "status": "cancelled"}
+    channel.cancel_event.set()
+    return {"job_id": job_id, "status": "cancelling"}
+
+
 @router.delete(
     "/api/comfy/jobs/{job_id}",
     status_code=status.HTTP_204_NO_CONTENT,

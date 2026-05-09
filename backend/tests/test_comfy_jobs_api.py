@@ -254,6 +254,46 @@ def test_stream_404_when_no_channel(client):
     assert resp.status_code == 404
 
 
+def test_cancel_404_for_unknown_job(client):
+    resp = client.post("/api/comfy/jobs/nope/cancel")
+    assert resp.status_code == 404
+
+
+def test_cancel_idempotent_for_finished_job(client, conn):
+    # Build a finished row directly through the repo so we don't need
+    # an actual orchestrator run.
+    wf = _make_workflow(client, conn)
+    s = _make_session(client, workflow_id=wf["id"])
+    job = comfy_jobs_repo.create_job(
+        conn, session_id=s["id"], workflow_id=wf["id"],
+        generation_id="g", slot_map_snapshot=SLOTS, agents_snapshot=[],
+    )
+    comfy_jobs_repo.set_status(conn, job["id"], "success")
+    resp = client.post(f"/api/comfy/jobs/{job['id']}/cancel")
+    assert resp.status_code == 202
+    # Status untouched on a no-op cancel.
+    assert resp.json()["status"] == "success"
+
+
+def test_cancel_running_job_without_channel_flips_status(client, conn):
+    """When the run has no live channel (e.g. the orchestrator died
+    or was reaped), the cancel endpoint still flips the row to
+    `cancelled` so the gallery reflects reality."""
+    wf = _make_workflow(client, conn)
+    s = _make_session(client, workflow_id=wf["id"])
+    job = comfy_jobs_repo.create_job(
+        conn, session_id=s["id"], workflow_id=wf["id"],
+        generation_id="g", slot_map_snapshot=SLOTS, agents_snapshot=[],
+    )
+    # Row is in `running` from create_job; no channel was ever opened.
+    resp = client.post(f"/api/comfy/jobs/{job['id']}/cancel")
+    assert resp.status_code == 202
+    assert resp.json()["status"] == "cancelled"
+    refreshed = comfy_jobs_repo.get_job(conn, job["id"])
+    assert refreshed is not None
+    assert refreshed["status"] == "cancelled"
+
+
 # --- repo-level invariants -------------------------------------------
 
 

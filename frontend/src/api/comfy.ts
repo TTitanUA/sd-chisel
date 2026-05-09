@@ -559,6 +559,11 @@ export const comfyApi = {
     apiFetch<void>(`/api/comfy/jobs/${encodeURIComponent(jobId)}`, {
       method: "DELETE",
     }),
+  cancelJob: (jobId: string) =>
+    apiFetch<{ job_id: string; status: string }>(
+      `/api/comfy/jobs/${encodeURIComponent(jobId)}/cancel`,
+      { method: "POST" },
+    ),
 };
 
 /** Parse a 409 conflict body returned from createWorkflow. */

@@ -1,16 +1,22 @@
-/** Inline pipeline view — rendered as a third centre-body mode next
- *  to "Agent editor" / "Node tree". Two regions stacked top-to-bottom:
+/** Inline pipeline view — rendered as a centre-body mode next to
+ *  "Agent editor" / "Node tree". Three regions stacked top-to-bottom:
  *
- *  - **Pipeline strip** (top) — one chip per stage with pending /
+ *  - **Header** — title (Single Run · job id · generation id when a
+ *    run exists) + the action button. The action button cycles
+ *    between Start (idle / finished) and Cancel (in flight); the
+ *    tiny × on the right dismisses a finished trace.
+ *  - **Pipeline strip** — one chip per stage with pending /
  *    running / succeeded / failed / warning / skipped state derived
  *    from the SSE event stream.
- *  - **Event log** (bottom) — append-only, newest at the bottom; one
- *    line per server event with its stage / event / detail summary.
+ *  - **Event log** — append-only, newest at the bottom; one line
+ *    per server event with its stage / event / detail summary.
+ *    Patch slot_patched events render the assigned value.
  *
- *  When the run terminates the user can dismiss to clear runState
- *  (the centre body falls back to the previously-active mode); while
- *  inProgress, dismissal is refused and the dismiss button surfaces
- *  the reason. */
+ *  The viewer renders even when no run has fired — the strip shows
+ *  every stage as pending and the body invites the user to press
+ *  Start. After a run finishes the user can dismiss the trace OR
+ *  press Start again to fire another run.
+ */
 import { useEffect, useMemo, useRef } from "react";
 import { useComfy } from "../state/useComfy";
 import type { ComfyRunEvent } from "@/api/comfy";
@@ -47,10 +53,6 @@ const STATUS_LABEL: Record<StageStatus, string> = {
   skipped: "skip",
 };
 
-/** Reduce the event stream into a per-stage status. The orchestrator
- *  publishes ``event=started/succeeded/failed/warning/skipped/...``
- *  per stage; we keep the latest, with "running" inferred from the
- *  presence of any event lacking a terminal verdict. */
 function deriveStageStatuses(events: ComfyRunEvent[]): Record<string, StageStatus> {
   const out: Record<string, StageStatus> = {};
   for (const e of events) {
@@ -58,7 +60,7 @@ function deriveStageStatuses(events: ComfyRunEvent[]): Record<string, StageStatu
     const event = typeof e.event === "string" ? e.event : null;
     if (!stage) continue;
     if (event === "succeeded") out[stage] = "succeeded";
-    else if (event === "failed") out[stage] = "failed";
+    else if (event === "failed" || event === "cancelled") out[stage] = "failed";
     else if (event === "warning") {
       out[stage] = out[stage] === "failed" ? "failed" : "warning";
     } else if (event === "skipped") out[stage] = "skipped";
@@ -73,14 +75,34 @@ function deriveStageStatuses(events: ComfyRunEvent[]): Record<string, StageStatu
   return out;
 }
 
-/** Render a one-line summary of an event for the log pane. */
+function truncate(s: string, max = 200): string {
+  if (s.length <= max) return s;
+  return s.slice(0, max - 1) + "…";
+}
+
+/** Render a one-line summary of an event for the log pane. The
+ *  patch stage's `slot_patched` event gets a special form that puts
+ *  the assigned value front and center. */
 function eventSummary(e: ComfyRunEvent): string {
+  if (e.stage === "patch" && e.event === "slot_patched") {
+    const label = String(e.slot_label ?? "?");
+    const node = String(e.node_id ?? "?");
+    const input = String(e.input_name ?? "?");
+    let valueRepr = "(empty)";
+    if (e.value !== undefined && e.value !== null) {
+      valueRepr =
+        typeof e.value === "string"
+          ? JSON.stringify(truncate(e.value, 240))
+          : truncate(JSON.stringify(e.value), 240);
+    }
+    return `${label} → #${node}.${input} = ${valueRepr}`;
+  }
   const parts: string[] = [];
   if (typeof e.event === "string") parts.push(e.event);
   for (const k of [
     "agent_id", "name", "model", "slot_label", "comfy_filename",
     "filename", "node_id", "prompt_id", "client_id", "url", "value", "max",
-    "message", "kept", "unloaded",
+    "message", "kept", "unloaded", "patched_count",
   ]) {
     const v = e[k as keyof ComfyRunEvent];
     if (v === undefined || v === null) continue;
@@ -100,11 +122,13 @@ function formatTs(ms: number | undefined): string {
 }
 
 export function RunViewer({
-  onClose,
+  onDismiss,
+  startDisabledReason,
 }: {
-  onClose: () => void;
+  onDismiss: () => void;
+  startDisabledReason: string | null;
 }) {
-  const { runState } = useComfy();
+  const { runState, runWorkflow, cancelRun } = useComfy();
   const logRef = useRef<HTMLDivElement>(null);
 
   const stageStatuses = useMemo(
@@ -119,30 +143,63 @@ export function RunViewer({
     }
   }, [runState?.events.length]);
 
-  if (!runState) return null;
+  const inProgress = runState?.inProgress === true;
+  const hasFinishedTrace = runState !== null && !inProgress;
+
+  let actionLabel: string;
+  let actionDisabled = false;
+  let actionTitle: string | undefined;
+  let onAction: () => void;
+  let actionVariant: "primary" | "danger" = "primary";
+
+  if (inProgress) {
+    actionLabel = "Cancel";
+    onAction = () => void cancelRun();
+    actionTitle = "Cancel the in-flight run";
+    actionVariant = "danger";
+  } else {
+    actionLabel = hasFinishedTrace ? "Run again" : "Start";
+    onAction = () => void runWorkflow();
+    actionDisabled = startDisabledReason !== null;
+    actionTitle = startDisabledReason ?? "Fire the Single Run pipeline";
+  }
 
   return (
     <div className={styles.panel}>
       <header className={styles.header}>
         <div className={styles.title}>
           <span className={styles.titleText}>Single Run</span>
-          <code className={styles.jobId}>{runState.jobId.slice(0, 8)}</code>
-          <span className={styles.gen}>{runState.generationId}</span>
-          {runState.inProgress && (
-            <span className={styles.runningPill}>running</span>
+          {runState && (
+            <>
+              <code className={styles.jobId}>{runState.jobId.slice(0, 8)}</code>
+              <span className={styles.gen}>{runState.generationId}</span>
+            </>
+          )}
+          {inProgress && <span className={styles.runningPill}>running</span>}
+        </div>
+        <div className={styles.actions}>
+          <button
+            type="button"
+            className={
+              actionVariant === "danger" ? styles.cancel : styles.start
+            }
+            onClick={onAction}
+            disabled={actionDisabled}
+            title={actionTitle}
+          >
+            {actionLabel}
+          </button>
+          {hasFinishedTrace && (
+            <button
+              type="button"
+              className={styles.dismiss}
+              onClick={onDismiss}
+              title="Clear this run trace"
+            >
+              ×
+            </button>
           )}
         </div>
-        <button
-          type="button"
-          className={styles.close}
-          onClick={onClose}
-          disabled={runState.inProgress}
-          title={runState.inProgress
-            ? "Run is in progress — wait for it to finish"
-            : "Dismiss this run trace"}
-        >
-          {runState.inProgress ? "Running…" : "Dismiss"}
-        </button>
       </header>
 
       <section className={styles.strip}>
@@ -164,14 +221,21 @@ export function RunViewer({
       </section>
 
       <section className={styles.body} ref={logRef}>
-        {runState.events.length === 0 && (
+        {!runState && (
+          <div className={styles.empty}>
+            {startDisabledReason
+              ? startDisabledReason
+              : "Press Start to fire the pipeline."}
+          </div>
+        )}
+        {runState && runState.events.length === 0 && (
           <div className={styles.empty}>Waiting for first event…</div>
         )}
-        {runState.events.map((e, idx) => {
+        {runState?.events.map((e, idx) => {
           const stage = typeof e.stage === "string" ? e.stage : "?";
           const event = typeof e.event === "string" ? e.event : "";
           const tone =
-            event === "failed" || event === "warning"
+            event === "failed" || event === "warning" || event === "cancelled"
               ? styles[`event_${event}`]
               : "";
           return (
