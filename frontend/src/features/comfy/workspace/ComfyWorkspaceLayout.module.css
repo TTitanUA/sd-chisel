@@ -78,51 +78,11 @@
 .runActions {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
+  padding-left: 12px;
+  margin-left: 12px;
+  border-left: 1px solid var(--border);
   flex-shrink: 0;
-}
-
-.runError {
-  font-size: 11px;
-  color: var(--danger);
-  max-width: 240px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.singleRun {
-  font: inherit !important;
-  font-size: 12px !important;
-  font-weight: 600 !important;
-  padding: 5px 14px !important;
-  background: var(--accent) !important;
-  color: white !important;
-  border: 1px solid var(--accent) !important;
-  border-radius: 4px !important;
-  cursor: pointer !important;
-  transition: filter 120ms;
-}
-
-.singleRun:hover:not(:disabled) {
-  filter: brightness(1.08);
-}
-
-.singleRun:disabled {
-  opacity: 0.5 !important;
-  cursor: not-allowed !important;
-}
-
-.batchRun {
-  font: inherit !important;
-  font-size: 12px !important;
-  padding: 5px 14px !important;
-  background: transparent !important;
-  color: var(--text-muted) !important;
-  border: 1px solid var(--border) !important;
-  border-radius: 4px !important;
-  cursor: not-allowed !important;
-  opacity: 0.6 !important;
 }
 
 .modeBar button {
@@ -134,6 +94,11 @@
   border-radius: 3px;
   color: var(--text-muted);
   cursor: pointer;
+}
+
+.modeBar button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 .modeActive {
@@ -168,11 +133,11 @@
   transition: height 320ms cubic-bezier(0.32, 0.72, 0, 1);
 }
 
-/* Three-row zoom for Single Run. Card meta + actions ≈ 80 px,
- * thumbnail 100 px square (110 - 5*2 padding), gap 6 px → row ≈ 188.
- * 3 rows + gallery header + a little breathing room ≈ 600 px. */
+/* Three-row zoom for Single Run. Cards are image-only 110×110 squares
+ * (GalleryCard.module.css), gap 12 px, body padding 12 px, header
+ * ≈ 32 px → 110*3 + 12*2 + 12*2 + 32 ≈ 410 px. */
 .footerZoom {
-  height: 600px;
+  height: 410px;
 }
 
 .footerToggle {

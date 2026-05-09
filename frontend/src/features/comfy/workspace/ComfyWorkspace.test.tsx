@@ -17,6 +17,7 @@ const SESSION: Session = {
   vl_model_name: null,
   prompt_model_name: null,
   comfy_input_cleanup: "keep",
+  comfy_restart_after_run: false,
   hidden: false,
   created_at: 1,
   updated_at: 1,
@@ -125,11 +126,9 @@ describe("ComfyWorkspace", () => {
     vi.stubGlobal("fetch", stubFetch({ ready: true }));
     renderWorkspace();
     await waitFor(() => expect(screen.getByText("comfy smoke")).toBeInTheDocument());
-    // Single Run shows up twice (mode tab + action button). Use
-    // getAllByRole to assert presence without picking one.
     await waitFor(() =>
-      expect(screen.getAllByRole("button", { name: /Single Run/i }).length)
-        .toBeGreaterThanOrEqual(1),
+      expect(screen.getByRole("button", { name: /Single Run/i }))
+        .toBeInTheDocument(),
     );
     expect(screen.getByRole("button", { name: /Batch Run/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Agent editor/i })).toBeInTheDocument();

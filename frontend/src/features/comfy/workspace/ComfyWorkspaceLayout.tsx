@@ -72,10 +72,6 @@ export function ComfyWorkspaceLayout({ knobsOpen }: { knobsOpen: boolean }) {
     inputName: string;
   } | null>(null);
 
-  // Auto-switch to the Single Run tab the moment a run is queued —
-  // resume-on-reload still wants the user to see the pipeline strip
-  // even though the click that opened the tab happened in a prior
-  // tab life.
   useEffect(() => {
     if (runState !== null) {
       setCenterMode("run");
@@ -92,8 +88,8 @@ export function ComfyWorkspaceLayout({ knobsOpen }: { knobsOpen: boolean }) {
   );
 
   // Coverage check for the Start button inside the Run Viewer. The
-  // mode-bar Single Run button itself is always enabled — clicking
-  // it just opens the tab without firing.
+  // Single Run tab button itself is always enabled — clicking it
+  // just opens the tab without firing.
   const llmCoverage = useMemo(() => {
     if (!slotMap) return null;
     const llm = slotMap.slot_map.slots.filter((s) => s.binding === "llm");
@@ -164,7 +160,10 @@ export function ComfyWorkspaceLayout({ knobsOpen }: { knobsOpen: boolean }) {
               >
                 Node tree
               </button>
+            </div>
+            <div className={styles.runActions}>
               <button
+                type="button"
                 className={centerMode === "run" ? styles.modeActive : ""}
                 onClick={() => setCenterMode("run")}
                 title={
@@ -177,19 +176,8 @@ export function ComfyWorkspaceLayout({ knobsOpen }: { knobsOpen: boolean }) {
               >
                 Single Run{isRunningWorkflow ? " · running" : ""}
               </button>
-            </div>
-            <div className={styles.runActions}>
               <button
                 type="button"
-                className={styles.singleRun}
-                onClick={() => setCenterMode("run")}
-                title="Open Single Run"
-              >
-                Single Run
-              </button>
-              <button
-                type="button"
-                className={styles.batchRun}
                 disabled
                 title="Batch Run — coming in next phase"
               >
